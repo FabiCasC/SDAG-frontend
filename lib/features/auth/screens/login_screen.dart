@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/services/trip_simulation_service.dart';
 import '../../dashboard/screens/owner_dashboard_screen.dart';
 import '../../driver/screens/driver_validation_screen.dart';
 import '../../passenger/screens/passenger_flow_screens.dart';
@@ -18,6 +20,70 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _dniController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _updatePromptShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeShowUpdate());
+  }
+
+  Future<void> _maybeShowUpdate() async {
+    if (!mounted) return;
+    if (_updatePromptShown) return;
+    _updatePromptShown = true;
+
+    final info = TripSimulationService.instance.checkForUpdate();
+    if (!info.available) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !info.critical,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(info.critical ? 'Actualización crítica' : 'Actualización disponible'),
+          content: Text(
+            info.critical
+                ? 'Debes actualizar para continuar.\nVersión actual: ${TripSimulationService.instance.currentAppVersion}\nNueva versión: ${info.latest}'
+                : 'Hay una nueva versión disponible.\nVersión actual: ${TripSimulationService.instance.currentAppVersion}\nNueva versión: ${info.latest}',
+          ),
+          actions: [
+            if (!info.critical)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Luego'),
+              ),
+            TextButton(
+              onPressed: () async {
+                final uri = Uri.tryParse(info.url);
+                if (uri == null) {
+                  Navigator.of(context).pop();
+                  CustomSnackbar.show(context, message: 'Link roto. Perfil en mantenimiento.', isError: true);
+                  return;
+                }
+                final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                if (!context.mounted) return;
+                if (!ok) {
+                  CustomSnackbar.show(context, message: 'No se pudo abrir el enlace.', isError: true);
+                  return;
+                }
+                if (!info.critical) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: const Text('Actualizar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _openRecovery() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const PasswordRecoveryScreen()),
+    );
+  }
 
   void _handleLogin() async {
     setState(() {
@@ -38,17 +104,31 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } else {
       final dni = _dniController.text.trim();
+      final blocked = TripSimulationService.instance.blockedDriverDnis.contains(dni);
+      if (blocked) {
+        CustomSnackbar.show(
+          context,
+          message: 'Cuenta suspendida. Contacta al dueño.',
+          isError: true,
+        );
+        return;
+      }
       late final Widget next;
+      late final String role;
       switch (dni) {
         case '11111111':
-          next = const OwnerDashboardScreen();
+          next = const OwnerNavShell();
+          role = 'Dueño';
           break;
         case '22222222':
-          next = const DriverValidationScreen();
+          next = const DriverNavShell();
+          role = 'Conductor';
           break;
         default:
-          next = const PassengerRouteSearchScreen();
+          next = const PassengerNavShell();
+          role = 'Pasajero';
       }
+      TripSimulationService.instance.setCurrentSession(dni: dni, role: role);
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -128,6 +208,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           prefixIcon: const Icon(Icons.lock_outline),
                         ),
                         const SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: _openRecovery,
+                            child: const Text('Olvidé mi clave'),
+                          ),
+                        ),
                         Text(
                           'Demo: 11111111 = Dueño, 22222222 = Conductor, otro = Pasajero',
                           style: Theme.of(context).textTheme.bodySmall,
@@ -151,6 +238,166 @@ class _LoginScreenState extends State<LoginScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class PasswordRecoveryScreen extends StatefulWidget {
+  const PasswordRecoveryScreen({super.key});
+
+  @override
+  State<PasswordRecoveryScreen> createState() => _PasswordRecoveryScreenState();
+}
+
+class _PasswordRecoveryScreenState extends State<PasswordRecoveryScreen> {
+  final TripSimulationService _trip = TripSimulationService.instance;
+  final TextEditingController _dniController = TextEditingController();
+  final TextEditingController _codeController = TextEditingController();
+  final TextEditingController _newPasswordController = TextEditingController();
+  String _channel = 'SMS';
+  bool _sent = false;
+  bool _verified = false;
+
+  void _send() {
+    final dni = _dniController.text.trim();
+    if (dni.isEmpty) {
+      CustomSnackbar.show(context, message: 'Ingresa tu DNI', isError: true);
+      return;
+    }
+    final result = _trip.startPasswordRecovery(dni: dni, channel: _channel);
+    setState(() {
+      _sent = true;
+      _verified = false;
+    });
+    CustomSnackbar.show(context, message: result.message, isSuccess: result.ok);
+  }
+
+  void _verify() {
+    final dni = _dniController.text.trim();
+    final code = _codeController.text.trim();
+    final result = _trip.verifyRecoveryCode(dni: dni, code: code);
+    if (!result.ok) {
+      CustomSnackbar.show(context, message: result.message, isError: true);
+      return;
+    }
+    setState(() {
+      _verified = true;
+    });
+    CustomSnackbar.show(context, message: result.message, isSuccess: true);
+  }
+
+  void _setPassword() {
+    final dni = _dniController.text.trim();
+    final pw = _newPasswordController.text.trim();
+    final result = _trip.setNewPassword(dni: dni, newPassword: pw);
+    if (!result.ok) {
+      CustomSnackbar.show(context, message: result.message, isError: true);
+      return;
+    }
+    CustomSnackbar.show(context, message: result.message, isSuccess: true);
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Recuperar cuenta'),
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    CustomTextField(
+                      label: 'DNI',
+                      hint: 'Ingresa tu DNI',
+                      keyboardType: TextInputType.number,
+                      controller: _dniController,
+                      prefixIcon: const Icon(Icons.person_outline),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: _channel,
+                      items: const [
+                        DropdownMenuItem(value: 'SMS', child: Text('SMS')),
+                        DropdownMenuItem(value: 'Email', child: Text('Email')),
+                      ],
+                      onChanged: (v) => setState(() => _channel = v ?? 'SMS'),
+                      decoration: const InputDecoration(
+                        labelText: 'Canal de recuperación',
+                        prefixIcon: Icon(Icons.verified_user_rounded),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    CustomButton(
+                      text: 'Enviar código',
+                      onPressed: _send,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_sent)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('Verificación', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 12),
+                      CustomTextField(
+                        label: 'Código',
+                        hint: '6 dígitos',
+                        keyboardType: TextInputType.number,
+                        controller: _codeController,
+                        prefixIcon: const Icon(Icons.password_rounded),
+                      ),
+                      const SizedBox(height: 12),
+                      CustomButton(
+                        text: 'Verificar código',
+                        onPressed: _verify,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
+            if (_verified)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('Nueva clave', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 12),
+                      CustomTextField(
+                        label: 'Clave',
+                        hint: 'Mínimo 4 caracteres',
+                        isObscure: true,
+                        controller: _newPasswordController,
+                        prefixIcon: const Icon(Icons.lock_outline),
+                      ),
+                      const SizedBox(height: 12),
+                      CustomButton(
+                        text: 'Guardar clave',
+                        onPressed: _setPassword,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

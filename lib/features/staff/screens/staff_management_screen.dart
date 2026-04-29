@@ -80,6 +80,7 @@ class _StaffManagementScreenState extends State<StaffManagementScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'owner_staff_management_fab',
         onPressed: () => _showAddDriverBottomSheet(context),
         child: const Icon(Icons.person_add),
       ),

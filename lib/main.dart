@@ -11,11 +11,24 @@ class SDAGApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SDAG',  // Título de la app
-      theme: AppTheme.lightTheme,  // Tema claro definido en AppTheme
-      home: const LoginScreen(),  // Pantalla inicial (LoginScreen)
-      debugShowCheckedModeBanner: false,  // Desactiva el banner de depuración
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: AppTheme.themeMode,
+      builder: (context, mode, _) {
+        return ValueListenableBuilder<String>(
+          valueListenable: AppTheme.languageCode,
+          builder: (context, lang, __) {
+            return MaterialApp(
+              title: 'SDAG',
+              theme: AppTheme.lightTheme,
+              darkTheme: AppTheme.darkTheme,
+              themeMode: mode,
+              locale: Locale(lang),
+              home: const LoginScreen(),
+              debugShowCheckedModeBanner: false,
+            );
+          },
+        );
+      },
     );
   }
 }

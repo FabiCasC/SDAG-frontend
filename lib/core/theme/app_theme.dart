@@ -3,6 +3,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_colors.dart';
 
 class AppTheme {
+  static final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.light);
+  static final ValueNotifier<String> languageCode = ValueNotifier('es');
+
+  static String t({required String es, required String en}) {
+    return languageCode.value == 'en' ? en : es;
+  }
+
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
@@ -84,6 +91,66 @@ class AppTheme {
       ),
       cardTheme: const CardThemeData(
         color: AppColors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+        elevation: 2,
+        margin: EdgeInsets.only(bottom: 16),
+      ),
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: AppColors.energeticOrange,
+        foregroundColor: AppColors.white,
+      ),
+    );
+  }
+
+  static ThemeData get darkTheme {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: const Color(0xFF0B1220),
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: AppColors.primaryBlue,
+        brightness: Brightness.dark,
+        primary: AppColors.primaryBlue,
+        secondary: AppColors.energeticOrange,
+        surface: const Color(0xFF111827),
+        error: AppColors.error,
+      ),
+      textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme).copyWith(
+        displayLarge: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+        displayMedium: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+        displaySmall: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+        headlineLarge: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+        headlineMedium: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+        headlineSmall: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+        titleLarge: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white),
+        titleMedium: GoogleFonts.inter(fontWeight: FontWeight.w600, color: Colors.white),
+        titleSmall: GoogleFonts.inter(fontWeight: FontWeight.w600, color: Colors.white),
+        bodyLarge: GoogleFonts.inter(fontWeight: FontWeight.normal, color: Colors.white),
+        bodyMedium: GoogleFonts.inter(fontWeight: FontWeight.normal, color: Colors.white),
+        bodySmall: GoogleFonts.inter(fontWeight: FontWeight.normal, color: const Color(0xFF9CA3AF)),
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: const Color(0xFF111827),
+        foregroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        titleTextStyle: GoogleFonts.inter(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+        ),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
+        ),
+      ),
+      cardTheme: const CardThemeData(
+        color: Color(0xFF111827),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(12)),
         ),
