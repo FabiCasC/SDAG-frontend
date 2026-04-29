@@ -1,23 +1,6 @@
 import 'package:flutter/material.dart';
 
-void main() {
-  runApp(MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SDAG - Reporte de Puntualidad',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: ReportePuntualidadPage(),
-    );
-  }
-}
-
-class ReportePuntualidadPage extends StatelessWidget {
+class Vista50ReportePuntualidad extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -29,13 +12,11 @@ class ReportePuntualidadPage extends StatelessWidget {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: <Widget>[
-            // Título de la sección
             Text(
               'Cumplimiento de Tiempos del Conductor - Abril 2026',
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             ),
             SizedBox(height: 20),
-            // Estadísticas o métricas
             MetricCard(
               title: 'Viajes a Tiempo',
               value: '120',
@@ -54,7 +35,6 @@ class ReportePuntualidadPage extends StatelessWidget {
               color: Colors.blue,
             ),
             SizedBox(height: 20),
-            // Gráfico simplificado de barras (simulado con `Container`)
             Container(
               height: 250,
               width: double.infinity,
