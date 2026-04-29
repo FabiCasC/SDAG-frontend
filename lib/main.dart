@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+// 1. IMPORTANTE: Agregamos la referencia a tu nueva vista
+import 'views/Selector_de_idiomas.dart';
 
 void main() {
   runApp(const SDAGApp());
@@ -12,13 +14,12 @@ class SDAGApp extends StatelessWidget {
     return MaterialApp(
       title: 'SDAG - Gestión de Cabina',
       debugShowCheckedModeBanner: false,
-      // CAPA LÓGICA DE BRANDING (Lo que los 5 deben heredar)
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0044FF), // Azul Trustworthy
+          seedColor: const Color(0xFF0044FF),
           primary: const Color(0xFF0044FF),
-          secondary: const Color(0xFFFF8800), // Naranja Energetic
+          secondary: const Color(0xFFFF8800),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF0044FF),
@@ -31,6 +32,7 @@ class SDAGApp extends StatelessWidget {
           ),
         ),
       ),
+      // Mantenemos MainMenu como inicio, pero el botón ahora sí funcionará
       home: const MainMenu(),
     );
   }
@@ -57,7 +59,13 @@ class MainMenu extends StatelessWidget {
                           textAlign: TextAlign.center),
             ),
             ElevatedButton(
-              onPressed: () {},
+              // 2. AQUÍ AGREGAMOS LA LÓGICA:
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SelectorIdiomas()),
+                );
+              },
               child: const Text('INGRESAR AL SISTEMA'),
             ),
           ],
