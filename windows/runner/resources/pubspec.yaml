@@ -1,37 +1,49 @@
+name: nombre_del_proyecto
+description: Una nueva aplicación Flutter
+
+publish_to: 'none' # Remove this line if you are planning to publish to pub.dev
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.18.0 <3.0.0"
+
 dependencies:
   flutter:
     sdk: flutter
+
+  # Paquete para gráficos
   fl_chart: ^0.40.0
 
-  dependencies:
-    flutter:
-      sdk: flutter
-    pdf: ^3.6.0       # Para generar PDF
-    excel: ^2.0.3     # Para generar archivos Excel
-    path_provider: ^2.0.2 # Para acceder al almacenamiento del dispositivo
-    file_saver: ^1.0.2 # Para guardar los archivos generados
+  # Paquete para generar PDF
+  pdf: ^3.6.0
 
-    dependencies:
-      flutter:
-        sdk: flutter
-      battery_plus: ^2.0.0
+  # Paquete para generar archivos Excel
+  excel: ^2.0.3
 
-      dependencies:
-        flutter:
-          sdk: flutter
-        fl_chart: ^0.40.0
+  # Para acceder al almacenamiento del dispositivo
+  path_provider: ^2.0.2
 
-        dependencies:
-          flutter:
-            sdk: flutter
-          fl_chart: ^0.40.0  # Para gráficos
+  # Para guardar los archivos generados
+  file_saver: ^1.0.2
 
-          dependencies:
-            flutter:
-              sdk: flutter
-            flutter_email_sender: ^5.0.2  # Paquete para enviar correos electrónicos
+  # Paquete para acceder al nivel de batería del dispositivo
+  battery_plus: ^2.0.0
 
-dependencies:
-  flutter:
+  # Paquete para enviar correos electrónicos
+  flutter_email_sender: ^5.0.2
+
+  # Paquete para tutorial interactivo de bienvenida
+  introduction_screen: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
     sdk: flutter
-  introduction_screen: ^2.1.0  # Paquete para crear tutoriales interactivos
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/tutorial1.png
+    - assets/tutorial2.png
+    - assets/tutorial3.png
