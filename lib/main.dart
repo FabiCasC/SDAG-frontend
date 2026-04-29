@@ -3,7 +3,7 @@ import 'core/theme/app_theme.dart';
 import 'features/auth/screens/login_screen.dart';
 
 // Importa las vistas que creamos (del 49 al 64)
-import 'views/muerto1.dart';
+import 'views/vista_49_auto_asignado.dart';
 import 'views/vista_50_reporte_puntualidad.dart';
 // Agrega más vistas según sea necesario
 

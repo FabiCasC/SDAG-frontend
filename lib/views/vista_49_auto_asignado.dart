@@ -12,7 +12,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
         textTheme: TextTheme(
-          headline1: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          headline6: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),  // Reemplazamos headline1 con headline6
           bodyText1: TextStyle(fontSize: 16),
         ),
       ),
@@ -42,7 +42,7 @@ class CarInfoPage extends StatelessWidget {
             // Título de la sección
             Text(
               'Información del Auto Asignado',
-              style: Theme.of(context).textTheme.headline1,
+              style: Theme.of(context).textTheme.headline6,  // Usamos headline6 aquí
             ),
             SizedBox(height: 30),
             // Visualización de la placa
