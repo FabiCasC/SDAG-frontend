@@ -1,0 +1,27 @@
+dependencies:
+  flutter:
+    sdk: flutter
+  fl_chart: ^0.40.0
+
+  dependencies:
+    flutter:
+      sdk: flutter
+    pdf: ^3.6.0       # Para generar PDF
+    excel: ^2.0.3     # Para generar archivos Excel
+    path_provider: ^2.0.2 # Para acceder al almacenamiento del dispositivo
+    file_saver: ^1.0.2 # Para guardar los archivos generados
+
+    dependencies:
+      flutter:
+        sdk: flutter
+      battery_plus: ^2.0.0
+
+      dependencies:
+        flutter:
+          sdk: flutter
+        fl_chart: ^0.40.0
+
+        dependencies:
+          flutter:
+            sdk: flutter
+          fl_chart: ^0.40.0  # Para gráficos
