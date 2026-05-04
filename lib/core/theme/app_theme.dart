@@ -1,10 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_colors.dart';
+import 'app_spacing.dart';
 
 class AppTheme {
   static final ValueNotifier<ThemeMode> themeMode = ValueNotifier(ThemeMode.light);
   static final ValueNotifier<String> languageCode = ValueNotifier('es');
+
+  // Estilo para botones de acciones críticas (naranja energético)
+  static ButtonStyle get criticalButtonStyle => ElevatedButton.styleFrom(
+        backgroundColor: AppColors.energeticOrange,
+        foregroundColor: AppColors.white,
+        minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppSpacing.borderRadius),
+        ),
+        elevation: 0,
+      );
 
   static String t({required String es, required String en}) {
     return languageCode.value == 'en' ? en : es;
@@ -13,27 +25,27 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      scaffoldBackgroundColor: AppColors.surfaceGrey,
+      scaffoldBackgroundColor: AppColors.backgroundLight,
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColors.primaryBlue,
         primary: AppColors.primaryBlue,
         secondary: AppColors.energeticOrange,
-        surface: AppColors.surfaceGrey,
+        surface: AppColors.backgroundLight,
         error: AppColors.error,
       ),
       textTheme: GoogleFonts.interTextTheme().copyWith(
-        displayLarge: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-        displayMedium: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-        displaySmall: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-        headlineLarge: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-        headlineMedium: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-        headlineSmall: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-        titleLarge: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-        titleMedium: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-        titleSmall: GoogleFonts.inter(fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-        bodyLarge: GoogleFonts.inter(fontWeight: FontWeight.normal, color: AppColors.textPrimary),
-        bodyMedium: GoogleFonts.inter(fontWeight: FontWeight.normal, color: AppColors.textPrimary),
-        bodySmall: GoogleFonts.inter(fontWeight: FontWeight.normal, color: AppColors.textSecondary),
+        displayLarge: GoogleFonts.inter(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+        displayMedium: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+        displaySmall: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+        headlineLarge: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        headlineMedium: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        headlineSmall: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        titleLarge: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        titleMedium: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        titleSmall: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+        bodyLarge: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.normal, color: AppColors.textPrimary),
+        bodyMedium: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.normal, color: AppColors.textPrimary),
+        bodySmall: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.normal, color: AppColors.textSecondary),
       ),
       appBarTheme: AppBarTheme(
         backgroundColor: AppColors.white,
@@ -57,11 +69,11 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primaryBlue,
           foregroundColor: AppColors.white,
-          minimumSize: const Size.fromHeight(50),
+          minimumSize: const Size.fromHeight(AppSpacing.buttonHeight),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppSpacing.borderRadius),
           ),
-          elevation: 2,
+          elevation: 0,
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(

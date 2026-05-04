@@ -5,6 +5,7 @@ import '../../../core/services/trip_simulation_service.dart';
 import '../../dashboard/screens/owner_dashboard_screen.dart';
 import '../../driver/screens/driver_validation_screen.dart';
 import '../../passenger/screens/passenger_flow_screens.dart';
+import '../../main_navigation/presentation/pages/controller_main_page.dart';
 import '../../../shared/widgets/custom_button.dart';
 import '../../../shared/widgets/custom_text_field.dart';
 import '../../../shared/widgets/custom_snackbar.dart';
@@ -124,6 +125,18 @@ class _LoginScreenState extends State<LoginScreen> {
           next = const DriverNavShell();
           role = 'Conductor';
           break;
+        case '99999': // DNI del controlador RF 91
+          if (_passwordController.text != 'controlador') {
+             CustomSnackbar.show(
+              context,
+              message: 'Usuario o clave inválida',
+              isError: true,
+            );
+            return;
+          }
+          next = const ControllerMainPage();
+          role = 'Controlador';
+          break;
         default:
           next = const PassengerNavShell();
           role = 'Pasajero';
@@ -216,7 +229,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                         Text(
-                          'Demo: 11111111 = Dueño, 22222222 = Conductor, otro = Pasajero',
+                          'Demo: 11111111 = Dueño, 22222222 = Conductor, 99999 = Controlador',
                           style: Theme.of(context).textTheme.bodySmall,
                           textAlign: TextAlign.center,
                         ),
