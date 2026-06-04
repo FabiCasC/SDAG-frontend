@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'notification_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -1578,7 +1579,11 @@ class TripSimulationService extends ChangeNotifier {
       _incidents.removeRange(0, _incidents.length - 300);
     }
     _recordEvent('incident_added', {'kind': kind, 'placa': placa});
-    notifyListeners();
+NotificationService.instance.sendIncidentAlert(
+  token: 'fcm-token-demo',
+  mensaje: '$kind: $description',
+);
+notifyListeners();
   }
 
   List<DocumentEntry> expiringDocuments({int withinHours = 48}) {
@@ -1753,8 +1758,12 @@ class TripSimulationService extends ChangeNotifier {
     }
 
     if (distanceMeters(_vehicleMeters, passengerStopMeters) <= 500) {
-      passengerGeofenceFired = true;
-    }
+  passengerGeofenceFired = true;
+  NotificationService.instance.sendEtaAlert(
+    token: 'fcm-token-demo',
+    stopName: 'Paradero',
+  );
+}
 
     for (final s in driverStops) {
       if (distanceMeters(_vehicleMeters, s.positionMeters) <= 500) {
