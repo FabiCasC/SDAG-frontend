@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -2755,7 +2756,7 @@ class _PassengerPaymentScreenState extends State<PassengerPaymentScreen> {
   bool _isProcessing = false;
   final double _farePerSeat = 10.0;
 
-  Future<void> _simulatePayment() async {
+Future<void> _simulatePayment() async {
     setState(() {
       _isProcessing = true;
     });
@@ -2775,6 +2776,29 @@ class _PassengerPaymentScreenState extends State<PassengerPaymentScreen> {
       farePerSeat: _farePerSeat,
       driverDni: '22222222',
     );
+
+    // ── Insertar en Supabase tabla Reservas ──
+    try {
+      final supabase = Supabase.instance.client;
+      for (final asiento in widget.asientos) {
+        await supabase.from('Reservas').insert({
+          'transaction_id': booking.transactionId,
+          'pasajero_dni':   dni,
+          'ruta':           widget.ruta,
+          'destino':        widget.destino,
+          'salida':         widget.salida,
+          'stop_name':      widget.stopName,
+          'asiento':        asiento,
+          'total':          _farePerSeat * widget.asientos.length,
+          'conductor_dni':  '22222222',
+          'created_at':     DateTime.now().toIso8601String(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Error al guardar en Supabase: $e');
+    }
+
+    if (!mounted) return;
     passengerTicketNotifier.value = PassengerTicketData(
       transactionId: booking.transactionId,
       ruta: widget.ruta,
