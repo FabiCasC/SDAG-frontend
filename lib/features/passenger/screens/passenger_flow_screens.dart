@@ -12,6 +12,7 @@ import '../../../shared/widgets/custom_button.dart';
 import '../../../shared/widgets/custom_snackbar.dart';
 import '../../../shared/widgets/custom_text_field.dart';
 import '../../auth/screens/login_screen.dart';
+import 'viajes_service.dart';
 
 class PassengerTicketData {
   const PassengerTicketData({
@@ -1936,13 +1937,17 @@ class PassengerRouteSearchScreen extends StatefulWidget {
 
 class _PassengerRouteSearchScreenState extends State<PassengerRouteSearchScreen> {
   final TripSimulationService _trip = TripSimulationService.instance;
-  final List<Map<String, dynamic>> _routes = [
-    {'ruta': 'Lima - Chosica', 'destino': 'Chosica', 'salida': '06:30', 'capacidad': 15, 'estado': 'Carga'},
-    {'ruta': 'Lima - Huancayo', 'destino': 'Huancayo', 'salida': '07:15', 'capacidad': 8, 'estado': 'Carga'},
-    {'ruta': 'Chosica - Matucana', 'destino': 'Matucana', 'salida': '08:00', 'capacidad': 6, 'estado': 'En ruta'},
-    {'ruta': 'Lima - Matucana', 'destino': 'Matucana', 'salida': '09:10', 'capacidad': 4, 'estado': 'Carga'},
-    {'ruta': 'Lima - Chosica', 'destino': 'Chosica', 'salida': '10:45', 'capacidad': 6, 'estado': 'Carga'},
-  ];
+  // Servicio que consulta viajes reales desde Supabase
+  final ViajesService _viajesService = ViajesService();
+
+  // Lista de viajes cargada desde Supabase (reemplaza la lista hardcodeada)
+  List<Map<String, dynamic>> _routes = [];
+
+  // Indica si se está cargando datos desde Supabase
+  bool _cargando = false;
+
+  // Dirección seleccionada por el pasajero
+  String _direccion = 'san_isidro_chosica';
 
   String _selectedDestino = 'Todos';
   String _selectedStopName = 'Paradero Plaza';
@@ -1952,6 +1957,41 @@ class _PassengerRouteSearchScreenState extends State<PassengerRouteSearchScreen>
     super.initState();
     if (_trip.driverStops.isNotEmpty) {
       _selectedStopName = _trip.driverStops.first.stopName;
+    }
+    // Carga los viajes desde Supabase al iniciar la pantalla
+    _cargarViajes();
+  }
+
+  /// Consulta Supabase y actualiza la lista de viajes disponibles.
+  Future<void> _cargarViajes() async {
+    setState(() => _cargando = true);
+    try {
+      final viajes = await _viajesService.buscarViajesDisponibles(
+        direccion: _direccion,
+      );
+      setState(() {
+        _routes = viajes.map((v) {
+          // Adapta el formato de Supabase al formato que usa la pantalla
+          final vehiculo = v['vehiculos'] as Map<String, dynamic>?;
+          final conductor = v['conductores'] as Map<String, dynamic>?;
+          return {
+            'ruta': _direccion == 'san_isidro_chosica'
+                ? 'San Isidro → Chosica'
+                : 'Chosica → San Isidro',
+            'destino': _direccion == 'san_isidro_chosica' ? 'Chosica' : 'San Isidro',
+            'salida': v['hora_salida'] ?? '--:--',
+            'capacidad': vehiculo?['capacidad'] ?? 0,
+            'estado': v['estado'] == 'esperando' ? 'Carga' : 'En ruta',
+            'conductor': conductor?['nombre'] ?? 'Sin asignar',
+            'placa': vehiculo?['placa'] ?? '',
+          };
+        }).toList();
+      });
+    } catch (e) {
+      // Si falla la consulta, la lista queda vacía
+      setState(() => _routes = []);
+    } finally {
+      setState(() => _cargando = false);
     }
   }
 
