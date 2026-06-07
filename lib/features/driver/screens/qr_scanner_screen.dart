@@ -47,20 +47,35 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     // Proceder a validar el token leído
     _validarQr(qrToken);
   }
+  /// Valida el token del QR escaneado consultando Supabase.
+  /// Busca el pasajero en manifest_entries por DNI y actualiza
+  /// su estado de boarding a "abordo".
+  Future<void> _validarQr(String token) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('id, first_name, last_name, boarding')
+          .eq('dni', token)
+          .maybeSingle();
 
-  /// Valida el token del QR escaneado.
-  /// 
-  /// Por ahora es una simulación local: cualquier QR que empiece
-  /// con 'SDAG-' se considera válido.
-  /// Cuando se integre Supabase, aquí va la llamada RPC real que
-  /// consultará la tabla Manifiesto_Electronico y cambiará el
-  /// estado del pasajero a "Subió".
-  void _validarQr(String token) {
-    final esValido = token.startsWith('SDAG-');
-    setState(() {
-      _esValido = esValido;
-    });
-    _mostrarResultado(esValido, token);
+      if (response == null) {
+        setState(() => _esValido = false);
+        _mostrarResultado(false, token);
+        return;
+      }
+
+      await Supabase.instance.client
+          .from('manifest_entries')
+          .update({'boarding': 'abordo'})
+          .eq('id', response['id']);
+
+      setState(() => _esValido = true);
+      _mostrarResultado(true, '${response['first_name']} ${response['last_name']}');
+
+    } catch (e) {
+      setState(() => _esValido = false);
+      _mostrarResultado(false, token);
+    }
   }
 
   /// Muestra un diálogo con el resultado del escaneo.
