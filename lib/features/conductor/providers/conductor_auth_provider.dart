@@ -159,7 +159,6 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
 
   Future<void> logout() async {
     state = ConductorAuthState.initial;
-    await Supabase.instance.client.auth.signOut();
   }
 
   Future<void> confirmarPago() async {

@@ -73,23 +73,45 @@ class AdminConductoresScreen extends ConsumerWidget {
                           onVerPerfil: () => context.push('/admin/conductores/${c.id}'),
                           onEditar: () => context.push('/admin/conductores/${c.id}/editar'),
                           onVerHistorial: () => context.push('/admin/conductores/${c.id}/historial'),
-                          onDesactivar: () {
-                            controller.desactivarConductor(c.id);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                backgroundColor: AppColors.success,
-                                content: Text('Conductor desactivado'),
-                              ),
-                            );
+                          onDesactivar: () async {
+                            try {
+                              await controller.desactivarConductor(c.id);
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  backgroundColor: AppColors.success,
+                                  content: Text('Conductor desactivado'),
+                                ),
+                              );
+                            } catch (_) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  backgroundColor: AppColors.error,
+                                  content: Text('No se pudo desactivar'),
+                                ),
+                              );
+                            }
                           },
-                          onReactivar: () {
-                            controller.reactivarConductor(c.id);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                backgroundColor: AppColors.success,
-                                content: Text('Conductor reactivado'),
-                              ),
-                            );
+                          onReactivar: () async {
+                            try {
+                              await controller.reactivarConductor(c.id);
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  backgroundColor: AppColors.success,
+                                  content: Text('Conductor reactivado'),
+                                ),
+                              );
+                            } catch (_) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  backgroundColor: AppColors.error,
+                                  content: Text('No se pudo reactivar'),
+                                ),
+                              );
+                            }
                           },
                         ),
                       );

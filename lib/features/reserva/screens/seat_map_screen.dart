@@ -175,7 +175,7 @@ class SeatMapWidget extends StatelessWidget {
     final occupied = asientosOcupados.toSet();
     final selected = asientosSeleccionados.toSet();
 
-    Widget buildSeat(int seatNumber) {
+    Widget buildPassengerSeat(int seatNumber) {
       final state = occupied.contains(seatNumber)
           ? _SeatVisualState.occupied
           : selected.contains(seatNumber)
@@ -192,44 +192,181 @@ class SeatMapWidget extends StatelessWidget {
       );
     }
 
-    final remaining = (capacidad - 2).clamp(0, capacidad);
-    final rows = remaining == 0 ? 0 : (remaining / 2).ceil();
+    Widget buildDriverSeat() => const _DriverSeatTile();
+
+    Widget row2({
+      required Widget left,
+      required Widget right,
+    }) {
+      return Row(
+        children: [
+          Expanded(child: left),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: right),
+        ],
+      );
+    }
+
+    Widget row3({
+      required Widget left,
+      required Widget middle,
+      required Widget right,
+    }) {
+      return Row(
+        children: [
+          Expanded(child: left),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: middle),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: right),
+        ],
+      );
+    }
+
+    Widget rowAisle({
+      required Widget left,
+      required Widget right,
+    }) {
+      return Row(
+        children: [
+          Expanded(child: left),
+          const SizedBox(width: AppSpacing.lg),
+          Expanded(child: right),
+        ],
+      );
+    }
+
+    List<Widget> layoutRows() {
+      switch (capacidad) {
+        case 4:
+          return [
+            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
+            const SizedBox(height: AppSpacing.sm),
+            row3(
+              left: buildPassengerSeat(2),
+              middle: buildPassengerSeat(3),
+              right: buildPassengerSeat(4),
+            ),
+          ];
+        case 6:
+          return [
+            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
+            const SizedBox(height: AppSpacing.sm),
+            row2(left: buildPassengerSeat(2), right: buildPassengerSeat(3)),
+            const SizedBox(height: AppSpacing.sm),
+            row3(
+              left: buildPassengerSeat(4),
+              middle: buildPassengerSeat(5),
+              right: buildPassengerSeat(6),
+            ),
+          ];
+        case 8:
+          return [
+            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
+            const SizedBox(height: AppSpacing.sm),
+            row2(left: buildPassengerSeat(2), right: buildPassengerSeat(3)),
+            const SizedBox(height: AppSpacing.sm),
+            row2(left: buildPassengerSeat(4), right: buildPassengerSeat(5)),
+            const SizedBox(height: AppSpacing.sm),
+            row3(
+              left: buildPassengerSeat(6),
+              middle: buildPassengerSeat(7),
+              right: buildPassengerSeat(8),
+            ),
+          ];
+        case 15:
+          final rows = <Widget>[
+            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
+          ];
+          for (var seat = 2; seat <= 15; seat += 2) {
+            rows.add(const SizedBox(height: AppSpacing.sm));
+            rows.add(
+              rowAisle(
+                left: buildPassengerSeat(seat),
+                right: buildPassengerSeat(seat + 1),
+              ),
+            );
+          }
+          return rows;
+        default:
+          final perRow = 2;
+          final totalRows = (capacidad / perRow).ceil();
+          final widgets = <Widget>[];
+          for (var r = 0; r < totalRows; r++) {
+            if (r > 0) widgets.add(const SizedBox(height: AppSpacing.sm));
+            final leftSeat = r * perRow + 1;
+            final rightSeat = r * perRow + 2;
+            widgets.add(
+              row2(
+                left: buildPassengerSeat(leftSeat),
+                right: rightSeat <= capacidad
+                    ? buildPassengerSeat(rightSeat)
+                    : const SizedBox.shrink(),
+              ),
+            );
+          }
+          return widgets;
+      }
+    }
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          children: [
-            Expanded(child: buildSeat(1)),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(child: capacidad >= 2 ? buildSeat(2) : const SizedBox.shrink()),
-          ],
-        ),
-        if (rows > 0) ...[
-          const SizedBox(height: AppSpacing.sm),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: AppSpacing.sm,
-              mainAxisSpacing: AppSpacing.sm,
-              childAspectRatio: 1,
-            ),
-            itemCount: rows * 2,
-            itemBuilder: (context, index) {
-              final seatNumber = index + 3;
-              if (seatNumber > capacidad) return const SizedBox.shrink();
-              return buildSeat(seatNumber);
-            },
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(AppRadius.r16),
+            border: Border.all(color: AppColors.border),
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: layoutRows(),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _SeatLegend(),
       ],
     );
   }
 }
 
 enum _SeatVisualState { available, occupied, selected }
+
+class _DriverSeatTile extends StatelessWidget {
+  const _DriverSeatTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Ink(
+      width: AppSpacing.seatSize,
+      height: AppSpacing.seatSize,
+      decoration: BoxDecoration(
+        color: AppColors.fieldFill,
+        borderRadius: BorderRadius.circular(AppRadius.r8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.drive_eta_rounded, color: AppColors.textSecondary, size: 20),
+            const SizedBox(height: 2),
+            Text(
+              'C',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _SeatTile extends StatelessWidget {
   const _SeatTile({
@@ -274,6 +411,123 @@ class _SeatTile extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SeatLegend extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    Widget item({
+      required Widget icon,
+      required String label,
+    }) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          icon,
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            label,
+            style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          ),
+        ],
+      );
+    }
+
+    return Wrap(
+      spacing: AppSpacing.lg,
+      runSpacing: AppSpacing.sm,
+      alignment: WrapAlignment.center,
+      children: [
+        item(
+          icon: const _LegendBox(
+            bg: AppColors.seatOkBg,
+            border: AppColors.success,
+            fg: AppColors.success,
+            label: '1',
+          ),
+          label: 'Disponible',
+        ),
+        item(
+          icon: const _LegendBox(
+            bg: AppColors.infoSurface,
+            border: AppColors.primaryBlue,
+            fg: AppColors.primaryBlue,
+            label: '1',
+          ),
+          label: 'Seleccionado',
+        ),
+        item(
+          icon: const _LegendBox(
+            bg: AppColors.fieldFill,
+            border: AppColors.border,
+            fg: AppColors.textSecondary,
+            label: '1',
+          ),
+          label: 'Ocupado',
+        ),
+        item(
+          icon: const _LegendDriverBox(),
+          label: 'Conductor',
+        ),
+      ],
+    );
+  }
+}
+
+class _LegendBox extends StatelessWidget {
+  const _LegendBox({
+    required this.bg,
+    required this.border,
+    required this.fg,
+    required this.label,
+  });
+
+  final Color bg;
+  final Color border;
+  final Color fg;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(AppRadius.r8),
+        border: Border.all(color: border),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          style: theme.textTheme.labelLarge?.copyWith(color: fg, fontWeight: FontWeight.w800),
+        ),
+      ),
+    );
+  }
+}
+
+class _LegendDriverBox extends StatelessWidget {
+  const _LegendDriverBox();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        color: AppColors.fieldFill,
+        borderRadius: BorderRadius.circular(AppRadius.r8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: const Center(
+        child: Icon(Icons.drive_eta_rounded, size: 18, color: AppColors.textSecondary),
       ),
     );
   }
