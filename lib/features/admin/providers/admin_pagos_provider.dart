@@ -155,15 +155,24 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
     try {
       await Supabase.instance.client
           .from('driver_payout_requests')
-          .update({'status': 'confirmado'})
+          .update({'status': 'completado'})
           .eq('id', solicitudId);
+          
       await Supabase.instance.client.from('driver_payouts').insert({
         'profile_id': req.profileId,
         'gross_amount': req.totalRecaudado,
         'commission_amount': req.monto,
         'status': 'Confirmado',
       });
+
+      await Supabase.instance.client.from('drivers').update({
+        'last_pago_confirmado_at': DateTime.now().toUtc().toIso8601String(),
+        'pago_confirmado': true,
+        'estado': 'disponible'
+      }).eq('profile_id', req.profileId);
+
       await _loadFromSupabase();
+      ref.read(adminConductoresProvider.notifier).refresh();
     } catch (_) {}
   }
 

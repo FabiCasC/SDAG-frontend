@@ -8,6 +8,7 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_conductores_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminCalificacionesScreen extends ConsumerWidget {
   const AdminCalificacionesScreen({super.key});
@@ -129,37 +130,53 @@ class _ConductorRatingCard extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.w900),
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        for (final r in _lastRatings(conductor))
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SizedBox(
-                                  width: 110,
-                                  child: Text(
-                                    r.dateLabel,
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: AppColors.textSecondary,
-                                          fontWeight: FontWeight.w700,
+                        Consumer(
+                          builder: (context, ref, child) {
+                            final ratingsAsync = ref.watch(driverRatingsProvider(conductor.id));
+                            return ratingsAsync.when(
+                              data: (ratings) {
+                                if (ratings.isEmpty) return const Text('No hay comentarios recientes.');
+                                return Column(
+                                  children: [
+                                    for (final r in ratings)
+                                      Padding(
+                                        padding: const EdgeInsets.only(bottom: 8),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            SizedBox(
+                                              width: 110,
+                                              child: Text(
+                                                r.dateLabel,
+                                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                      color: AppColors.textSecondary,
+                                                      fontWeight: FontWeight.w700,
+                                                    ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            _Stars(rating: r.stars.toDouble(), count: 0, showCount: false),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                r.comment,
+                                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                                      color: AppColors.textPrimary,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _Stars(rating: r.stars.toDouble(), count: 0, showCount: false),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    r.comment,
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                          color: AppColors.textPrimary,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                                      ),
+                                  ],
+                                );
+                              },
+                              loading: () => const Center(child: CircularProgressIndicator()),
+                              error: (_, __) => const Text('Error al cargar comentarios.'),
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ),
@@ -387,24 +404,29 @@ class _LastRating {
   final String comment;
 }
 
-List<_LastRating> _lastRatings(MockAdminConductor c) {
-  final comments = [
-    'Puntual y manejo seguro.',
-    'Muy amable con los pasajeros.',
-    'Conducción rápida pero llegó a tiempo.',
-    'Buena comunicación durante el viaje.',
-    'Vehículo limpio y cómodo.',
-  ];
-  final baseStars = c.ratingPromedio.round().clamp(1, 5);
-  final now = DateTime.now();
-  final out = <_LastRating>[];
-  for (var i = 0; i < 5; i++) {
-    final dt = now.subtract(Duration(days: 1 + i * 3));
-    final stars = (baseStars - (i % 2 == 0 ? 0 : 1)).clamp(1, 5);
-    out.add(_LastRating(dateLabel: _formatDateOnly(dt), stars: stars, comment: comments[i % comments.length]));
+final driverRatingsProvider = FutureProvider.family<List<_LastRating>, String>((ref, profileId) async {
+  final driverResp = await Supabase.instance.client.from('drivers').select('id').eq('profile_id', profileId).maybeSingle();
+  if (driverResp == null) return [];
+  final driverId = driverResp['id'];
+
+  final resp = await Supabase.instance.client
+      .from('ratings')
+      .select('stars, comment, created_at')
+      .eq('driver_id', driverId)
+      .order('created_at', ascending: false)
+      .limit(5);
+
+  final list = <_LastRating>[];
+  for (final r in (resp as List).cast<Map<String, dynamic>>()) {
+      final created = DateTime.tryParse(r['created_at'].toString()) ?? DateTime.now();
+      list.add(_LastRating(
+        dateLabel: _formatDateOnly(created),
+        stars: (r['stars'] as num?)?.toInt() ?? 5,
+        comment: r['comment']?.toString() ?? '',
+      ));
   }
-  return out;
-}
+  return list;
+});
 
 String _formatDateOnly(DateTime dt) {
   String two(int v) => v.toString().padLeft(2, '0');
