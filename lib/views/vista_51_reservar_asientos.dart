@@ -11,9 +11,9 @@ class MyApp extends StatelessWidget {
       title: 'SDAG - Reservar Asientos',
       theme: ThemeData(
         primarySwatch: Colors.blue,
-        textTheme: TextTheme(
-          headline1: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          bodyText1: TextStyle(fontSize: 16),
+        textTheme: const TextTheme(
+          titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          bodyLarge: TextStyle(fontSize: 16),
         ),
       ),
       home: ReservarAsientosPage(),
@@ -53,7 +53,7 @@ class _ReservarAsientosPageState extends State<ReservarAsientosPage> {
             // Título de la sección
             Text(
               'Selecciona hasta 4 asientos',
-              style: Theme.of(context).textTheme.headline1,
+              style: Theme.of(context).textTheme.titleLarge,
             ),
             SizedBox(height: 20),
             // Selección de asientos
