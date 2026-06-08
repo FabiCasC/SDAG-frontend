@@ -39,6 +39,8 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
     final driver = reserva.conductorSeleccionado;
     final reservaId = reserva.reservaId;
     final seats = [...reserva.asientosSeleccionados]..sort();
+    final pickup = reserva.puntoRecojo?.trim();
+    final total = seats.length * 15.0;
 
     if (driver == null || reservaId == null || seats.isEmpty) {
       return const AppScaffold(
@@ -118,6 +120,42 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
               style: theme.textTheme.titleMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: AppSpacing.lg),
+            AppCard(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${driver.name} · ${driver.plate}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Asientos: ${seats.map((s) => '#$s').join(', ')}',
+                      style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Punto de recojo: ${pickup == null || pickup.isEmpty ? '—' : pickup}',
+                      style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Monto pagado: S/ ${total.toStringAsFixed(0)}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: AppColors.primaryBlue,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
             ...passengers.map((p) => Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.md),
                   child: _QrCard(
@@ -127,7 +165,7 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
                 )),
             const SizedBox(height: AppSpacing.lg),
             AppPrimaryButton(
-              label: 'Ver mi reserva',
+              label: 'Ver mi reserva activa',
               onPressed: () => context.go(AppRoutes.passengerReservaActiva),
             ),
             const SizedBox(height: AppSpacing.md),

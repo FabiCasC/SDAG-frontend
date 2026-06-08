@@ -1,178 +1,96 @@
-declare const Deno: {
-  env: { get: (key: string) => string | undefined };
-  serve: (handler: (req: Request) => Response | Promise<Response>) => void;
-};
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-
-function textResponse(text: string, status: number): Response {
-  return new Response(text, { status, headers: corsHeaders });
-}
-
-function getBearerToken(req: Request): string | null {
-  const authHeader = req.headers.get('Authorization') ?? '';
-  if (!authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.slice('Bearer '.length).trim();
-  return token.length > 0 ? token : null;
-}
-
-async function fetchJson(url: string, init: RequestInit): Promise<{ status: number; json: any; raw: string }> {
-  const res = await fetch(url, init);
-  const raw = await res.text();
-  const json = (() => {
-    try {
-      return JSON.parse(raw);
-    } catch (_) {
-      return null;
-    }
-  })();
-  return { status: res.status, json, raw };
-}
-
-Deno.serve(async (req: Request) => {
+Deno.serve(async (req) => {
   try {
-    if (req.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders });
-    }
-    if (req.method !== 'POST') {
-      return textResponse('Method not allowed', 405);
+    if (req.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!supabaseUrl || !serviceRoleKey) {
-      return textResponse('Missing server configuration', 500);
+      return new Response("Missing server configuration", { status: 500 });
     }
 
-    const jwt = getBearerToken(req);
-    if (!jwt) return textResponse('Unauthorized', 401);
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
+    if (!token) return new Response("Unauthorized", { status: 401 });
 
-    const callerAuth = await fetchJson(`${supabaseUrl}/auth/v1/user`, {
-      method: 'GET',
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${jwt}`,
-      },
-    });
-    const callerId = callerAuth.json?.id?.toString();
-    if (callerAuth.status !== 200 || !callerId) return textResponse('Unauthorized', 401);
+    const admin = createClient(supabaseUrl, serviceRoleKey);
 
-    const roleResp = await fetchJson(
-      `${supabaseUrl}/rest/v1/profiles?select=role&id=eq.${encodeURIComponent(callerId)}`,
-      {
-        method: 'GET',
-        headers: {
-          apikey: serviceRoleKey,
-          Authorization: `Bearer ${serviceRoleKey}`,
-        },
-      },
-    );
-    const callerRole = Array.isArray(roleResp.json) ? roleResp.json[0]?.role?.toString() : null;
-    if (roleResp.status !== 200 || callerRole !== 'admin') return textResponse('Forbidden', 403);
+    const { data: authData, error: authErr } = await admin.auth.getUser(token);
+    if (authErr || !authData.user) return new Response("Unauthorized", { status: 401 });
 
-    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!body) return jsonResponse({ error: 'invalid_body' }, 400);
+    const callerId = authData.user.id;
+    const { data: callerProfile, error: callerProfileErr } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", callerId)
+      .maybeSingle();
+    if (callerProfileErr) return new Response("Unauthorized", { status: 401 });
+    if (callerProfile?.role !== "admin") return new Response("Forbidden", { status: 403 });
 
-    const firstName = String(body.first_name ?? '').trim();
-    const lastName = String(body.last_name ?? '').trim();
-    const dni = String(body.dni ?? '').trim();
-    const phone = String(body.phone ?? '').trim();
-    const email = String(body.email ?? '').trim().toLowerCase();
-    const password = String(body.password ?? '').trim();
-    const plate = String(body.plate ?? '').trim().toUpperCase();
-    const vehicleType = String(body.vehicle_type ?? '').trim();
+    const body = await req.json();
+    const firstName = String(body.first_name ?? "").trim();
+    const lastName = String(body.last_name ?? "").trim();
+    const dni = String(body.dni ?? "").trim();
+    const phone = body.phone == null ? null : String(body.phone).trim();
+    const email = String(body.email ?? "").trim().toLowerCase();
+    const password = String(body.password ?? "");
+    const plate = String(body.plate ?? "").trim().toUpperCase();
+    const vehicleType = String(body.vehicle_type ?? "").trim();
     const capacity = Number(body.capacity ?? 0);
     const commissionPct = Number(body.commission_pct ?? 0);
 
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return jsonResponse({ error: 'invalid_email' }, 400);
-    if (password.length < 8) return jsonResponse({ error: 'invalid_password' }, 400);
-    if (!firstName || !lastName) return jsonResponse({ error: 'invalid_name' }, 400);
-    if (!dni) return jsonResponse({ error: 'invalid_dni' }, 400);
-    if (!plate) return jsonResponse({ error: 'invalid_plate' }, 400);
-    if (!Number.isFinite(capacity) || capacity <= 0) return jsonResponse({ error: 'invalid_capacity' }, 400);
+    if (!firstName || !lastName) return Response.json({ error: "Nombre y apellido requeridos" }, { status: 400 });
+    if (!/^\d{8}$/.test(dni)) return Response.json({ error: "DNI inválido" }, { status: 400 });
+    if (phone && !/^\d{9}$/.test(phone)) return Response.json({ error: "Teléfono inválido" }, { status: 400 });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return Response.json({ error: "Correo inválido" }, { status: 400 });
+    if (password.trim().length < 8) return Response.json({ error: "Contraseña inválida" }, { status: 400 });
+    if (!/^[A-Z]{3}-\d{3}$/.test(plate)) return Response.json({ error: "Placa inválida" }, { status: 400 });
+    if (!Number.isFinite(capacity) || capacity <= 0) return Response.json({ error: "Capacidad inválida" }, { status: 400 });
     if (!Number.isFinite(commissionPct) || commissionPct < 0 || commissionPct > 100) {
-      return jsonResponse({ error: 'invalid_commission_pct' }, 400);
+      return Response.json({ error: "Comisión inválida" }, { status: 400 });
     }
 
-    const createUser = await fetchJson(`${supabaseUrl}/auth/v1/admin/users`, {
-      method: 'POST',
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: {
-          role: 'driver',
-          first_name: firstName,
-          last_name: lastName,
-        },
-      }),
+    const { data: createdAuth, error: createAuthErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
     });
-    const newUserId = createUser.json?.id?.toString();
-    if ((createUser.status !== 200 && createUser.status !== 201) || !newUserId) {
-      return jsonResponse({ error: 'create_user_failed', details: createUser.json ?? createUser.raw }, 400);
+    if (createAuthErr || !createdAuth.user) {
+      return Response.json({ error: createAuthErr?.message ?? "No se pudo crear el usuario" }, { status: 400 });
     }
 
-    const profileInsert = await fetchJson(`${supabaseUrl}/rest/v1/profiles`, {
-      method: 'POST',
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify({
-        id: newUserId,
-        role: 'driver',
+    const userId = createdAuth.user.id;
+    try {
+      const profileInsert = await admin.from("profiles").insert({
+        id: userId,
+        role: "driver",
         first_name: firstName,
         last_name: lastName,
         dni,
-        phone,
+        phone: phone && phone.length > 0 ? phone : null,
         email,
-      }),
-    });
-    if (profileInsert.status !== 201 && profileInsert.status !== 200) {
-      return jsonResponse({ error: 'profile_insert_failed', details: profileInsert.json ?? profileInsert.raw }, 400);
-    }
+        name: `${firstName} ${lastName}`.trim(),
+      });
+      if (profileInsert.error) throw profileInsert.error;
 
-    const driverInsert = await fetchJson(`${supabaseUrl}/rest/v1/drivers`, {
-      method: 'POST',
-      headers: {
-        apikey: serviceRoleKey,
-        Authorization: `Bearer ${serviceRoleKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify({
-        profile_id: newUserId,
+      const driverInsert = await admin.from("drivers").insert({
+        profile_id: userId,
         plate,
         vehicle_type: vehicleType,
         capacity,
         commission_pct: commissionPct,
-        cuenta_activa: true,
-      }),
-    });
-    if (driverInsert.status !== 201 && driverInsert.status !== 200) {
-      return jsonResponse({ error: 'driver_insert_failed', details: driverInsert.json ?? driverInsert.raw }, 400);
-    }
+      }).select("id").single();
+      if (driverInsert.error) throw driverInsert.error;
 
-    return jsonResponse({ user_id: newUserId }, 200);
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    return jsonResponse({ error: message }, 500);
+      return Response.json({ user_id: userId, driver_id: driverInsert.data.id }, { status: 200 });
+    } catch (e) {
+      await admin.auth.admin.deleteUser(userId);
+      return Response.json({ error: String(e?.message ?? e) }, { status: 400 });
+    }
+  } catch (e) {
+    return Response.json({ error: String(e?.message ?? e) }, { status: 500 });
   }
 });
