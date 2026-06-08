@@ -105,18 +105,16 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
     }
 
     final controller = ref.read(adminConductoresProvider.notifier);
-    final edit = controller.editarConductor(
+    final edit = await controller.editarConductor(
       id: current.id,
-      nombres: _nombresController.text,
-      apellidos: _apellidosController.text,
-      dni: _dniController.text,
       telefono: _telefonoController.text,
       correo: _correoController.text,
       placa: _placaController.text,
-      vehiculoTipo: _vehiculoTipo,
       capacidad: _capacidad,
       comisionPorcentaje: current.comisionPorcentaje,
+      cuentaActiva: current.estado != MockAdminConductorEstado.inactivo,
     );
+    if (!mounted) return;
 
     if (edit.type == AdminEditarConductorResultType.duplicatePlaca) {
       setState(() => _saving = false);
