@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
+import 'busqueda_service.dart';
 
 class BusquedaScreen extends StatefulWidget {
   const BusquedaScreen({this.initialDirection, super.key});
@@ -18,36 +18,40 @@ class BusquedaScreen extends StatefulWidget {
 }
 
 class _BusquedaScreenState extends State<BusquedaScreen> {
-  MockTripDirection? _direction;
+  /// Dirección seleccionada: 'si_cho' o 'cho_si'
+  String? _direction;
+
+  /// Servicio que consulta viajes reales desde Supabase
+  final BusquedaService _service = BusquedaService();
+
+  /// Lista de viajes disponibles cargada desde Supabase
+  List<ViajeDisponible> _viajes = [];
+
+  /// Indica si se está cargando datos
+  bool _cargando = false;
 
   @override
   void initState() {
     super.initState();
-    _direction = _parseDirection(widget.initialDirection);
+    _direction = widget.initialDirection;
+    if (_direction != null) {
+      _cargarViajes(_direction!);
+    }
   }
 
-  MockTripDirection? _parseDirection(String? value) {
-    return switch (value) {
-      'si_cho' => MockTripDirection.sanIsidroToChosica,
-      'cho_si' => MockTripDirection.chosicaToSanIsidro,
-      _ => null,
-    };
+  /// Consulta Supabase y actualiza la lista de viajes
+  Future<void> _cargarViajes(String direction) async {
+    setState(() => _cargando = true);
+    final viajes = await _service.buscarViajes(direction);
+    setState(() {
+      _viajes = viajes;
+      _cargando = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    final drivers = _direction == null
-        ? const <MockDriver>[]
-        : MockData.drivers
-            .where((d) => d.direction == _direction)
-            .where(
-              (d) =>
-                  d.status == MockDriverStatus.available ||
-                  d.status == MockDriverStatus.active,
-            )
-            .toList();
 
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
@@ -62,12 +66,20 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
           children: [
             Text(
               'Selecciona dirección',
-              style: theme.textTheme.titleLarge?.copyWith(color: AppColors.textPrimary),
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: AppColors.textPrimary,
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             _DirectionSelector(
               direction: _direction,
-              onChanged: (value) => setState(() => _direction = value),
+              onChanged: (value) {
+                setState(() {
+                  _direction = value;
+                  _viajes = [];
+                });
+                _cargarViajes(value);
+              },
             ),
             const SizedBox(height: AppSpacing.lg),
             if (_direction == null)
@@ -75,16 +87,23 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
                 title: 'Elige una dirección',
                 subtitle: 'Selecciona una dirección para ver conductores disponibles.',
               )
-            else if (drivers.isEmpty)
+            else if (_cargando)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(AppSpacing.xxl),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (_viajes.isEmpty)
               const _EmptyDriversState()
             else
-              ...drivers.map(
-                (d) => Padding(
+              ..._viajes.map(
+                (v) => Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.md),
                   child: _DriverCard(
-                    driver: d,
+                    viaje: v,
                     onTap: () => context.push(
-                      '${AppRoutes.passengerDriverDetail}?id=${d.id}',
+                      '${AppRoutes.passengerDriverDetail}?id=${v.driverId}',
                     ),
                   ),
                 ),
@@ -102,13 +121,13 @@ class _DirectionSelector extends StatelessWidget {
     required this.onChanged,
   });
 
-  final MockTripDirection? direction;
-  final ValueChanged<MockTripDirection> onChanged;
+  final String? direction;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final leftSelected = direction == MockTripDirection.sanIsidroToChosica;
-    final rightSelected = direction == MockTripDirection.chosicaToSanIsidro;
+    final leftSelected = direction == 'si_cho';
+    final rightSelected = direction == 'cho_si';
 
     return Row(
       children: [
@@ -116,7 +135,7 @@ class _DirectionSelector extends StatelessWidget {
           child: _DirectionButton(
             selected: leftSelected,
             label: 'San Isidro → Chosica',
-            onPressed: () => onChanged(MockTripDirection.sanIsidroToChosica),
+            onPressed: () => onChanged('si_cho'),
           ),
         ),
         const SizedBox(width: AppSpacing.md),
@@ -124,7 +143,7 @@ class _DirectionSelector extends StatelessWidget {
           child: _DirectionButton(
             selected: rightSelected,
             label: 'Chosica → San Isidro',
-            onPressed: () => onChanged(MockTripDirection.chosicaToSanIsidro),
+            onPressed: () => onChanged('cho_si'),
           ),
         ),
       ],
@@ -146,10 +165,8 @@ class _DirectionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
     final bg = selected ? AppColors.primaryBlue : AppColors.white;
     final fg = selected ? AppColors.white : AppColors.primaryBlue;
-    final border = BorderSide(color: AppColors.primaryBlue);
 
     return SizedBox(
       height: AppSpacing.controlHeight,
@@ -157,11 +174,13 @@ class _DirectionButton extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           backgroundColor: bg,
           foregroundColor: fg,
-          side: border,
+          side: const BorderSide(color: AppColors.primaryBlue),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadius.r16),
           ),
-          textStyle: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          textStyle: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
         ),
         onPressed: onPressed,
         child: Text(label, textAlign: TextAlign.center),
@@ -171,17 +190,16 @@ class _DirectionButton extends StatelessWidget {
 }
 
 class _DriverCard extends StatelessWidget {
-  const _DriverCard({required this.driver, required this.onTap});
+  const _DriverCard({required this.viaje, required this.onTap});
 
-  final MockDriver driver;
+  final ViajeDisponible viaje;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final initials = _initials(driver.name);
-
-    final (seatBg, seatFg, seatLabel) = _seatBadge(driver.availableSeats);
+    final initials = _initials(viaje.driverName);
+    final (seatBg, seatFg, seatLabel) = _seatBadge(viaje.availableSeats);
 
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.r16),
@@ -212,7 +230,7 @@ class _DriverCard extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            driver.name,
+                            viaje.driverName,
                             style: theme.textTheme.titleMedium?.copyWith(
                               color: AppColors.textPrimary,
                               fontWeight: FontWeight.w600,
@@ -224,15 +242,17 @@ class _DriverCard extends StatelessWidget {
                           (i) => Icon(
                             Icons.star_rounded,
                             size: 16,
-                            color: i < driver.rating.round()
+                            color: i < viaje.rating.round()
                                 ? AppColors.ratingStar
                                 : AppColors.fieldFill,
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
                         Text(
-                          driver.rating.toStringAsFixed(1),
-                          style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                          viaje.rating.toStringAsFixed(1),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                       ],
                     ),
@@ -244,7 +264,7 @@ class _DriverCard extends StatelessWidget {
                         _Badge(
                           bg: AppColors.fieldFill,
                           fg: AppColors.textPrimary,
-                          label: driver.plate,
+                          label: viaje.plate,
                         ),
                         _Badge(
                           bg: seatBg,
@@ -256,39 +276,43 @@ class _DriverCard extends StatelessWidget {
                     const SizedBox(height: AppSpacing.sm),
                     Row(
                       children: [
-                        const Icon(Icons.event_seat_rounded, size: 18, color: AppColors.textSecondary),
+                        const Icon(
+                          Icons.event_seat_rounded,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
                         const SizedBox(width: AppSpacing.xs),
                         Text(
-                          '${driver.totalSeats} asientos',
-                          style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                          '${viaje.totalSeats} asientos',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                         const SizedBox(width: AppSpacing.md),
-                        const Icon(Icons.alt_route_rounded, size: 18, color: AppColors.textSecondary),
+                        const Icon(
+                          Icons.alt_route_rounded,
+                          size: 18,
+                          color: AppColors.textSecondary,
+                        ),
                         const SizedBox(width: AppSpacing.xs),
                         Expanded(
                           child: Text(
-                            driver.routeLabel,
-                            style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                            viaje.routeLabel,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Row(
-                      children: [
-                        const Icon(Icons.schedule_rounded, size: 18, color: AppColors.textSecondary),
-                        const SizedBox(width: AppSpacing.xs),
-                        Text(
-                          'Llega en ~${driver.etaMinutes} min',
-                          style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
                         ),
                       ],
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.textSecondary,
+              ),
             ],
           ),
         ),
@@ -327,7 +351,10 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -349,24 +376,31 @@ class _EmptyDriversState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.directions_bus_filled_outlined, size: 56, color: AppColors.textSecondary),
+            const Icon(
+              Icons.directions_bus_filled_outlined,
+              size: 56,
+              color: AppColors.textSecondary,
+            ),
             const SizedBox(height: AppSpacing.md),
             Text(
               'No hay conductores disponibles',
-              style: theme.textTheme.titleLarge?.copyWith(color: AppColors.textPrimary),
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: AppColors.textPrimary,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
               'Intenta cambiar la dirección o vuelve a intentarlo más tarde.',
-              style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: AppColors.textSecondary,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
