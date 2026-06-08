@@ -12,6 +12,7 @@ import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_auth_provider.dart';
 import '../providers/admin_monitoreo_provider.dart';
 import '../providers/admin_pagos_provider.dart';
+import '../providers/admin_analitica_provider.dart';
 
 class AdminHomeScreen extends ConsumerStatefulWidget {
   const AdminHomeScreen({super.key});
@@ -50,7 +51,8 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
     final auth = ref.watch(adminAuthProvider);
     final pagos = ref.watch(adminPagosProvider);
     final monitoreo = ref.watch(adminMonitoreoProvider);
-    final stats = MockData.adminStats;
+    final analitica = ref.watch(adminAnaliticaProvider);
+    final stats = analitica.estadisticas;
 
     final fleetItems = _buildFleet(monitoreo.vehiculosActivos);
     final conductoresActivos = fleetItems.where((e) => e.status != _FleetStatus.inactivo).length;
@@ -152,12 +154,12 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _QuickSummaryGrid(
-                          viajesHoy: stats.viajesHoy,
-                          ingresosHoy: stats.ingresosHoy,
-                          ocupacionPromedio: stats.ocupacionPromedio,
-                          conductoresActivos: conductoresActivos,
-                        ),
+                      _QuickSummaryGrid(
+                        viajesHoy: stats.viajesCompletados,
+                        ingresosHoy: stats.ingresosTotales,
+                        ocupacionPromedio: stats.ocupacionPromedio,
+                        conductoresActivos: conductoresActivos,
+                      ),
                         const SizedBox(height: AppSpacing.lg),
                         _PagosPendientesSection(
                           solicitudes: pagos.solicitudesPendientes,

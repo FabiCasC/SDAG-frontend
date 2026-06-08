@@ -44,7 +44,7 @@ class AdminAnaliticaState {
   }
 
   static AdminAnaliticaState initial() => const AdminAnaliticaState(
-        periodoSeleccionado: AdminAnaliticaPeriodo.mes,
+        periodoSeleccionado: AdminAnaliticaPeriodo.hoy,
         estadisticas: AdminAnaliticaStats.zero,
         ingresosDiarios: [],
         rankingConductores: [],

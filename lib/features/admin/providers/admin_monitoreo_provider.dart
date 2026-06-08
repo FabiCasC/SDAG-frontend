@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/mock/mock_data.dart';
 import 'admin_conductores_provider.dart';
@@ -148,7 +149,7 @@ class AdminMonitoreoState {
 
 class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
   AdminMonitoreoController({required this.ref}) : super(AdminMonitoreoState.initial()) {
-    cargarFlota();
+    _loadLocations();
     _startMovement();
     ref.onDispose(() {
       _timer?.cancel();
@@ -159,42 +160,54 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
   Timer? _timer;
 
   void cargarFlota() {
-    final conductores = ref.read(adminConductoresProvider).listaConductores;
-    final items = <AdminVehiculoActivo>[];
+    // Ya no se usa para datos estáticos, ahora todo se carga desde Supabase.
+  }
 
-    for (var i = 0; i < conductores.length; i++) {
-      final c = conductores[i];
-      final estado = switch (c.estado) {
-        MockAdminConductorEstado.enRuta => AdminVehiculoEstado.enRuta,
-        MockAdminConductorEstado.disponible => AdminVehiculoEstado.disponible,
-        MockAdminConductorEstado.inactivo => AdminVehiculoEstado.inactivo,
-        MockAdminConductorEstado.bloqueado => AdminVehiculoEstado.inactivo,
-      };
+  Future<void> _loadLocations() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('driver_locations')
+          .select('*, drivers(id, profile_id, plate, profiles(first_name, last_name))')
+          .neq('estado', 'inactivo');
 
-      final routePoints = _routePointsForEstado(estado);
-      final pos = routePoints.isEmpty ? const LatLng(-12.0464, -76.9156) : routePoints[i % routePoints.length];
-      final capacity = c.capacidad;
-      final ocupados = _occupancyForIndex(i, capacity);
-      final eta = estado == AdminVehiculoEstado.enRuta ? 18 + (i * 3) % 15 : null;
+      final next = <AdminVehiculoActivo>[];
+      for (final row in (data as List).cast<Map<String, dynamic>>()) {
+          final lat = (row['lat'] as num?)?.toDouble();
+          final lng = (row['lng'] as num?)?.toDouble();
+          if (lat == null || lng == null) continue;
 
-      items.add(
-        AdminVehiculoActivo(
-          conductorId: c.id,
-          conductorNombre: c.nombreCompleto,
-          placa: c.placa,
-          estado: estado == AdminVehiculoEstado.disponible && i % 5 == 2 ? AdminVehiculoEstado.activo : estado,
-          posicion: pos,
-          rutaLabel: estado == AdminVehiculoEstado.enRuta ? _routeLabelForConductor(c) : null,
-          ocupados: ocupados,
-          capacidad: capacity,
-          etaMinutos: eta,
-          routeIndex: i % (routePoints.isEmpty ? 1 : routePoints.length),
-          routePoints: routePoints,
-        ),
-      );
-    }
+          final d = row['drivers'] as Map<String, dynamic>?;
+          if (d == null) continue;
 
-    state = state.copyWith(vehiculosActivos: items);
+          final p = d['profiles'] as Map<String, dynamic>?;
+          if (p == null) continue;
+
+          final estadoStr = row['estado']?.toString();
+          AdminVehiculoEstado estado = AdminVehiculoEstado.disponible;
+          if (estadoStr == 'en_ruta') {
+            estado = AdminVehiculoEstado.enRuta;
+          } else if (estadoStr == 'lleno') {
+            estado = AdminVehiculoEstado.activo;
+          } else if (estadoStr == 'esperando') {
+            estado = AdminVehiculoEstado.disponible;
+          }
+
+          next.add(AdminVehiculoActivo(
+            conductorId: d['profile_id'].toString(), // Usamos profile_id para mantener consistencia con los demás providers
+            conductorNombre: '${p['first_name']} ${p['last_name']}',
+            placa: d['plate']?.toString() ?? '—',
+            estado: estado,
+            posicion: LatLng(lat, lng),
+            rutaLabel: estado == AdminVehiculoEstado.enRuta ? 'En Ruta' : null,
+            ocupados: row['occupied_seats'] as int? ?? 0,
+            capacidad: row['capacity'] as int? ?? 0,
+            etaMinutos: row['eta_minutes'] as int?,
+            routeIndex: 0,
+            routePoints: const [],
+          ));
+      }
+      state = state.copyWith(vehiculosActivos: next);
+    } catch (_) {}
   }
 
   void filtrarManifiestos({
@@ -239,53 +252,9 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
 
   void _startMovement() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 3), (_) {
-      final next = <AdminVehiculoActivo>[];
-      for (final v in state.vehiculosActivos) {
-        if (v.routePoints.isEmpty || v.estado == AdminVehiculoEstado.inactivo) {
-          next.add(v);
-          continue;
-        }
-        final idx = (v.routeIndex + 1) % v.routePoints.length;
-        final pos = v.routePoints[idx];
-        final eta = v.estado == AdminVehiculoEstado.enRuta
-            ? (6 + ((v.routePoints.length - idx) * 4)).clamp(3, 60)
-            : v.etaMinutos;
-        next.add(v.copyWith(routeIndex: idx, posicion: pos, etaMinutos: eta));
-      }
-      state = state.copyWith(vehiculosActivos: next);
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _loadLocations();
     });
-  }
-
-  static List<LatLng> _routePointsForEstado(AdminVehiculoEstado estado) {
-    const sanIsidro = LatLng(-12.0931, -76.9662);
-    const mid1 = LatLng(-12.0670, -76.9450);
-    const mid2 = LatLng(-12.0464, -76.9156);
-    const mid3 = LatLng(-12.0000, -76.8600);
-    const chosica = LatLng(-11.9333, -76.7000);
-
-    switch (estado) {
-      case AdminVehiculoEstado.enRuta:
-        return const [sanIsidro, mid2, mid3, chosica];
-      case AdminVehiculoEstado.activo:
-        return const [mid1, mid2, mid1, mid2];
-      case AdminVehiculoEstado.disponible:
-        return const [sanIsidro, mid1, sanIsidro];
-      case AdminVehiculoEstado.inactivo:
-        return const [mid2];
-    }
-  }
-
-  static int _occupancyForIndex(int i, int capacity) {
-    if (capacity <= 0) return 0;
-    final value = 1 + ((i * 3) % capacity);
-    return value.clamp(0, capacity);
-  }
-
-  static String _routeLabelForConductor(MockAdminConductor c) {
-    final dir = c.placa.hashCode.isEven ? 'San Isidro → Chosica' : 'Chosica → San Isidro';
-    final via = c.placa.hashCode % 3 == 0 ? 'Vía Javier Prado' : 'Vía La Priale';
-    return '$dir · $via';
   }
 }
 
