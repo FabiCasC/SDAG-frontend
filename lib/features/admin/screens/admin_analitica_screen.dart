@@ -339,7 +339,7 @@ class _IngresosBarChart extends StatelessWidget {
         barTouchData: BarTouchData(
           enabled: true,
           touchTooltipData: BarTouchTooltipData(
-            tooltipBgColor: const Color(0xFF0F172A),
+            getTooltipColor: (_) => const Color(0xFF0F172A),
             getTooltipItem: (group, groupIndex, rod, rodIndex) {
               final item = items[group.x];
               return BarTooltipItem(

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import '../../../core/theme/app_colors.dart';
+import '../../../shared/design/app_colors.dart';
 
 /// Pantalla de escaneo de QR para el conductor.
 /// Permite verificar el abordaje de pasajeros leyendo su código QR.
@@ -17,9 +17,6 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
   /// Bandera para evitar procesar múltiples escaneos seguidos
   bool _escaneado = false;
-
-  /// Guarda el valor del último QR leído
-  String? _resultadoQr;
 
   /// null = sin escanear, true = QR válido, false = QR inválido
   bool? _esValido;
@@ -39,7 +36,6 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
     // Marcar como escaneado y detener la cámara
     setState(() {
       _escaneado = true;
-      _resultadoQr = qrToken;
     });
 
     _controller.stop();
@@ -149,7 +145,6 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   void _reiniciarEscaner() {
     setState(() {
       _escaneado = false;
-      _resultadoQr = null;
       _esValido = null;
     });
     _controller.start();
