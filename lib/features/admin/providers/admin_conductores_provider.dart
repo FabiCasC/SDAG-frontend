@@ -184,6 +184,8 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     } catch (_) {}
   }
 
+  Future<void> refresh() => _loadFromSupabase();
+
   void buscarConductor(String query) {
     state = _copyWith(queryBusqueda: query);
   }
@@ -196,22 +198,24 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     state = _copyWith(filtroEstado: estado);
   }
 
-  AdminCrearConductorResult crearConductor({
+  Future<AdminCrearConductorResult> crearConductor({
     required String nombres,
     required String apellidos,
     required String dni,
     String? telefono,
     required String correo,
+    required String password,
     required String placa,
     required String vehiculoTipo,
     required int capacidad,
     required double comisionPorcentaje,
-  }) {
+  }) async {
     final n = nombres.trim();
     final a = apellidos.trim();
     final d = dni.trim();
     final t = (telefono ?? '').trim();
     final c = correo.trim().toLowerCase();
+    final pw = password.trim();
     final p = placa.trim().toUpperCase();
     final v = vehiculoTipo.trim();
 
@@ -226,6 +230,9 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     }
     if (!_emailRe.hasMatch(c)) {
       return const AdminCrearConductorResult.invalid('Correo inválido');
+    }
+    if (pw.length < 8) {
+      return const AdminCrearConductorResult.invalid('La contraseña debe tener mínimo 8 caracteres');
     }
     if (!_placaRe.hasMatch(p)) {
       return const AdminCrearConductorResult.invalid('Placa inválida');
@@ -246,59 +253,57 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
       }
     }
 
-    final created = MockAdminConductor(
-      id: d,
-      nombres: n,
-      apellidos: a,
-      dni: d,
-      telefono: t.isEmpty ? '—' : t,
-      correo: c,
-      placa: p,
-      vehiculoTipo: v,
-      capacidad: capacidad,
-      comisionPorcentaje: comisionPorcentaje,
-      ratingPromedio: 0.0,
-      ratingCount: 0,
-      estado: MockAdminConductorEstado.disponible,
-      bloqueadoPorPago: false,
-    );
+    try {
+      final resp = await Supabase.instance.client.functions.invoke(
+        'create-driver',
+        body: {
+          'first_name': n,
+          'last_name': a,
+          'dni': d,
+          'phone': t.isEmpty ? null : t,
+          'email': c,
+          'password': pw,
+          'plate': p,
+          'vehicle_type': v,
+          'capacity': capacidad,
+          'commission_pct': comisionPorcentaje,
+        },
+      );
 
-    state = _copyWith(
-      listaConductores: [created, ...state.listaConductores],
-      conductorSeleccionado: created.id,
-    );
-    return AdminCrearConductorResult.ok(createdId: created.id);
+      final data = resp.data;
+      final createdId = (data is Map && data['user_id'] != null) ? data['user_id'].toString() : null;
+      if (createdId == null) {
+        return const AdminCrearConductorResult.invalid('No se pudo crear el conductor (sin user_id)');
+      }
+
+      await _loadFromSupabase();
+      state = _copyWith(conductorSeleccionado: createdId);
+      return AdminCrearConductorResult.ok(createdId: createdId);
+    } on FunctionException catch (e) {
+      return AdminCrearConductorResult.invalid(e.details?.toString() ?? e.reasonPhrase ?? 'Error al crear conductor');
+    } on AuthException catch (e) {
+      return AdminCrearConductorResult.invalid(e.message);
+    } catch (_) {
+      return const AdminCrearConductorResult.invalid('Error al crear conductor');
+    }
   }
 
-  AdminEditarConductorResult editarConductor({
+  Future<AdminEditarConductorResult> editarConductor({
     required String id,
-    required String nombres,
-    required String apellidos,
-    required String dni,
     String? telefono,
-    required String correo,
+    String? correo,
     required String placa,
-    required String vehiculoTipo,
     required int capacidad,
     required double comisionPorcentaje,
-  }) {
+    required bool cuentaActiva,
+  }) async {
     final current = getById(id);
     if (current == null) return const AdminEditarConductorResult.notFound();
 
-    final n = nombres.trim();
-    final a = apellidos.trim();
-    final d = dni.trim();
     final t = (telefono ?? '').trim();
-    final c = correo.trim().toLowerCase();
+    final c = (correo ?? current.correo).trim().toLowerCase();
     final p = placa.trim().toUpperCase();
-    final v = vehiculoTipo.trim();
 
-    if (n.isEmpty || a.isEmpty) {
-      return const AdminEditarConductorResult.invalid('Completa nombres y apellidos');
-    }
-    if (!_dniRe.hasMatch(d)) {
-      return const AdminEditarConductorResult.invalid('DNI inválido');
-    }
     if (t.isNotEmpty && !_telefonoRe.hasMatch(t)) {
       return const AdminEditarConductorResult.invalid('Teléfono inválido');
     }
@@ -317,52 +322,45 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
 
     for (final item in state.listaConductores) {
       if (item.id == id) continue;
-      if (item.dni == d) return const AdminEditarConductorResult.duplicateDni();
       if (item.placa.toUpperCase() == p) return const AdminEditarConductorResult.duplicatePlaca();
     }
 
-    final next = current.copyWith(
-      nombres: n,
-      apellidos: a,
-      dni: d,
-      telefono: t.isEmpty ? '—' : t,
-      correo: c,
-      placa: p,
-      vehiculoTipo: v,
-      capacidad: capacidad,
-      comisionPorcentaje: comisionPorcentaje,
-    );
+    try {
+      await Supabase.instance.client.from('profiles').update({
+        'phone': t.isEmpty ? null : t,
+        'email': c,
+      }).eq('id', id);
 
-    state = _copyWith(
-      listaConductores: [
-        for (final item in state.listaConductores) if (item.id == id) next else item,
-      ],
-    );
-    return const AdminEditarConductorResult.ok();
+      await Supabase.instance.client.from('drivers').update({
+        'plate': p,
+        'capacity': capacidad,
+        'commission_pct': comisionPorcentaje,
+        'cuenta_activa': cuentaActiva,
+      }).eq('profile_id', id);
+
+      await _loadFromSupabase();
+      return const AdminEditarConductorResult.ok();
+    } on PostgrestException catch (e) {
+      return AdminEditarConductorResult.invalid(e.message);
+    } catch (_) {
+      return const AdminEditarConductorResult.invalid('No se pudo guardar');
+    }
   }
 
-  void desactivarConductor(String id) {
+  Future<void> desactivarConductor(String id) async {
     final current = getById(id);
     if (current == null) return;
     if (current.estado == MockAdminConductorEstado.inactivo) return;
-    final next = current.copyWith(estado: MockAdminConductorEstado.inactivo);
-    state = _copyWith(
-      listaConductores: [
-        for (final item in state.listaConductores) if (item.id == id) next else item,
-      ],
-    );
+    await Supabase.instance.client.from('drivers').update({'cuenta_activa': false}).eq('profile_id', id);
+    await _loadFromSupabase();
   }
 
-  void reactivarConductor(String id) {
+  Future<void> reactivarConductor(String id) async {
     final current = getById(id);
     if (current == null) return;
     if (current.estado != MockAdminConductorEstado.inactivo) return;
-    final next = current.copyWith(estado: MockAdminConductorEstado.disponible);
-    state = _copyWith(
-      listaConductores: [
-        for (final item in state.listaConductores) if (item.id == id) next else item,
-      ],
-    );
+    await Supabase.instance.client.from('drivers').update({'cuenta_activa': true}).eq('profile_id', id);
+    await _loadFromSupabase();
   }
 
   void desbloquearConductor(String id) {
@@ -384,17 +382,11 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     final current = getById(id);
     if (current == null) return;
     if (nuevoPorcentaje <= 0 || nuevoPorcentaje > 100) return;
-    final tomorrow = DateTime.now().add(const Duration(days: 1));
-    final effective = DateTime(tomorrow.year, tomorrow.month, tomorrow.day);
-    final next = current.copyWith(
-      comisionPendientePorcentaje: nuevoPorcentaje,
-      comisionPendienteDesde: effective,
-    );
-    state = _copyWith(
-      listaConductores: [
-        for (final item in state.listaConductores) if (item.id == id) next else item,
-      ],
-    );
+    Supabase.instance.client
+        .from('drivers')
+        .update({'commission_pct': nuevoPorcentaje})
+        .eq('profile_id', id)
+        .then((_) => _loadFromSupabase());
   }
 
   MockAdminConductor? getById(String id) {

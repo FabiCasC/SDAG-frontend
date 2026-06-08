@@ -160,7 +160,6 @@ class AdminAuthController extends StateNotifier<AdminAuthState> {
     await prefs.remove(_loggedKey);
     await prefs.remove(_failedKey);
     await prefs.remove(_blockedUntilKey);
-    await Supabase.instance.client.auth.signOut();
   }
 
   Future<void> resetIntentos() async {
