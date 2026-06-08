@@ -66,39 +66,21 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     try {
       final driversRaw = await Supabase.instance.client
           .from('drivers')
-          .select('id, profile_id, plate, vehicle_type, capacity, commission_pct, rating_avg, rating_count, estado, pago_confirmado, cuenta_activa');
-
-      final drivers = <Map<String, dynamic>>[];
-      final profileIds = <String>{};
-      for (final dm in (driversRaw as List).cast<Map<String, dynamic>>()) {
-        final pid = dm['profile_id']?.toString();
-        if (pid == null) continue;
-        profileIds.add(pid);
-        drivers.add(dm);
-      }
-
-      final profilesById = <String, Map<String, dynamic>>{};
-      if (profileIds.isNotEmpty) {
-        final profilesRaw = await Supabase.instance.client
-            .from('profiles')
-            .select('id, first_name, last_name, dni, phone, email')
-            .inFilter('id', profileIds.toList());
-        for (final pm in (profilesRaw as List).cast<Map<String, dynamic>>()) {
-          final id = pm['id']?.toString();
-          if (id != null) profilesById[id] = pm;
-        }
-      }
+          .select('*, profiles(*)');
 
       final conductores = <MockAdminConductor>[];
-      for (final d in drivers) {
+      for (final d in (driversRaw as List).cast<Map<String, dynamic>>()) {
+        final p = d['profiles'] as Map<String, dynamic>?;
+        if (p == null) continue;
+
         final pid = d['profile_id']?.toString();
         if (pid == null) continue;
-        final p = profilesById[pid];
-        final nombres = p?['first_name']?.toString() ?? '';
-        final apellidos = p?['last_name']?.toString() ?? '';
-        final dni = p?['dni']?.toString() ?? '—';
-        final telefono = p?['phone']?.toString() ?? '—';
-        final correo = p?['email']?.toString() ?? '—';
+
+        final nombres = p['first_name']?.toString() ?? '';
+        final apellidos = p['last_name']?.toString() ?? '';
+        final dni = p['dni']?.toString() ?? '—';
+        final telefono = p['phone']?.toString() ?? '—';
+        final correo = p['email']?.toString() ?? '—';
         final placa = d['plate']?.toString() ?? '—';
         final vehiculoTipo = d['vehicle_type']?.toString() ?? '—';
         final capacidad = (d['capacity'] as int?) ?? 0;
@@ -113,7 +95,7 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
             ? MockAdminConductorEstado.inactivo
             : (!pagoConfirmado
                 ? MockAdminConductorEstado.bloqueado
-                : (estadoRaw == 'enRuta'
+                : (estadoRaw == 'en_ruta'
                     ? MockAdminConductorEstado.enRuta
                     : MockAdminConductorEstado.disponible));
 
@@ -139,31 +121,29 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
 
       final tripsRaw = await Supabase.instance.client
           .from('trips')
-          .select('id, driver_id, created_at, amount, status, route_id')
+          .select('*, routes(name)')
           .order('created_at', ascending: false)
           .limit(200);
+
       final viajes = <MockAdminViaje>[];
       for (final tm in (tripsRaw as List).cast<Map<String, dynamic>>()) {
           final id = tm['id']?.toString();
           final driverId = tm['driver_id']?.toString();
           final createdAt = DateTime.tryParse(tm['created_at']?.toString() ?? '');
-          final monto = ((tm['amount'] as num?)?.toDouble()) ?? 0.0;
+          final monto = ((tm['amount_total'] as num?)?.toDouble() ?? (tm['amount'] as num?)?.toDouble()) ?? 0.0;
           final status = tm['status']?.toString();
-          final routeId = tm['route_id']?.toString();
           if (id == null || driverId == null || createdAt == null || status == null) continue;
 
-          String rutaLabel = 'Ruta';
-          if (routeId != null) {
-            final route = await Supabase.instance.client.from('routes').select('name').eq('id', routeId).maybeSingle();
-            rutaLabel = route?['name']?.toString() ?? rutaLabel;
-          }
+          final routeData = tm['routes'] as Map<String, dynamic>?;
+          final rutaLabel = routeData?['name']?.toString() ?? 'Ruta';
 
-          final conductorProfileId = drivers
-              .firstWhere(
-                (d) => d['id']?.toString() == driverId,
-                orElse: () => const <String, dynamic>{},
-              )['profile_id']
-              ?.toString();
+          String? conductorProfileId;
+          for (final d in (driversRaw as List).cast<Map<String, dynamic>>()) {
+            if (d['id']?.toString() == driverId) {
+              conductorProfileId = d['profile_id']?.toString();
+              break;
+            }
+          }
 
           viajes.add(
             MockAdminViaje(
@@ -254,34 +234,40 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     }
 
     try {
-      final resp = await Supabase.instance.client.functions.invoke(
-        'create-driver',
-        body: {
-          'first_name': n,
-          'last_name': a,
-          'dni': d,
-          'phone': t.isEmpty ? null : t,
-          'email': c,
-          'password': pw,
-          'plate': p,
-          'vehicle_type': v,
-          'capacity': capacidad,
-          'commission_pct': comisionPorcentaje,
-        },
-      );
+      final profileResp = await Supabase.instance.client.from('profiles').insert({
+        'role': 'driver',
+        'first_name': n,
+        'last_name': a,
+        'dni': d,
+        'phone': t.isEmpty ? null : t,
+        'email': c,
+      }).select('id').single();
 
-      final data = resp.data;
-      final createdId = (data is Map && data['user_id'] != null) ? data['user_id'].toString() : null;
+      final createdId = profileResp['id']?.toString();
       if (createdId == null) {
-        return const AdminCrearConductorResult.invalid('No se pudo crear el conductor (sin user_id)');
+        return const AdminCrearConductorResult.invalid('No se pudo crear el perfil del conductor');
       }
+
+      await Supabase.instance.client.from('drivers').insert({
+        'profile_id': createdId,
+        'plate': p,
+        'vehicle_type': v,
+        'capacity': capacidad,
+        'commission_pct': comisionPorcentaje,
+        'cuenta_activa': true,
+        'estado': 'disponible',
+      });
 
       await _loadFromSupabase();
       state = _copyWith(conductorSeleccionado: createdId);
       return AdminCrearConductorResult.ok(createdId: createdId);
-    } on FunctionException catch (e) {
-      return AdminCrearConductorResult.invalid(e.details?.toString() ?? e.reasonPhrase ?? 'Error al crear conductor');
-    } on AuthException catch (e) {
+    } on PostgrestException catch (e) {
+      if (e.message.toLowerCase().contains('duplicate key value')) {
+         if (e.message.toLowerCase().contains('dni')) return const AdminCrearConductorResult.duplicateDni();
+         if (e.message.toLowerCase().contains('plate')) return const AdminCrearConductorResult.duplicatePlaca();
+         if (e.message.toLowerCase().contains('phone')) return const AdminCrearConductorResult.invalid('Teléfono ya registrado');
+         if (e.message.toLowerCase().contains('email')) return const AdminCrearConductorResult.invalid('Correo ya registrado');
+      }
       return AdminCrearConductorResult.invalid(e.message);
     } catch (_) {
       return const AdminCrearConductorResult.invalid('Error al crear conductor');
@@ -363,19 +349,17 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     await _loadFromSupabase();
   }
 
-  void desbloquearConductor(String id) {
+  Future<void> desbloquearConductor(String id) async {
     final current = getById(id);
     if (current == null) return;
     if (current.estado != MockAdminConductorEstado.bloqueado && !current.bloqueadoPorPago) return;
-    final next = current.copyWith(
-      estado: MockAdminConductorEstado.disponible,
-      bloqueadoPorPago: false,
-    );
-    state = _copyWith(
-      listaConductores: [
-        for (final item in state.listaConductores) if (item.id == id) next else item,
-      ],
-    );
+    try {
+      await Supabase.instance.client.from('drivers').update({
+        'pago_confirmado': true,
+        'estado': 'disponible',
+      }).eq('profile_id', id);
+      await _loadFromSupabase();
+    } catch (_) {}
   }
 
   void actualizarComision(String id, double nuevoPorcentaje) {

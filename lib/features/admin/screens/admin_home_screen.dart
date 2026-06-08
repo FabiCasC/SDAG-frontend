@@ -12,6 +12,7 @@ import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_auth_provider.dart';
 import '../providers/admin_monitoreo_provider.dart';
 import '../providers/admin_pagos_provider.dart';
+import '../providers/admin_analitica_provider.dart';
 
 class AdminHomeScreen extends ConsumerStatefulWidget {
   const AdminHomeScreen({super.key});
@@ -50,128 +51,141 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
     final auth = ref.watch(adminAuthProvider);
     final pagos = ref.watch(adminPagosProvider);
     final monitoreo = ref.watch(adminMonitoreoProvider);
-    final stats = MockData.adminStats;
+    final analitica = ref.watch(adminAnaliticaProvider);
+    final stats = analitica.estadisticas;
 
     final fleetItems = _buildFleet(monitoreo.vehiculosActivos);
     final conductoresActivos = fleetItems.where((e) => e.status != _FleetStatus.inactivo).length;
 
     return Scaffold(
       backgroundColor: pageBg,
-      body: Stack(
-        children: [
-          SizedBox(
-            height: headerHeight,
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0xFF0F172A),
-                    Color(0xFF1E293B),
-                  ],
-                ),
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.p20, AppSpacing.md, AppSpacing.p20, AppSpacing.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Spacer(),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: AppColors.white.withAlpha(28),
-                              borderRadius: BorderRadius.circular(AppRadius.r16),
-                              border: Border.all(color: AppColors.white.withAlpha(46)),
-                            ),
-                            child: IconButton(
-                              onPressed: () => context.push(AppRoutes.adminPerfil),
-                              icon: const Icon(Icons.person_rounded, color: AppColors.white),
-                              tooltip: 'Perfil',
-                            ),
-                          ),
+      body: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: MediaQuery.of(context).size.height,
+          ),
+          child: Column(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    height: headerHeight,
+                    width: double.infinity,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0xFF0F172A),
+                          Color(0xFF1E293B),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Panel de administración',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: caption,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                    ),
+                    child: SafeArea(
+                      bottom: false,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(AppSpacing.p20, AppSpacing.md, AppSpacing.p20, AppSpacing.md),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Spacer(),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: AppColors.white.withAlpha(28),
+                                    borderRadius: BorderRadius.circular(AppRadius.r16),
+                                    border: Border.all(color: AppColors.white.withAlpha(46)),
+                                  ),
+                                  child: IconButton(
+                                    onPressed: () => context.push(AppRoutes.adminPerfil),
+                                    icon: const Icon(Icons.person_rounded, color: AppColors.white),
+                                    tooltip: 'Perfil',
+                                  ),
+                                ),
+                              ],
                             ),
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        'Buenos días, ${_adminSaludoNombre(MockData.adminNombre)}',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: AppColors.white,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 22,
+                            const SizedBox(height: 6),
+                            Text(
+                              'Panel de administración',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: caption,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                             ),
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        _formatDateTime(_now),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: datetimeColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w400,
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              'Buenos días, ${_adminSaludoNombre(MockData.adminNombre)}',
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                    color: AppColors.white,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 22,
+                                  ),
                             ),
-                      ),
-                      const Spacer(),
-                      if (auth.adminLogueado)
-                        Text(
-                          'Sesión activa',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: caption),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              _formatDateTime(_now),
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: datetimeColor,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                            ),
+                            const Spacer(),
+                            if (auth.adminLogueado)
+                              Text(
+                                'Sesión activa',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: caption),
+                              ),
+                          ],
                         ),
-                    ],
+                      ),
+                    ),
                   ),
-                ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.p20,
+                      headerHeight - 50,
+                      AppSpacing.p20,
+                      bottomPadding,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                      _QuickSummaryGrid(
+                        viajesHoy: stats.viajesCompletados,
+                        ingresosHoy: stats.ingresosTotales,
+                        ocupacionPromedio: stats.ocupacionPromedio,
+                        conductoresActivos: conductoresActivos,
+                      ),
+                        const SizedBox(height: AppSpacing.lg),
+                        _PagosPendientesSection(
+                          solicitudes: pagos.solicitudesPendientes,
+                          onVerTodas: () => context.go(AppRoutes.adminPagos),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        _FlotaSection(
+                          items: fleetItems,
+                          onVerMapa: () => context.go(AppRoutes.adminMonitoreo),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        _AccesosRapidos(
+                          onNuevoConductor: () => context.go(AppRoutes.adminConductoresNuevo),
+                          onManifiestos: () => context.go(AppRoutes.adminManifiestos),
+                          onAnalitica: () => context.go(AppRoutes.adminAnalitica),
+                          onConfiguracion: () => context.go(AppRoutes.adminConfiguracion),
+                          onChatGrupal: () => context.go(AppRoutes.adminChatGrupal),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ),
+            ],
           ),
-          Positioned.fill(
-            child: ListView(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.p20,
-                headerHeight - 50,
-                AppSpacing.p20,
-                bottomPadding,
-              ),
-              children: [
-                _QuickSummaryGrid(
-                  viajesHoy: stats.viajesHoy,
-                  ingresosHoy: stats.ingresosHoy,
-                  ocupacionPromedio: stats.ocupacionPromedio,
-                  conductoresActivos: conductoresActivos,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _PagosPendientesSection(
-                  solicitudes: pagos.solicitudesPendientes,
-                  onVerTodas: () => context.go(AppRoutes.adminPagos),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _FlotaSection(
-                  items: fleetItems,
-                  onVerMapa: () => context.go(AppRoutes.adminMonitoreo),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _AccesosRapidos(
-                  onNuevoConductor: () => context.go(AppRoutes.adminConductoresNuevo),
-                  onManifiestos: () => context.go(AppRoutes.adminManifiestos),
-                  onAnalitica: () => context.go(AppRoutes.adminAnalitica),
-                  onConfiguracion: () => context.go(AppRoutes.adminConfiguracion),
-                  onChatGrupal: () => context.go(AppRoutes.adminChatGrupal),
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
       bottomNavigationBar: const _AdminBottomNav(currentIndex: 0),
     );
@@ -334,49 +348,60 @@ class _SummaryCard extends StatelessWidget {
             offset: Offset(0, AppSpacing.shadowOffsetY),
           ),
         ],
-        border: Border(
-          left: BorderSide(color: color, width: 6),
-        ),
       ),
-      padding: const EdgeInsets.all(16),
+      clipBehavior: Clip.antiAlias,
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Container(
+            width: 6,
+            color: color,
+          ),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 36,
-                        height: 1.0,
-                      ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF62748E),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                ),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          value,
+                          style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                                color: color,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 36,
+                                height: 1.0,
+                              ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFF62748E),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Icon(icon, color: color, size: 28),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: AppSpacing.sm),
-          Icon(icon, color: color, size: 28),
         ],
       ),
     );
