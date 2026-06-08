@@ -9,7 +9,6 @@ class SoporteTecnicoView extends StatefulWidget {
 
 class _SoporteTecnicoViewState extends State<SoporteTecnicoView> {
   final TextEditingController _controladorError = TextEditingController();
-  bool _adjuntandoLog = false;
   bool _enviando = false;
 
   // Simulación de datos técnicos (Criterio de aceptación)
