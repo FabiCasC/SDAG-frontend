@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 
 import '../../../app/router/app_routes.dart';
 import '../../../core/mock/mock_data.dart';
@@ -221,35 +224,99 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _StaticRouteMap extends StatelessWidget {
+class _StaticRouteMap extends StatefulWidget {
   const _StaticRouteMap({required this.routeLabel});
 
   final String routeLabel;
 
   @override
-  Widget build(BuildContext context) {
-    if (kIsWeb) {
-      return _WebStaticMap(routeLabel: routeLabel);
+  State<_StaticRouteMap> createState() => _StaticRouteMapState();
+}
+
+class _StaticRouteMapState extends State<_StaticRouteMap> {
+  static const _apiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
+  static const _origin = LatLng(MockData.sanIsidroLat, MockData.sanIsidroLng);
+  static const _destination = LatLng(MockData.chosicaLat, MockData.chosicaLng);
+  static const _mid = LatLng(MockData.midLat, MockData.midLng);
+
+  List<LatLng> _routePoints = const [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kIsWeb) _fetchRoute();
+  }
+
+  Future<void> _fetchRoute() async {
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/directions/json'
+        '?origin=${_origin.latitude},${_origin.longitude}'
+        '&destination=${_destination.latitude},${_destination.longitude}'
+        '&key=$_apiKey'
+        '&language=es',
+      );
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == 'OK') {
+          final encoded = data['routes'][0]['overview_polyline']['points'] as String;
+          setState(() {
+            _routePoints = _decodePolyline(encoded);
+            _loading = false;
+          });
+          return;
+        }
+      }
+    } catch (_) {}
+    // Fallback a línea recta si falla la API
+    setState(() {
+      _routePoints = const [_origin, _mid, _destination];
+      _loading = false;
+    });
+  }
+
+  List<LatLng> _decodePolyline(String encoded) {
+    final points = <LatLng>[];
+    int index = 0;
+    int lat = 0, lng = 0;
+    while (index < encoded.length) {
+      int shift = 0, result = 0, b;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      lat += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      shift = 0; result = 0;
+      do {
+        b = encoded.codeUnitAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      lng += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+      points.add(LatLng(lat / 1e5, lng / 1e5));
     }
+    return points;
+  }
 
-    const sanIsidro = LatLng(MockData.sanIsidroLat, MockData.sanIsidroLng);
-    const mid = LatLng(MockData.midLat, MockData.midLng);
-    const chosica = LatLng(MockData.chosicaLat, MockData.chosicaLng);
+  @override
+  Widget build(BuildContext context) {
+    if (kIsWeb) return _WebStaticMap(routeLabel: widget.routeLabel);
 
+    final polylinePoints = _routePoints.isEmpty ? const [_origin, _mid, _destination] : _routePoints;
     final polyline = Polyline(
       polylineId: const PolylineId('route'),
       color: AppColors.primaryBlue,
       width: 5,
-      points: const [sanIsidro, mid, chosica],
+      points: polylinePoints,
     );
 
     return Stack(
       children: [
         GoogleMap(
-          initialCameraPosition: const CameraPosition(
-            target: mid,
-            zoom: 10.8,
-          ),
+          initialCameraPosition: const CameraPosition(target: _mid, zoom: 10.8),
           polylines: {polyline},
           zoomControlsEnabled: false,
           myLocationButtonEnabled: false,
@@ -258,12 +325,16 @@ class _StaticRouteMap extends StatelessWidget {
           scrollGesturesEnabled: false,
           tiltGesturesEnabled: false,
           zoomGesturesEnabled: false,
-          liteModeEnabled: true,
+          liteModeEnabled: false,
           markers: {
-            const Marker(markerId: MarkerId('si'), position: sanIsidro),
-            const Marker(markerId: MarkerId('ch'), position: chosica),
+            const Marker(markerId: MarkerId('si'), position: _origin),
+            const Marker(markerId: MarkerId('ch'), position: _destination),
           },
         ),
+        if (_loading)
+          const Positioned.fill(
+            child: Center(child: CircularProgressIndicator()),
+          ),
         Positioned(
           left: AppSpacing.md,
           top: AppSpacing.md,
@@ -280,7 +351,7 @@ class _StaticRouteMap extends StatelessWidget {
                 const Icon(Icons.alt_route_rounded, size: 16, color: AppColors.primaryBlue),
                 const SizedBox(width: AppSpacing.xs),
                 Text(
-                  routeLabel,
+                  widget.routeLabel,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.textPrimary,
                         fontWeight: FontWeight.w600,
