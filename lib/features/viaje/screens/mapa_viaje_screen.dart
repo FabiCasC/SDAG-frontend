@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 
 import '../../../app/router/app_routes.dart';
 import '../../../features/reserva/providers/reserva_provider.dart';
@@ -14,11 +16,78 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/viaje_provider.dart';
 
-class MapaViajeScreen extends ConsumerWidget {
+List<LatLng> _decodePolyline(String encoded) {
+  final points = <LatLng>[];
+  int index = 0;
+  int lat = 0, lng = 0;
+  while (index < encoded.length) {
+    int shift = 0, result = 0, b;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    lat += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+    shift = 0; result = 0;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    lng += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
+    points.add(LatLng(lat / 1e5, lng / 1e5));
+  }
+  return points;
+}
+
+Future<List<LatLng>> _fetchDirections(LatLng origin, LatLng destination) async {
+  const apiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
+  final url = Uri.parse(
+    'https://maps.googleapis.com/maps/api/directions/json'
+    '?origin=${origin.latitude},${origin.longitude}'
+    '&destination=${destination.latitude},${destination.longitude}'
+    '&key=$apiKey&language=es',
+  );
+  try {
+    final response = await http.get(url);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data['status'] == 'OK') {
+        final encoded = data['routes'][0]['overview_polyline']['points'] as String;
+        return _decodePolyline(encoded);
+      }
+    }
+  } catch (_) {}
+  return [origin, destination];
+}
+
+class MapaViajeScreen extends ConsumerStatefulWidget {
   const MapaViajeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MapaViajeScreen> createState() => _MapaViajeScreenState();
+}
+
+class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
+  static const _origin = LatLng(-12.0931, -76.9662);
+  static const _destination = LatLng(-11.9333, -76.7000);
+  static const _mid = LatLng(-12.0464, -76.9156);
+
+  List<LatLng> _routePoints = const [_origin, _mid, _destination];
+  bool _loadingRoute = true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kIsWeb) {
+      _fetchDirections(_origin, _destination).then((points) {
+        if (mounted) setState(() { _routePoints = points; _loadingRoute = false; });
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final reserva = ref.watch(reservaProvider);
     final viaje = ref.watch(viajeProvider);
     ref.listen<ViajeState>(viajeProvider, (previous, next) {
@@ -38,30 +107,22 @@ class MapaViajeScreen extends ConsumerWidget {
       );
     }
 
-    final pickup = const LatLng(-12.0931, -76.9662);
-    final sanIsidro = const LatLng(-12.0931, -76.9662);
-    final mid = const LatLng(-12.0464, -76.9156);
-    final chosica = const LatLng(-11.9333, -76.7000);
-
     final vehicle = LatLng(viaje.vehiclePosition.lat, viaje.vehiclePosition.lng);
-
     final polyline = Polyline(
       polylineId: const PolylineId('route'),
       color: AppColors.primaryBlue,
       width: 5,
-      points: [sanIsidro, mid, chosica],
+      points: _routePoints,
     );
 
     return Scaffold(
       body: Stack(
         children: [
           if (kIsWeb)
-            _WebMapFallback(
-              vehicleLabel: '${driver.name} · ${driver.plate}',
-            )
+            _WebMapFallback(vehicleLabel: '${driver.name} · ${driver.plate}')
           else
             GoogleMap(
-              initialCameraPosition: CameraPosition(target: mid, zoom: 11),
+              initialCameraPosition: const CameraPosition(target: _mid, zoom: 11),
               polylines: {polyline},
               markers: {
                 Marker(
@@ -69,13 +130,14 @@ class MapaViajeScreen extends ConsumerWidget {
                   position: vehicle,
                   icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
                 ),
-                Marker(
-                  markerId: const MarkerId('pickup'),
-                  position: pickup,
-                ),
+                const Marker(markerId: MarkerId('pickup'), position: _origin),
               },
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
+            ),
+          if (_loadingRoute && !kIsWeb)
+            const Positioned.fill(
+              child: Center(child: CircularProgressIndicator()),
             ),
           Positioned(
             top: AppSpacing.lg,
