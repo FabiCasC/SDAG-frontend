@@ -19,7 +19,7 @@ class Vista49AutoAsignado extends StatelessWidget {
           children: <Widget>[
             Text(
               'Información del Auto Asignado',
-              style: Theme.of(context).textTheme.headline6,  // Usamos headline6 aquí
+              style: Theme.of(context).textTheme.titleLarge,
             ),
             SizedBox(height: 30),
             InfoCard(
