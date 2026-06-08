@@ -22,19 +22,34 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    final baseDark = ThemeData.dark();
+    final baseLight = ThemeData.light();
+
     return MaterialApp(
       title: 'SDAG - Modo Nocturno',
       theme: _isNightMode
-          ? ThemeData.dark().copyWith(
-        primaryColor: Colors.blueGrey,
-        accentColor: Colors.deepOrange,
-        buttonTheme: ButtonThemeData(buttonColor: Colors.deepOrange),
-      )
-          : ThemeData.light().copyWith(
-        primaryColor: Colors.blue,
-        accentColor: Colors.blueAccent,
-        buttonTheme: ButtonThemeData(buttonColor: Colors.blue),
-      ),
+          ? baseDark.copyWith(
+              colorScheme: baseDark.colorScheme.copyWith(
+                primary: Colors.blueGrey,
+                secondary: Colors.deepOrange,
+              ),
+              elevatedButtonTheme: ElevatedButtonThemeData(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepOrange,
+                ),
+              ),
+            )
+          : baseLight.copyWith(
+              colorScheme: baseLight.colorScheme.copyWith(
+                primary: Colors.blue,
+                secondary: Colors.blueAccent,
+              ),
+              elevatedButtonTheme: ElevatedButtonThemeData(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                ),
+              ),
+            ),
       home: ModoNocturnoPage(
         isNightMode: _isNightMode,
         toggleNightMode: _toggleNightMode,
