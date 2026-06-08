@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
@@ -95,6 +96,94 @@ class AdminCalificacionesScreen extends ConsumerWidget {
   }
 }
 
+final adminRatingsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, profileId) async {
+  final res = await Supabase.instance.client
+      .from('ratings')
+      .select('''
+        stars, comment, created_at,
+        drivers!inner (
+          profile_id,
+          profiles!inner (first_name, last_name)
+        )
+      ''')
+      .eq('drivers.profile_id', profileId)
+      .order('created_at', ascending: false)
+      .limit(10);
+  return List<Map<String, dynamic>>.from(res);
+});
+
+class _DriverRatingsList extends ConsumerWidget {
+  const _DriverRatingsList({required this.profileId, required this.conductorNombre});
+  final String profileId;
+  final String conductorNombre;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncRatings = ref.watch(adminRatingsProvider(profileId));
+    
+    return asyncRatings.when(
+      data: (ratings) {
+        if (ratings.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('Aún no hay reseñas en la base de datos.'),
+          );
+        }
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              conductorNombre,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            for (final r in ratings)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 110,
+                      child: Text(
+                        _formatDateOnly(DateTime.tryParse(r['created_at']?.toString() ?? '') ?? DateTime.now()),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _Stars(rating: ((r['stars'] as num?)?.toDouble() ?? 0.0), count: 0, showCount: false),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        r['comment']?.toString() ?? 'Sin comentario',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+      loading: () => const SizedBox(
+        height: 100,
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (e, st) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('Error: $e'),
+      ),
+    );
+  }
+}
+
 class _ConductorRatingCard extends StatelessWidget {
   const _ConductorRatingCard({
     required this.rank,
@@ -120,47 +209,9 @@ class _ConductorRatingCard extends StatelessWidget {
                   title: const Text('Últimas calificaciones'),
                   content: SizedBox(
                     width: 520,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          '${conductor.nombreCompleto} · ${conductor.placa}',
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        for (final r in _lastRatings(conductor))
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SizedBox(
-                                  width: 110,
-                                  child: Text(
-                                    r.dateLabel,
-                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: AppColors.textSecondary,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _Stars(rating: r.stars.toDouble(), count: 0, showCount: false),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    r.comment,
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                          color: AppColors.textPrimary,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
+                    child: _DriverRatingsList(
+                      profileId: conductor.id,
+                      conductorNombre: '${conductor.nombreCompleto} · ${conductor.placa}',
                     ),
                   ),
                   actions: [

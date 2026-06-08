@@ -1,5 +1,4 @@
 import 'package:flutter/widgets.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,11 +9,10 @@ import 'app/router/app_router.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await dotenv.load(fileName: 'env.json');
-  final url = dotenv.env['SUPABASE_URL'];
-  final anonKey = dotenv.env['SUPABASE_ANON_KEY'];
+  const url = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
+  const anonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
 
-  if (url != null && url.isNotEmpty && anonKey != null && anonKey.isNotEmpty) {
+  if (url.isNotEmpty && anonKey.isNotEmpty) {
     await Supabase.initialize(
       url: url,
       anonKey: anonKey,

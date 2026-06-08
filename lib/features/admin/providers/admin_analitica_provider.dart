@@ -57,19 +57,19 @@ class AdminAnaliticaStats {
   const AdminAnaliticaStats({
     required this.ingresosTotales,
     required this.viajesCompletados,
-    required this.ocupacionPromedio,
+    required this.totalReservas,
     required this.comisionesPagadas,
   });
 
   final double ingresosTotales;
   final int viajesCompletados;
-  final double ocupacionPromedio;
+  final int totalReservas;
   final double comisionesPagadas;
 
   static const zero = AdminAnaliticaStats(
     ingresosTotales: 0,
     viajesCompletados: 0,
-    ocupacionPromedio: 0,
+    totalReservas: 0,
     comisionesPagadas: 0,
   );
 }
@@ -134,6 +134,22 @@ class AdminAnaliticaController extends StateNotifier<AdminAnaliticaState> {
     final toIso = DateTime(to.year, to.month, to.day).add(const Duration(days: 1)).toIso8601String();
 
     try {
+      final tripsCountRes = await Supabase.instance.client
+          .from('trips')
+          .select('id')
+          .gte('created_at', fromIso)
+          .lt('created_at', toIso)
+          .count(CountOption.exact);
+      final viajesCompletados = tripsCountRes.count ?? 0;
+
+      final resCountRes = await Supabase.instance.client
+          .from('reservations')
+          .select('id')
+          .gte('created_at', fromIso)
+          .lt('created_at', toIso)
+          .count(CountOption.exact);
+      final totalReservas = resCountRes.count ?? 0;
+
       final trips = await Supabase.instance.client
           .from('trips')
           .select('id, driver_id, amount, created_at, status')
@@ -154,14 +170,14 @@ class AdminAnaliticaController extends StateNotifier<AdminAnaliticaState> {
         (sum, t) => sum + (((t['amount'] as num?)?.toDouble()) ?? 0.0),
       );
 
-      final payouts = await Supabase.instance.client
-          .from('driver_payouts')
-          .select('commission_amount, created_at')
+      final commissionsRes = await Supabase.instance.client
+          .from('driver_commissions')
+          .select('comision')
           .gte('created_at', fromIso)
           .lt('created_at', toIso);
       var comisionesPagadas = 0.0;
-      for (final pm in (payouts as List).cast<Map<String, dynamic>>()) {
-          comisionesPagadas += ((pm['commission_amount'] as num?)?.toDouble()) ?? 0.0;
+      for (final pm in (commissionsRes as List).cast<Map<String, dynamic>>()) {
+          comisionesPagadas += ((pm['comision'] as num?)?.toDouble()) ?? 0.0;
       }
 
       final ingresosPorDia = <String, double>{};
@@ -255,8 +271,8 @@ class AdminAnaliticaController extends StateNotifier<AdminAnaliticaState> {
       state = state.copyWith(
         estadisticas: AdminAnaliticaStats(
           ingresosTotales: ingresosTotales,
-          viajesCompletados: completed.length,
-          ocupacionPromedio: avgOcc,
+          viajesCompletados: viajesCompletados,
+          totalReservas: totalReservas,
           comisionesPagadas: comisionesPagadas,
         ),
         ingresosDiarios: ingresosDiarios,

@@ -12,6 +12,7 @@ import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_auth_provider.dart';
 import '../providers/admin_monitoreo_provider.dart';
 import '../providers/admin_pagos_provider.dart';
+import '../providers/admin_analitica_provider.dart';
 
 class AdminHomeScreen extends ConsumerStatefulWidget {
   const AdminHomeScreen({super.key});
@@ -50,128 +51,134 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
     final auth = ref.watch(adminAuthProvider);
     final pagos = ref.watch(adminPagosProvider);
     final monitoreo = ref.watch(adminMonitoreoProvider);
-    final stats = MockData.adminStats;
+    final analitica = ref.watch(adminAnaliticaProvider);
+    final stats = analitica.estadisticas;
 
     final fleetItems = _buildFleet(monitoreo.vehiculosActivos);
     final conductoresActivos = fleetItems.where((e) => e.status != _FleetStatus.inactivo).length;
 
     return Scaffold(
       backgroundColor: pageBg,
-      body: Stack(
-        children: [
-          SizedBox(
-            height: headerHeight,
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Color(0xFF0F172A),
-                    Color(0xFF1E293B),
-                  ],
-                ),
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.p20, AppSpacing.md, AppSpacing.p20, AppSpacing.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Spacer(),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: AppColors.white.withAlpha(28),
-                              borderRadius: BorderRadius.circular(AppRadius.r16),
-                              border: Border.all(color: AppColors.white.withAlpha(46)),
-                            ),
-                            child: IconButton(
-                              onPressed: () => context.push(AppRoutes.adminPerfil),
-                              icon: const Icon(Icons.person_rounded, color: AppColors.white),
-                              tooltip: 'Perfil',
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Panel de administración',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: caption,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        'Buenos días, ${_adminSaludoNombre(MockData.adminNombre)}',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: AppColors.white,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 22,
-                            ),
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        _formatDateTime(_now),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: datetimeColor,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w400,
-                            ),
-                      ),
-                      const Spacer(),
-                      if (auth.adminLogueado)
-                        Text(
-                          'Sesión activa',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: caption),
-                        ),
+      body: SingleChildScrollView(
+        child: Stack(
+          children: [
+            SizedBox(
+              height: headerHeight,
+              width: double.infinity,
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF0F172A),
+                      Color(0xFF1E293B),
                     ],
+                  ),
+                ),
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.p20, AppSpacing.md, AppSpacing.p20, AppSpacing.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Spacer(),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: AppColors.white.withAlpha(28),
+                                borderRadius: BorderRadius.circular(AppRadius.r16),
+                                border: Border.all(color: AppColors.white.withAlpha(46)),
+                              ),
+                              child: IconButton(
+                                onPressed: () => context.push(AppRoutes.adminPerfil),
+                                icon: const Icon(Icons.person_rounded, color: AppColors.white),
+                                tooltip: 'Perfil',
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Panel de administración',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: caption,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Buenos días, ${_adminSaludoNombre(MockData.adminNombre)}',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                color: AppColors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 22,
+                              ),
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          _formatDateTime(_now),
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: datetimeColor,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w400,
+                              ),
+                        ),
+                        const Spacer(),
+                        if (auth.adminLogueado)
+                          Text(
+                            'Sesión activa',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: caption),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          Positioned.fill(
-            child: ListView(
+            Padding(
               padding: EdgeInsets.fromLTRB(
                 AppSpacing.p20,
                 headerHeight - 50,
                 AppSpacing.p20,
                 bottomPadding,
               ),
-              children: [
-                _QuickSummaryGrid(
-                  viajesHoy: stats.viajesHoy,
-                  ingresosHoy: stats.ingresosHoy,
-                  ocupacionPromedio: stats.ocupacionPromedio,
-                  conductoresActivos: conductoresActivos,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _PagosPendientesSection(
-                  solicitudes: pagos.solicitudesPendientes,
-                  onVerTodas: () => context.go(AppRoutes.adminPagos),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _FlotaSection(
-                  items: fleetItems,
-                  onVerMapa: () => context.go(AppRoutes.adminMonitoreo),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _AccesosRapidos(
-                  onNuevoConductor: () => context.go(AppRoutes.adminConductoresNuevo),
-                  onManifiestos: () => context.go(AppRoutes.adminManifiestos),
-                  onAnalitica: () => context.go(AppRoutes.adminAnalitica),
-                  onConfiguracion: () => context.go(AppRoutes.adminConfiguracion),
-                  onChatGrupal: () => context.go(AppRoutes.adminChatGrupal),
-                ),
-              ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _QuickSummaryGrid(
+                    viajesHoy: stats.viajesCompletados,
+                    ingresosHoy: stats.ingresosTotales,
+                    totalReservas: stats.totalReservas,
+                    conductoresActivos: conductoresActivos,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _PagosPendientesSection(
+                    solicitudes: pagos.solicitudesPendientes,
+                    onVerTodas: () => context.go(AppRoutes.adminPagos),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _FlotaSection(
+                    items: fleetItems,
+                    onVerMapa: () => context.go(AppRoutes.adminMonitoreo),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _AccesosRapidos(
+                    onNuevoConductor: () => context.go(AppRoutes.adminConductoresNuevo),
+                    onManifiestos: () => context.go(AppRoutes.adminManifiestos),
+                    onAnalitica: () => context.go(AppRoutes.adminAnalitica),
+                    onConfiguracion: () => context.go(AppRoutes.adminConfiguracion),
+                    onChatGrupal: () => context.go(AppRoutes.adminChatGrupal),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       bottomNavigationBar: const _AdminBottomNav(currentIndex: 0),
     );
@@ -255,51 +262,69 @@ class _QuickSummaryGrid extends StatelessWidget {
   const _QuickSummaryGrid({
     required this.viajesHoy,
     required this.ingresosHoy,
-    required this.ocupacionPromedio,
+    required this.totalReservas,
     required this.conductoresActivos,
   });
 
   final int viajesHoy;
   final double ingresosHoy;
-  final double ocupacionPromedio;
+  final int totalReservas;
   final int conductoresActivos;
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
-      crossAxisSpacing: AppSpacing.sm,
-      mainAxisSpacing: AppSpacing.sm,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        _SummaryCard(
-          title: 'Viajes hoy',
-          subtitle: 'viajes completados hoy',
-          value: '$viajesHoy',
-          color: const Color(0xFF2563EB),
-          icon: Icons.directions_bus_rounded,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _SummaryCard(
+                title: 'Viajes hoy',
+                subtitle: 'completados',
+                value: '$viajesHoy',
+                color: const Color(0xFF2563EB),
+                icon: Icons.directions_bus_rounded,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: _SummaryCard(
+                title: 'Ingresos hoy',
+                subtitle: 'recaudado',
+                value: 'S/ ${_formatNumber(ingresosHoy.round())}',
+                color: const Color(0xFF16A34A),
+                icon: Icons.attach_money_rounded,
+              ),
+            ),
+          ],
         ),
-        _SummaryCard(
-          title: 'Ingresos hoy',
-          subtitle: 'recaudado hoy',
-          value: 'S/ ${_formatNumber(ingresosHoy.round())}',
-          color: const Color(0xFF16A34A),
-          icon: Icons.attach_money_rounded,
-        ),
-        _SummaryCard(
-          title: 'Ocupación',
-          subtitle: 'promedio de asientos',
-          value: '${(ocupacionPromedio * 100).round()}%',
-          color: const Color(0xFFF97316),
-          icon: Icons.people_rounded,
-        ),
-        _SummaryCard(
-          title: 'Conductores activos',
-          subtitle: 'conductores en operación',
-          value: '$conductoresActivos',
-          color: const Color(0xFF9333EA),
-          icon: Icons.person_pin_rounded,
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _SummaryCard(
+                title: 'Total reservas',
+                subtitle: 'reservas vigentes',
+                value: '$totalReservas',
+                color: const Color(0xFFF97316),
+                icon: Icons.people_rounded,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: _SummaryCard(
+                title: 'Activos',
+                subtitle: 'conductores online',
+                value: '$conductoresActivos',
+                color: const Color(0xFF9333EA),
+                icon: Icons.person_pin_rounded,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -334,17 +359,16 @@ class _SummaryCard extends StatelessWidget {
             offset: Offset(0, AppSpacing.shadowOffsetY),
           ),
         ],
-        border: Border(
-          left: BorderSide(color: color, width: 6),
-        ),
+        border: Border.all(color: AppColors.border),
       ),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   title,
@@ -352,6 +376,8 @@ class _SummaryCard extends StatelessWidget {
                         color: AppColors.textPrimary,
                         fontWeight: FontWeight.w800,
                       ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
@@ -359,24 +385,28 @@ class _SummaryCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.displaySmall?.copyWith(
                         color: color,
                         fontWeight: FontWeight.w900,
-                        fontSize: 36,
+                        fontSize: 28,
                         height: 1.0,
                       ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   subtitle,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: const Color(0xFF62748E),
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: FontWeight.w500,
                       ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
-          Icon(icon, color: color, size: 28),
+          Icon(icon, color: color, size: 24),
         ],
       ),
     );
@@ -400,31 +430,40 @@ class _PagosPendientesSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(
-              'Pagos pendientes',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      'Pagos pendientes',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            if (pendingCount > 0)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFDC2626),
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                ),
-                child: Text(
-                  '$pendingCount',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.white,
-                        fontWeight: FontWeight.w900,
+                  const SizedBox(width: AppSpacing.sm),
+                  if (pendingCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDC2626),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
                       ),
-                ),
+                      child: Text(
+                        '$pendingCount',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.white,
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                    ),
+                ],
               ),
-            const Spacer(),
+            ),
             if (pendingCount > 0)
               TextButton(
                 onPressed: onVerTodas,
@@ -488,6 +527,8 @@ class _PagosPendientesSection extends StatelessWidget {
                                       color: AppColors.textPrimary,
                                       fontWeight: FontWeight.w800,
                                     ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 6),
                               Text(
@@ -496,6 +537,8 @@ class _PagosPendientesSection extends StatelessWidget {
                                       color: AppColors.textSecondary,
                                       fontWeight: FontWeight.w600,
                                     ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ],
                           ),
@@ -540,15 +583,18 @@ class _FlotaSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(
-              'Estado de la flota',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
+            Expanded(
+              child: Text(
+                'Estado de la flota',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
+                    ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-            const Spacer(),
             TextButton(
               onPressed: onVerMapa,
               child: const Text('Ver mapa completo'),

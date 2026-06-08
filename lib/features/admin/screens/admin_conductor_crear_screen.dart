@@ -108,7 +108,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
     if (ok != true) return;
 
     final controller = ref.read(adminConductoresProvider.notifier);
-    final result = controller.crearConductor(
+    final result = await controller.crearConductor(
       nombres: _nombresController.text,
       apellidos: _apellidosController.text,
       dni: _dniController.text,

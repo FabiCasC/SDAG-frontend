@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../core/mock/mock_data.dart';
@@ -158,43 +159,70 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
   final Ref ref;
   Timer? _timer;
 
-  void cargarFlota() {
-    final conductores = ref.read(adminConductoresProvider).listaConductores;
-    final items = <AdminVehiculoActivo>[];
+  Future<void> cargarFlota() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('driver_locations')
+          .select('''
+            driver_id, estado, lat, lng, eta_minutes, occupied_seats, capacity,
+            drivers!inner (
+              plate,
+              profiles!inner (first_name, last_name)
+            )
+          ''')
+          .neq('estado', 'inactivo');
 
-    for (var i = 0; i < conductores.length; i++) {
-      final c = conductores[i];
-      final estado = switch (c.estado) {
-        MockAdminConductorEstado.enRuta => AdminVehiculoEstado.enRuta,
-        MockAdminConductorEstado.disponible => AdminVehiculoEstado.disponible,
-        MockAdminConductorEstado.inactivo => AdminVehiculoEstado.inactivo,
-        MockAdminConductorEstado.bloqueado => AdminVehiculoEstado.inactivo,
-      };
+      final items = <AdminVehiculoActivo>[];
+      for (int i = 0; i < data.length; i++) {
+        final row = data[i] as Map<String, dynamic>;
+        final driverId = row['driver_id'] as String;
+        final estadoStr = row['estado'] as String;
+        final lat = (row['lat'] as num?)?.toDouble() ?? -12.0464;
+        final lng = (row['lng'] as num?)?.toDouble() ?? -76.9156;
+        final eta = row['eta_minutes'] as int?;
+        final occupied = row['occupied_seats'] as int? ?? 0;
+        final capacity = row['capacity'] as int? ?? 0;
+        
+        final driverData = row['drivers'] as Map<String, dynamic>? ?? {};
+        final plate = driverData['plate'] as String? ?? '—';
+        final profileData = driverData['profiles'] as Map<String, dynamic>? ?? {};
+        final nombreCompleto = '${profileData['first_name'] ?? ''} ${profileData['last_name'] ?? ''}'.trim();
 
-      final routePoints = _routePointsForEstado(estado);
-      final pos = routePoints.isEmpty ? const LatLng(-12.0464, -76.9156) : routePoints[i % routePoints.length];
-      final capacity = c.capacidad;
-      final ocupados = _occupancyForIndex(i, capacity);
-      final eta = estado == AdminVehiculoEstado.enRuta ? 18 + (i * 3) % 15 : null;
+        AdminVehiculoEstado estadoEnum;
+        switch (estadoStr) {
+          case 'disponible':
+            estadoEnum = AdminVehiculoEstado.disponible;
+            break;
+          case 'activo':
+            estadoEnum = AdminVehiculoEstado.activo;
+            break;
+          case 'en_ruta':
+            estadoEnum = AdminVehiculoEstado.enRuta;
+            break;
+          default:
+            estadoEnum = AdminVehiculoEstado.inactivo;
+        }
 
-      items.add(
-        AdminVehiculoActivo(
-          conductorId: c.id,
-          conductorNombre: c.nombreCompleto,
-          placa: c.placa,
-          estado: estado == AdminVehiculoEstado.disponible && i % 5 == 2 ? AdminVehiculoEstado.activo : estado,
-          posicion: pos,
-          rutaLabel: estado == AdminVehiculoEstado.enRuta ? _routeLabelForConductor(c) : null,
-          ocupados: ocupados,
-          capacidad: capacity,
-          etaMinutos: eta,
-          routeIndex: i % (routePoints.isEmpty ? 1 : routePoints.length),
-          routePoints: routePoints,
-        ),
-      );
-    }
+        final routePoints = _routePointsForEstado(estadoEnum);
 
-    state = state.copyWith(vehiculosActivos: items);
+        items.add(
+          AdminVehiculoActivo(
+            conductorId: driverId,
+            conductorNombre: nombreCompleto.isEmpty ? 'Desconocido' : nombreCompleto,
+            placa: plate,
+            estado: estadoEnum,
+            posicion: LatLng(lat, lng),
+            rutaLabel: estadoEnum == AdminVehiculoEstado.enRuta ? _routeLabelForPlaca(plate) : null,
+            ocupados: occupied,
+            capacidad: capacity,
+            etaMinutos: eta,
+            routeIndex: 0,
+            routePoints: routePoints,
+          ),
+        );
+      }
+      state = state.copyWith(vehiculosActivos: items);
+    } catch (_) {}
   }
 
   void filtrarManifiestos({
@@ -282,9 +310,9 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
     return value.clamp(0, capacity);
   }
 
-  static String _routeLabelForConductor(MockAdminConductor c) {
-    final dir = c.placa.hashCode.isEven ? 'San Isidro → Chosica' : 'Chosica → San Isidro';
-    final via = c.placa.hashCode % 3 == 0 ? 'Vía Javier Prado' : 'Vía La Priale';
+  static String _routeLabelForPlaca(String placa) {
+    final dir = placa.hashCode.isEven ? 'San Isidro → Chosica' : 'Chosica → San Isidro';
+    final via = placa.hashCode % 3 == 0 ? 'Vía Javier Prado' : 'Vía La Priale';
     return '$dir · $via';
   }
 }

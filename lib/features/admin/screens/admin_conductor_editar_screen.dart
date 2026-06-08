@@ -105,7 +105,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
     }
 
     final controller = ref.read(adminConductoresProvider.notifier);
-    final edit = controller.editarConductor(
+    final edit = await controller.editarConductor(
       id: current.id,
       nombres: _nombresController.text,
       apellidos: _apellidosController.text,

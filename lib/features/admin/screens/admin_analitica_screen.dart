@@ -210,12 +210,12 @@ class _IndicatorsGrid extends StatelessWidget {
           color: const Color(0xFF2563EB),
         ),
         _IndicatorCard(
-          title: 'Ocupación promedio',
-          value: '${(stats.ocupacionPromedio * 100).round()}%',
+          title: 'Total reservas',
+          value: '${stats.totalReservas}',
           color: const Color(0xFFF97316),
         ),
         _IndicatorCard(
-          title: 'Comisiones pagadas',
+          title: 'Comisiones (Monto)',
           value: 'S/ ${_formatNumber(stats.comisionesPagadas.round())}',
           color: const Color(0xFF9333EA),
         ),
@@ -248,12 +248,7 @@ class _IndicatorCard extends StatelessWidget {
             offset: Offset(0, AppSpacing.shadowOffsetY),
           ),
         ],
-        border: Border(
-          left: BorderSide(color: color, width: 6),
-          top: const BorderSide(color: AppColors.border),
-          right: const BorderSide(color: AppColors.border),
-          bottom: const BorderSide(color: AppColors.border),
-        ),
+        border: Border.all(color: AppColors.border),
       ),
       padding: const EdgeInsets.all(16),
       child: Column(

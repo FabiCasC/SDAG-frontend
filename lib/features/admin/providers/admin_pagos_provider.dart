@@ -78,17 +78,25 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
     try {
       final requests = await Supabase.instance.client
           .from('driver_payout_requests')
-          .select('id, profile_id, gross_amount, commission_amount, status, created_at')
-          .order('created_at', ascending: false);
-      final payouts = await Supabase.instance.client
-          .from('driver_payouts')
-          .select('id, profile_id, gross_amount, commission_amount, status, created_at')
+          .select('''
+            id, profile_id, gross_amount, commission_amount, status, created_at,
+            profiles!inner (
+              first_name, last_name,
+              drivers!inner (plate, commission_pct)
+            )
+          ''')
           .order('created_at', ascending: false);
 
-      final byProfile = <String, MockAdminConductor>{};
-      for (final c in ref.read(adminConductoresProvider).listaConductores) {
-        byProfile[c.id] = c;
-      }
+      final payouts = await Supabase.instance.client
+          .from('driver_payouts')
+          .select('''
+            id, profile_id, gross_amount, commission_amount, status, created_at,
+            profiles!inner (
+              first_name, last_name,
+              drivers!inner (plate, commission_pct)
+            )
+          ''')
+          .order('created_at', ascending: false);
 
       final solicitudes = <AdminPagoSolicitud>[];
       for (final rm in (requests as List).cast<Map<String, dynamic>>()) {
@@ -98,16 +106,23 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
           final createdAt = DateTime.tryParse(rm['created_at']?.toString() ?? '');
           final monto = (rm['commission_amount'] as num?)?.toDouble();
           final total = (rm['gross_amount'] as num?)?.toDouble();
+
           if (id == null || profileId == null || createdAt == null || monto == null || total == null) continue;
           if (status != 'pendiente') continue;
-          final c = byProfile[profileId];
+
+          final profileData = rm['profiles'] is Map ? rm['profiles'] as Map<String, dynamic> : {};
+          final first = profileData['first_name']?.toString() ?? '';
+          final last = profileData['last_name']?.toString() ?? '';
+          final driversList = profileData['drivers'] is List ? profileData['drivers'] as List : [];
+          final driverData = driversList.isNotEmpty ? (driversList.first as Map<String, dynamic>?) ?? {} : (profileData['drivers'] is Map ? profileData['drivers'] as Map<String, dynamic> : {});
+          
           solicitudes.add(
             AdminPagoSolicitud(
               id: id,
-              conductor: c?.nombreCompleto ?? profileId,
-              placa: c?.placa ?? '—',
+              conductor: '$first $last'.trim().isEmpty ? profileId : '$first $last'.trim(),
+              placa: driverData['plate']?.toString() ?? '—',
               monto: monto,
-              porcentaje: c?.comisionPorcentaje ?? 15.0,
+              porcentaje: (driverData['commission_pct'] as num?)?.toDouble() ?? 15.0,
               totalRecaudado: total,
               solicitadoAt: createdAt,
               detalleViajes: _buildDetalleViajes(total, createdAt),
@@ -123,15 +138,22 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
           final monto = (pm['commission_amount'] as num?)?.toDouble();
           final total = (pm['gross_amount'] as num?)?.toDouble();
           final estado = pm['status']?.toString() ?? '—';
+
           if (id == null || profileId == null || createdAt == null || monto == null || total == null) continue;
-          final c = byProfile[profileId];
+
+          final profileData = pm['profiles'] is Map ? pm['profiles'] as Map<String, dynamic> : {};
+          final first = profileData['first_name']?.toString() ?? '';
+          final last = profileData['last_name']?.toString() ?? '';
+          final driversList = profileData['drivers'] is List ? profileData['drivers'] as List : [];
+          final driverData = driversList.isNotEmpty ? (driversList.first as Map<String, dynamic>?) ?? {} : (profileData['drivers'] is Map ? profileData['drivers'] as Map<String, dynamic> : {});
+
           historial.add(
             AdminPagoHistorial(
               id: id,
-              conductor: c?.nombreCompleto ?? profileId,
-              placa: c?.placa ?? '—',
+              conductor: '$first $last'.trim().isEmpty ? profileId : '$first $last'.trim(),
+              placa: driverData['plate']?.toString() ?? '—',
               monto: monto,
-              porcentaje: c?.comisionPorcentaje ?? 15.0,
+              porcentaje: (driverData['commission_pct'] as num?)?.toDouble() ?? 15.0,
               totalRecaudado: total,
               confirmadoAt: createdAt,
               estado: estado,

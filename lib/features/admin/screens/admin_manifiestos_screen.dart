@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
@@ -255,6 +256,14 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
   }
 }
 
+final manifestEntriesProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, viajeId) async {
+  final entries = await Supabase.instance.client
+      .from('manifest_entries')
+      .select('first_name, last_name, dni, seat_number, boarding, manifests!inner(trip_id)')
+      .eq('manifests.trip_id', viajeId);
+  return List<Map<String, dynamic>>.from(entries);
+});
+
 class AdminManifiestoDetalleScreen extends ConsumerWidget {
   const AdminManifiestoDetalleScreen({required this.viajeId, super.key});
 
@@ -276,8 +285,8 @@ class AdminManifiestoDetalleScreen extends ConsumerWidget {
     final nombre = conductor?.nombreCompleto ?? '—';
     final placa = conductor?.placa ?? '—';
     final capacidad = conductor?.capacidad ?? 8;
-    final pasajeros = MockData.pasajerosViajeActivo.take(capacidad).toList(growable: false);
-    final abordaron = (capacidad - (viajeId.hashCode.abs() % (capacidad + 1))).clamp(0, capacidad);
+
+    final pasajerosAsync = ref.watch(manifestEntriesProvider(viajeId));
 
     return Scaffold(
       backgroundColor: pageBg,
@@ -285,19 +294,6 @@ class AdminManifiestoDetalleScreen extends ConsumerWidget {
         backgroundColor: appBarBg,
         foregroundColor: AppColors.white,
         title: const Text('Manifiesto'),
-        actions: [
-          IconButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  backgroundColor: Color(0xFF0F172A),
-                  content: Text('Manifiesto compartido (mock)'),
-                ),
-              );
-            },
-            icon: const Icon(Icons.share_rounded),
-          ),
-        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.p20),
@@ -328,76 +324,100 @@ class AdminManifiestoDetalleScreen extends ConsumerWidget {
                       ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  'Pasajeros: $abordaron/$capacidad abordaron',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                pasajerosAsync.when(
+                  data: (data) => Text(
+                    'Pasajeros: ${data.length}/$capacidad en manifiesto',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  loading: () => const Text('Cargando pasajeros...'),
+                  error: (e, st) => const Text('Error al cargar pasajeros'),
                 ),
               ],
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          ...pasajeros.asMap().entries.map((e) {
-            final i = e.key;
-            final p = e.value;
-            final boarded = i < abordaron;
-            final (chipBg, chipLabel) =
-                boarded ? (const Color(0xFF16A34A), 'Abordó') : (const Color(0xFFDC2626), 'No abordó');
+          pasajerosAsync.when(
+            data: (pasajeros) {
+              if (pasajeros.isEmpty) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('No hay pasajeros registrados en este manifiesto.'),
+                  ),
+                );
+              }
+              return Column(
+                children: pasajeros.map((p) {
+                  final nombres = p['first_name']?.toString() ?? 'Sin nombre';
+                  final apellidos = p['last_name']?.toString() ?? '';
+                  final dni = p['dni']?.toString() ?? '—';
+                  final asiento = p['seat_number']?.toString() ?? '—';
+                  final boarding = p['boarding']?.toString() ?? 'pendiente';
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.white,
-                  borderRadius: BorderRadius.circular(AppRadius.r16),
-                  border: Border.all(color: AppColors.border),
-                ),
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  final (chipBg, chipLabel) = boarding == 'abordo'
+                      ? (const Color(0xFF16A34A), 'Abordó')
+                      : (boarding == 'no_abordo' ? (const Color(0xFFDC2626), 'No abordó') : (const Color(0xFFF97316), 'Pendiente'));
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.white,
+                        borderRadius: BorderRadius.circular(AppRadius.r16),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Row(
                         children: [
-                          Text(
-                            '${p.nombres} ${p.apellidos}',
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                  color: AppColors.textPrimary,
-                                  fontWeight: FontWeight.w900,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '$nombres $apellidos'.trim(),
+                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                        color: AppColors.textPrimary,
+                                        fontWeight: FontWeight.w900,
+                                      ),
                                 ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'DNI: $dni · Asiento $asiento',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'DNI: ${p.dni} · Asiento ${p.asiento}',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppColors.textSecondary,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: chipBg,
+                              borderRadius: BorderRadius.circular(AppRadius.pill),
+                            ),
+                            child: Text(
+                              chipLabel,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: AppColors.white,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: chipBg,
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                      ),
-                      child: Text(
-                        chipLabel,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.white,
-                              fontWeight: FontWeight.w900,
-                            ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
+                  );
+                }).toList(),
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, st) => const Center(child: Text('Error consultando base de datos')),
+          ),
           const SizedBox(height: AppSpacing.lg),
           OutlinedButton(
             onPressed: () => context.go(AppRoutes.adminManifiestos),

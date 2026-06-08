@@ -679,15 +679,17 @@ class _HistorialTabState extends State<_HistorialTab> {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  OutlinedButton(
-                    onPressed: _pickRange,
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.r12)),
-                    ),
-                    child: Text(
-                      widget.filtroDesde == null || widget.filtroHasta == null
-                          ? 'Rango'
-                          : '${_formatDateOnly(widget.filtroDesde!)} - ${_formatDateOnly(widget.filtroHasta!)}',
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _pickRange,
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.r12)),
+                      ),
+                      child: Text(
+                        widget.filtroDesde == null || widget.filtroHasta == null
+                            ? 'Rango'
+                            : '${_formatDateOnly(widget.filtroDesde!)} - ${_formatDateOnly(widget.filtroHasta!)}',
+                      ),
                     ),
                   ),
                 ],
