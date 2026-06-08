@@ -11,9 +11,9 @@ class MyApp extends StatelessWidget {
       title: 'SDAG - Buscador de Conductores',
       theme: ThemeData(
         primarySwatch: Colors.blue,
-        textTheme: TextTheme(
-          headline1: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-          bodyText1: TextStyle(fontSize: 16),
+        textTheme: const TextTheme(
+          titleLarge: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          bodyLarge: TextStyle(fontSize: 16),
         ),
       ),
       home: BuscarConductoresPage(),
