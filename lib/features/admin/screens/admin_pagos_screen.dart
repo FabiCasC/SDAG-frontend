@@ -252,7 +252,7 @@ class _AdminPagosScreenState extends ConsumerState<AdminPagosScreen> with Single
                     await Future<void>.delayed(const Duration(seconds: 1));
                     if (context.mounted) navigator.pop();
 
-                    controller.confirmarPago(s.id);
+                    await controller.confirmarPago(s.id);
                     messenger.showSnackBar(
                       SnackBar(
                         backgroundColor: const Color(0xFF16A34A),

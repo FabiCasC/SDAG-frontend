@@ -106,7 +106,14 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     if (!mounted) return;
     if (ok != true) return;
 
-    ref.read(adminConductoresProvider.notifier).desactivarConductor(conductor.id);
+    await ref.read(adminConductoresProvider.notifier).desactivarConductor(conductor.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: AppColors.success,
+        content: Text('Conductor desactivado'),
+      ),
+    );
   }
 
   Future<void> _confirmReactivar(MockAdminConductor conductor) async {
@@ -133,7 +140,14 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     );
     if (!mounted) return;
     if (ok != true) return;
-    ref.read(adminConductoresProvider.notifier).reactivarConductor(conductor.id);
+    await ref.read(adminConductoresProvider.notifier).reactivarConductor(conductor.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: AppColors.success,
+        content: Text('Conductor reactivado'),
+      ),
+    );
   }
 
   @override

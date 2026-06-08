@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'dart:convert';
 
 import '../../../app/router/app_routes.dart';
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
@@ -25,15 +29,18 @@ class PagoScreen extends ConsumerStatefulWidget {
 class _PagoScreenState extends ConsumerState<PagoScreen> {
   static const _prefsTypeKey = 'sdag_payment_type';
   static const _prefsLast4Key = 'sdag_payment_last4';
+  static const _culqiPublicKeyFallback = 'pk_test_121t6Q3w2iXFBFDF';
 
   final _yapeController = TextEditingController();
   final _cardNumberController = TextEditingController();
   final _cardExpiryController = TextEditingController();
   final _cardCvvController = TextEditingController();
+  final _cardHolderController = TextEditingController();
 
   bool _saveForFuture = false;
   bool _paying = false;
   _PaymentOption? _selectedOption;
+  bool _cvvObscure = true;
 
   String? _savedLast4;
 
@@ -49,6 +56,7 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     _cardNumberController.dispose();
     _cardExpiryController.dispose();
     _cardCvvController.dispose();
+    _cardHolderController.dispose();
     super.dispose();
   }
 
@@ -156,6 +164,13 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
                             color: AppColors.textSecondary,
                           ),
                     ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      '${seats.length} × S/ 15.00 = S/ ${(seats.length * 15.0).toStringAsFixed(0)}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     Text(
                       'S/ ${total.toStringAsFixed(0)}',
@@ -224,6 +239,11 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
               TextField(
                 controller: _cardNumberController,
                 keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(16),
+                  _CardNumberFormatter(),
+                ],
                 decoration: const InputDecoration(labelText: 'Número de tarjeta'),
               ),
               const SizedBox(height: AppSpacing.md),
@@ -233,6 +253,11 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
                     child: TextField(
                       controller: _cardExpiryController,
                       keyboardType: TextInputType.datetime,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(4),
+                        _ExpiryFormatter(),
+                      ],
                       decoration: const InputDecoration(labelText: 'MM/AA'),
                     ),
                   ),
@@ -241,10 +266,27 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
                     child: TextField(
                       controller: _cardCvvController,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'CVV'),
+                      obscureText: _cvvObscure,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(3),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: 'CVV',
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(() => _cvvObscure = !_cvvObscure),
+                          icon: Icon(_cvvObscure ? Icons.visibility_rounded : Icons.visibility_off_rounded),
+                        ),
+                      ),
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _cardHolderController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Nombre del titular'),
               ),
             ],
             const SizedBox(height: AppSpacing.lg),
@@ -305,20 +347,10 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
   }) async {
     setState(() => _paying = true);
 
-    final simulateFail = option == _PaymentOption.yape &&
-        _yapeController.text.trim().isNotEmpty &&
-        _yapeController.text.trim().endsWith('000');
-
-    await Future<void>.delayed(const Duration(seconds: 2));
-
-    if (!mounted) return;
-    if (simulateFail) {
+    if (option != _PaymentOption.card) {
+      if (!mounted) return;
       setState(() => _paying = false);
-      if (onRetry != null) {
-        _showRetrySnack('No se pudo procesar el pago con Yape.', () => onRetry());
-      } else {
-        AppSnackbars.error(context, 'No se pudo procesar el pago con Yape.');
-      }
+      AppSnackbars.error(context, 'Solo está habilitado el pago con tarjeta.');
       return;
     }
 
@@ -343,66 +375,175 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       return;
     }
 
-    final reservaId = await _crearReservaSupabase(ref, option: option);
-    ref.read(reservaProvider.notifier).markPaid(reservaId: reservaId);
+    try {
+      final reservaId = await _payWithCulqi(ref);
+      ref.read(reservaProvider.notifier).markPaid(reservaId: reservaId);
 
-    if (!mounted) return;
-    setState(() => _paying = false);
-    context.go('${AppRoutes.passengerConfirmacion}?reservaId=$reservaId');
+      if (!mounted) return;
+      setState(() => _paying = false);
+      context.go('${AppRoutes.passengerConfirmacion}?reservaId=$reservaId');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _paying = false);
+      debugPrint('[PAY ERROR] ${e.runtimeType}: $e');
+      final message = switch (e) {
+        AuthException(:final message) => message,
+        FunctionException(:final details, :final reasonPhrase) =>
+          details?.toString() ?? reasonPhrase ?? 'Error en el pago.',
+        _ => 'Error: ${e.toString()}',
+      };
+      if (onRetry != null) {
+        _showRetrySnack(message, () => onRetry());
+      } else {
+        AppSnackbars.error(context, message);
+      }
+    }
   }
 
-  Future<String> _crearReservaSupabase(WidgetRef ref, {required _PaymentOption option}) async {
-    final accountId = ref.read(passengerSessionProvider).account?.id;
+  Future<String> _payWithCulqi(WidgetRef ref) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    final email = (user?.email ?? ref.read(passengerSessionProvider).account?.email ?? '').trim();
+    final userId = user?.id ?? ref.read(passengerSessionProvider).account?.id;
     final reserva = ref.read(reservaProvider);
     final seats = [...reserva.asientosSeleccionados]..sort();
     final pickup = reserva.puntoRecojo?.trim();
-    final selectedDriver = reserva.conductorSeleccionado;
-    final total = seats.length * 15.0;
+    final driver = reserva.conductorSeleccionado;
 
-    if (accountId == null) {
-      return 'r_${DateTime.now().millisecondsSinceEpoch}';
+    if (email.isEmpty || userId == null) {
+      throw const AuthException('Sesión inválida');
     }
+    if (seats.isEmpty || driver == null) {
+      throw const AuthException('Reserva inválida');
+    }
+
+    final cardNumberDigits = _cardNumberController.text.replaceAll(RegExp(r'\D'), '');
+    final cvv = _cardCvvController.text.replaceAll(RegExp(r'\D'), '');
+    final expiry = _cardExpiryController.text.trim();
+    final holder = _cardHolderController.text.trim();
+
+    final (mm, yy) = _parseExpiry(expiry);
+    if (cardNumberDigits.length != 16) {
+      throw const AuthException('Tarjeta inválida');
+    }
+    if (cvv.length != 3) {
+      throw const AuthException('CVV inválido');
+    }
+    if (mm < 1 || mm > 12) {
+      throw const AuthException('Vencimiento inválido');
+    }
+    if (yy < 0 || yy > 99) {
+      throw const AuthException('Vencimiento inválido');
+    }
+    if (holder.length < 3) {
+      throw const AuthException('Titular inválido');
+    }
+
+    final publicKey = (dotenv.env['CULQI_PUBLIC_KEY'] ?? _culqiPublicKeyFallback).trim();
+    if (publicKey.isEmpty) {
+      throw const AuthException('Falta configurar CULQI_PUBLIC_KEY');
+    }
+
+    final tokenRes = await http.post(
+      Uri.parse('https://secure.culqi.com/v2/tokens'),
+      headers: {
+        'Authorization': 'Bearer $publicKey',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'card_number': cardNumberDigits,
+        'cvv': cvv,
+        'expiration_month': mm,
+        'expiration_year': yy < 100 ? 2000 + yy : yy,
+        'email': email,
+      }),
+    );
+
+    final tokenJson = _tryDecodeJson(tokenRes.body);
+    if (tokenRes.statusCode != 201) {
+      debugPrint('[Culqi][token] status=${tokenRes.statusCode} body=${tokenRes.body}');
+      final msg = tokenJson?['user_message']?.toString() ??
+          tokenJson?['merchant_message']?.toString() ??
+          tokenJson?['message']?.toString() ??
+          'Tarjeta rechazada. Verifica los datos e intenta de nuevo.';
+      throw AuthException(msg);
+    }
+    final token = tokenJson?['id']?.toString();
+    if (token == null || token.isEmpty) {
+      throw const AuthException('Token inválido');
+    }
+
+    final amountCents = seats.length * 1500;
+    String? chargeId;
+    try {
+      final chargeResp = await Supabase.instance.client.functions.invoke(
+        'culqi-charge',
+        body: {
+          'source_id': token,
+          'email': email,
+          'amount': amountCents,
+          'description': 'Reserva SDAG - ${seats.length} asiento(s)',
+        },
+      );
+      final chargeData = chargeResp.data;
+      chargeId = (chargeData is Map && chargeData['charge_id'] != null)
+          ? chargeData['charge_id'].toString()
+          : null;
+      if (chargeId == null || chargeId.isEmpty) {
+        debugPrint('[Culqi][charge] missing charge_id data=$chargeData');
+      }
+    } on FunctionException catch (e) {
+      debugPrint('[Culqi][charge] status=${e.status} reason=${e.reasonPhrase} details=${e.details}');
+      final details = e.details;
+      String msg = 'No se pudo procesar el pago.';
+      if (details is Map) {
+        final inner = details['details'];
+        if (inner is Map) {
+          msg = inner['user_message']?.toString() ?? inner['merchant_message']?.toString() ?? msg;
+        } else {
+          msg = details['error']?.toString() ?? msg;
+        }
+      }
+      throw AuthException(msg);
+    }
+    if (chargeId == null || chargeId.isEmpty) {
+      throw const AuthException('Cargo fallido');
+    }
+
+    final amountTotal = seats.length * 15.0;
+    final tripId = await _getOrCreateTripIdForDriver(
+      driverPlate: driver.plate,
+      direction: driver.direction,
+      amount: amountTotal,
+    );
+
+    final row = await Supabase.instance.client.from('reservations').insert({
+      'trip_id': tripId,
+      'passenger_profile_id': userId,
+      'pickup_point': pickup,
+      'seats': seats,
+      'status': 'activa',
+      'amount': amountTotal,
+      'vehiculo_partio': false,
+    }).select().single();
+
+    final reservaId = row['id']?.toString();
+    if (reservaId == null || reservaId.isEmpty) {
+      throw const AuthException('Reserva inválida');
+    }
+
+    await Supabase.instance.client.from('payments').insert({
+      'reservation_id': reservaId,
+      'amount': amountTotal,
+      'status': 'confirmado',
+      'receipt_number': chargeId,
+      'provider': 'culqi',
+    });
 
     try {
-      String? tripId;
-      if (selectedDriver != null) {
-        tripId = await _getOrCreateTripIdForDriver(
-          driverPlate: selectedDriver.plate,
-          direction: selectedDriver.direction,
-          amount: total,
-        );
-      }
+      await Supabase.instance.client.from('profiles').update({'has_active_reservation': true}).eq('id', userId);
+    } catch (_) {}
 
-      final row = await Supabase.instance.client.from('reservations').insert({
-        'trip_id': tripId,
-        'passenger_profile_id': accountId,
-        'pickup_point': pickup,
-        'seats': seats,
-        'status': 'activa',
-      }).select('id').single();
-      final id = row['id'];
-      final reservaId = id?.toString() ?? 'r_${DateTime.now().millisecondsSinceEpoch}';
-
-      try {
-        await Supabase.instance.client.from('payments').insert({
-          'reservation_id': reservaId,
-          'amount': total,
-          'status': 'pagado',
-          'provider': option.name,
-        });
-      } catch (_) {}
-
-      try {
-        await Supabase.instance.client
-            .from('profiles')
-            .update({'has_active_reservation': true})
-            .eq('id', accountId);
-      } catch (_) {}
-
-      return reservaId;
-    } catch (_) {
-      return 'r_${DateTime.now().millisecondsSinceEpoch}';
-    }
+    return reservaId;
   }
 
   Future<String?> _getOrCreateTripIdForDriver({
@@ -451,6 +592,55 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     } catch (_) {
       return null;
     }
+  }
+}
+
+class _CardNumberFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    final buffer = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      if (i != 0 && i % 4 == 0) buffer.write(' ');
+      buffer.write(digits[i]);
+    }
+    final text = buffer.toString();
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
+class _ExpiryFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    final text = digits.length <= 2
+        ? digits
+        : '${digits.substring(0, 2)}/${digits.substring(2, digits.length.clamp(2, 4))}';
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
+(int, int) _parseExpiry(String value) {
+  final digits = value.replaceAll(RegExp(r'\D'), '');
+  if (digits.length < 4) return (0, 0);
+  final mm = int.tryParse(digits.substring(0, 2)) ?? 0;
+  final yy = int.tryParse(digits.substring(2, 4)) ?? 0;
+  return (mm, yy);
+}
+
+Map<String, dynamic>? _tryDecodeJson(String raw) {
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) return decoded;
+    return null;
+  } catch (_) {
+    return null;
   }
 }
 

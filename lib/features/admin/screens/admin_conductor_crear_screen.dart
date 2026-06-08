@@ -22,6 +22,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
   late final TextEditingController _dniController;
   late final TextEditingController _telefonoController;
   late final TextEditingController _correoController;
+  late final TextEditingController _passwordController;
   late final TextEditingController _placaController;
   late final TextEditingController _comisionController;
 
@@ -29,6 +30,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
   int _capacidad = 8;
   double _comision = 15.0;
   bool _submitting = false;
+  bool _passwordObscure = true;
 
   @override
   void initState() {
@@ -38,6 +40,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
     _dniController = TextEditingController();
     _telefonoController = TextEditingController();
     _correoController = TextEditingController();
+    _passwordController = TextEditingController();
     _placaController = TextEditingController();
     _comisionController = TextEditingController(text: _comision.toStringAsFixed(1));
   }
@@ -49,6 +52,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
     _dniController.dispose();
     _telefonoController.dispose();
     _correoController.dispose();
+    _passwordController.dispose();
     _placaController.dispose();
     _comisionController.dispose();
     super.dispose();
@@ -72,9 +76,6 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
   Future<void> _submit() async {
     if (_submitting) return;
     setState(() => _submitting = true);
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    if (!mounted) return;
-    setState(() => _submitting = false);
 
     final nombreCompleto = '${_nombresController.text.trim()} ${_apellidosController.text.trim()}'.trim();
     final placa = _placaController.text.trim().toUpperCase();
@@ -105,20 +106,26 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
       ),
     );
     if (!mounted) return;
-    if (ok != true) return;
+    if (ok != true) {
+      setState(() => _submitting = false);
+      return;
+    }
 
     final controller = ref.read(adminConductoresProvider.notifier);
-    final result = controller.crearConductor(
+    final result = await controller.crearConductor(
       nombres: _nombresController.text,
       apellidos: _apellidosController.text,
       dni: _dniController.text,
       telefono: _telefonoController.text,
       correo: _correoController.text,
+      password: _passwordController.text,
       placa: _placaController.text,
       vehiculoTipo: _vehiculoTipo,
       capacidad: _capacidad,
       comisionPorcentaje: _comision,
     );
+    if (!mounted) return;
+    setState(() => _submitting = false);
 
     switch (result.type) {
       case AdminCrearConductorResultType.ok:
@@ -163,6 +170,8 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
     final telefonoValid = telefonoRaw.isEmpty || RegExp(r'^\d{9}$').hasMatch(telefonoRaw);
     final correo = _correoController.text.trim();
     final correoValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(correo);
+    final password = _passwordController.text;
+    final passwordValid = password.trim().length >= 8;
 
     final dniDuplicado = dniValid && state.listaConductores.any((e) => e.dni == dni);
     final placaDuplicada = placaValid && state.listaConductores.any((e) => e.placa.toUpperCase() == placa);
@@ -177,6 +186,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
         !dniDuplicado &&
         telefonoValid &&
         correoValid &&
+        passwordValid &&
         placaValid &&
         !placaDuplicada &&
         comisionOk;
@@ -247,6 +257,21 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
                     labelText: 'Correo electrónico',
                     hintText: 'correo@ejemplo.com',
                     errorText: correoValid ? null : (correo.isEmpty ? 'Obligatorio' : 'Correo inválido'),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                TextField(
+                  controller: _passwordController,
+                  onChanged: (_) => setState(() {}),
+                  obscureText: _passwordObscure,
+                  decoration: InputDecoration(
+                    labelText: 'Contraseña',
+                    hintText: 'Mínimo 8 caracteres',
+                    errorText: passwordValid ? null : (password.trim().isEmpty ? 'Obligatorio' : 'Mínimo 8 caracteres'),
+                    suffixIcon: IconButton(
+                      onPressed: () => setState(() => _passwordObscure = !_passwordObscure),
+                      icon: Icon(_passwordObscure ? Icons.visibility_rounded : Icons.visibility_off_rounded),
+                    ),
                   ),
                 ),
               ],

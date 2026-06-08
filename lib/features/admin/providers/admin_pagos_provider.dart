@@ -104,6 +104,7 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
           solicitudes.add(
             AdminPagoSolicitud(
               id: id,
+              profileId: profileId,
               conductor: c?.nombreCompleto ?? profileId,
               placa: c?.placa ?? '—',
               monto: monto,
@@ -151,30 +152,18 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
     final idx = state.solicitudesPendientes.indexWhere((e) => e.id == solicitudId);
     if (idx < 0) return;
     final req = state.solicitudesPendientes[idx];
-    final remaining = [...state.solicitudesPendientes]..removeAt(idx);
-
-    final confirmed = AdminPagoHistorial(
-      id: 'hist-${DateTime.now().millisecondsSinceEpoch}',
-      conductor: req.conductor,
-      placa: req.placa,
-      monto: req.monto,
-      porcentaje: req.porcentaje,
-      totalRecaudado: req.totalRecaudado,
-      confirmadoAt: DateTime.now(),
-      estado: 'Confirmado',
-      detalleViajes: req.detalleViajes,
-    );
-
-    state = state.copyWith(
-      solicitudesPendientes: remaining,
-      historialPagos: [confirmed, ...state.historialPagos],
-    );
-
     try {
       await Supabase.instance.client
           .from('driver_payout_requests')
-          .update({'status': 'confirmado_admin'})
+          .update({'status': 'confirmado'})
           .eq('id', solicitudId);
+      await Supabase.instance.client.from('driver_payouts').insert({
+        'profile_id': req.profileId,
+        'gross_amount': req.totalRecaudado,
+        'commission_amount': req.monto,
+        'status': 'Confirmado',
+      });
+      await _loadFromSupabase();
     } catch (_) {}
   }
 
@@ -210,6 +199,7 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
       final id = row['id']?.toString() ?? 'sol-${now.millisecondsSinceEpoch}';
       final solicitud = AdminPagoSolicitud(
         id: id,
+        profileId: selected.id,
         conductor: selected.nombreCompleto,
         placa: selected.placa,
         monto: double.parse(monto.toStringAsFixed(0)),
@@ -243,6 +233,7 @@ final adminPagosProvider = StateNotifierProvider<AdminPagosController, AdminPago
 class AdminPagoSolicitud {
   const AdminPagoSolicitud({
     required this.id,
+    required this.profileId,
     required this.conductor,
     required this.placa,
     required this.monto,
@@ -253,6 +244,7 @@ class AdminPagoSolicitud {
   });
 
   final String id;
+  final String profileId;
   final String conductor;
   final String placa;
   final double monto;
