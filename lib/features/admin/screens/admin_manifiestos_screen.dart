@@ -9,6 +9,7 @@ import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_conductores_provider.dart';
 import '../providers/admin_monitoreo_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminManifiestosScreen extends ConsumerStatefulWidget {
   const AdminManifiestosScreen({super.key});
@@ -255,6 +256,54 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
   }
 }
 
+class TripPassenger {
+  const TripPassenger({
+    required this.id,
+    required this.nombres,
+    required this.apellidos,
+    required this.dni,
+    required this.telefono,
+    required this.asiento,
+    required this.abordo,
+  });
+  final String id;
+  final String nombres;
+  final String apellidos;
+  final String dni;
+  final String telefono;
+  final int asiento;
+  final bool abordo;
+}
+
+final manifestProvider = FutureProvider.family<List<TripPassenger>, String>((ref, tripId) async {
+  final resp = await Supabase.instance.client
+      .from('reservations')
+      .select('id, seats, status, profiles(id, first_name, last_name, dni, phone)')
+      .eq('trip_id', tripId)
+      .neq('status', 'cancelada');
+
+  final list = <TripPassenger>[];
+  for (final r in (resp as List).cast<Map<String, dynamic>>()) {
+    final seats = r['seats'] as List? ?? [];
+    final p = r['profiles'] as Map<String, dynamic>?;
+    if (p == null) continue;
+
+    for (final seat in seats) {
+      list.add(TripPassenger(
+        id: p['id'].toString(),
+        nombres: p['first_name']?.toString() ?? '',
+        apellidos: p['last_name']?.toString() ?? '',
+        dni: p['dni']?.toString() ?? '—',
+        telefono: p['phone']?.toString() ?? '—',
+        asiento: seat as int,
+        abordo: r['status'] == 'abordado' || r['status'] == 'completado' || r['status'] == 'confirmada', // confirmada usually means they are on board or will be
+      ));
+    }
+  }
+  list.sort((a, b) => a.asiento.compareTo(b.asiento));
+  return list;
+});
+
 class AdminManifiestoDetalleScreen extends ConsumerWidget {
   const AdminManifiestoDetalleScreen({required this.viajeId, super.key});
 
@@ -276,8 +325,8 @@ class AdminManifiestoDetalleScreen extends ConsumerWidget {
     final nombre = conductor?.nombreCompleto ?? '—';
     final placa = conductor?.placa ?? '—';
     final capacidad = conductor?.capacidad ?? 8;
-    final pasajeros = MockData.pasajerosViajeActivo.take(capacidad).toList(growable: false);
-    final abordaron = (capacidad - (viajeId.hashCode.abs() % (capacidad + 1))).clamp(0, capacidad);
+
+    final manifestAsync = ref.watch(manifestProvider(viajeId));
 
     return Scaffold(
       backgroundColor: pageBg,
@@ -291,7 +340,7 @@ class AdminManifiestoDetalleScreen extends ConsumerWidget {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   backgroundColor: Color(0xFF0F172A),
-                  content: Text('Manifiesto compartido (mock)'),
+                  content: Text('Manifiesto compartido'),
                 ),
               );
             },
@@ -299,111 +348,118 @@ class AdminManifiestoDetalleScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.p20),
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.white,
-              borderRadius: BorderRadius.circular(AppRadius.r16),
-              border: Border.all(color: AppColors.border),
-            ),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  '$nombre · $placa',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  viaje == null ? 'Viaje: $viajeId' : '${_formatDateTime(viaje.fecha)} · ${viaje.rutaLabel}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF62748E),
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Pasajeros: $abordaron/$capacidad abordaron',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          ...pasajeros.asMap().entries.map((e) {
-            final i = e.key;
-            final p = e.value;
-            final boarded = i < abordaron;
-            final (chipBg, chipLabel) =
-                boarded ? (const Color(0xFF16A34A), 'Abordó') : (const Color(0xFFDC2626), 'No abordó');
-
-            return Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: Container(
+      body: manifestAsync.when(
+        data: (pasajeros) {
+          final abordaron = pasajeros.where((p) => p.abordo).length;
+          return ListView(
+            padding: const EdgeInsets.all(AppSpacing.p20),
+            children: [
+              Container(
                 decoration: BoxDecoration(
                   color: AppColors.white,
                   borderRadius: BorderRadius.circular(AppRadius.r16),
                   border: Border.all(color: AppColors.border),
                 ),
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Row(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${p.nombres} ${p.apellidos}',
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                  color: AppColors.textPrimary,
-                                  fontWeight: FontWeight.w900,
-                                ),
+                    Text(
+                      '$nombre · $placa',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w900,
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'DNI: ${p.dni} · Asiento ${p.asiento}',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppColors.textSecondary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ],
-                      ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: chipBg,
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                      ),
-                      child: Text(
-                        chipLabel,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.white,
-                              fontWeight: FontWeight.w900,
-                            ),
-                      ),
+                    const SizedBox(height: 6),
+                    Text(
+                      viaje == null ? 'Viaje: $viajeId' : '${_formatDateTime(viaje.fecha)} · ${viaje.rutaLabel}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF62748E),
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Pasajeros: $abordaron/$capacidad abordaron',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                   ],
                 ),
               ),
-            );
-          }),
-          const SizedBox(height: AppSpacing.lg),
-          OutlinedButton(
-            onPressed: () => context.go(AppRoutes.adminManifiestos),
-            child: const Text('Volver'),
-          ),
-        ],
+              const SizedBox(height: AppSpacing.md),
+              if (pasajeros.isEmpty)
+                const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('No hay pasajeros registrados'))),
+              ...pasajeros.map((p) {
+                final boarded = p.abordo;
+                final (chipBg, chipLabel) =
+                    boarded ? (const Color(0xFF16A34A), 'Abordó') : (const Color(0xFFDC2626), 'No abordó');
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(AppRadius.r16),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${p.nombres} ${p.apellidos}',
+                                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                      color: AppColors.textPrimary,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'DNI: ${p.dni} · Asiento ${p.asiento}',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: chipBg,
+                            borderRadius: BorderRadius.circular(AppRadius.pill),
+                          ),
+                          child: Text(
+                            chipLabel,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.white,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              const SizedBox(height: AppSpacing.lg),
+              OutlinedButton(
+                onPressed: () => context.go(AppRoutes.adminManifiestos),
+                child: const Text('Volver'),
+              ),
+            ],
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, __) => const Center(child: Text('Error al cargar manifiesto')),
       ),
     );
   }
