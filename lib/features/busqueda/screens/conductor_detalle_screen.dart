@@ -9,7 +9,8 @@ import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../../reserva/providers/reserva_provider.dart';
-
+import '../../../data/models/route_polyline_model.dart';
+import '../../../shared/widgets/mapa_ruta_widget.dart';
 class ConductorDetalleScreen extends ConsumerWidget {
   const ConductorDetalleScreen({
     required this.driverId,
@@ -165,7 +166,16 @@ class ConductorDetalleScreen extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(height: AppSpacing.lg),
-                      _RoutePreview(routeLabel: driver.routeLabel),
+                      if (driver.routePolyline != null)
+                        SizedBox(
+                          height: 190,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(AppRadius.r16),
+                            child: MapaRutaWidget(routePolyline: driver.routePolyline!),
+                          ),
+                        )
+                      else
+                        _RoutePreview(routeLabel: driver.routeLabel),
                       const SizedBox(height: AppSpacing.lg),
                       FilledButton(
                         style: FilledButton.styleFrom(
@@ -232,7 +242,8 @@ final driverTripDetailProvider =
           routes (
             name,
             from_label,
-            to_label
+            to_label,
+            polyline
           )
         ''')
         .eq('id', lookup.tripId!)
@@ -260,7 +271,8 @@ final driverTripDetailProvider =
           routes (
             name,
             from_label,
-            to_label
+            to_label,
+            polyline
           )
         ''')
         .eq('driver_id', lookup.driverId!)
@@ -291,6 +303,13 @@ final driverTripDetailProvider =
   final routeFrom = routeMap['from_label']?.toString().trim() ?? '';
   final routeTo = routeMap['to_label']?.toString().trim() ?? '';
 
+  final polylineJson = routeMap['polyline'];
+  RoutePolyline? routePolyline;
+  if (polylineJson != null) {
+    routePolyline = RoutePolyline.fromJson(
+      Map<String, dynamic>.from(polylineJson as Map),
+    );
+  }
   return ReservaDriverInfo(
     tripId: row['id'].toString(),
     driverId: driverMap['id'].toString(),
@@ -304,6 +323,7 @@ final driverTripDetailProvider =
     rating: (driverMap['rating_avg'] as num?)?.toDouble() ?? 0,
     ratingCount: (driverMap['rating_count'] as int?) ?? 0,
     status: driverMap['estado']?.toString() ?? (row['status']?.toString() ?? ''),
+    routePolyline: routePolyline,
   );
 });
 

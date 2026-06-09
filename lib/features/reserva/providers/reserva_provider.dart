@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../data/models/route_polyline_model.dart';
 
 class ReservaAcompanante {
   const ReservaAcompanante({
@@ -27,6 +28,7 @@ class ReservaDriverInfo {
     required this.rating,
     required this.ratingCount,
     required this.status,
+    this.routePolyline,
   });
 
   final String tripId;
@@ -39,6 +41,7 @@ class ReservaDriverInfo {
   final double rating;
   final int ratingCount;
   final String status;
+  final RoutePolyline? routePolyline;
 }
 
 class ReservaState {
