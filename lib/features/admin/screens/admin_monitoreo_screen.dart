@@ -45,10 +45,12 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
   }
 
   Future<void> _loadIcons() async {
+    print('>>> Cargando íconos...');
     final disponible = await _combiMarker(const Color(0xFF16A34A));
     final enRuta = await _combiMarker(const Color(0xFF2563EB));
     final activo = await _combiMarker(const Color(0xFFF97316));
     final inactivo = await _combiMarker(const Color(0xFF94A3B8));
+    print('>>> Íconos cargados correctamente');
     if (!mounted) return;
     setState(() {
       _iconDisponible = disponible;
@@ -58,7 +60,6 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
       _iconsLoaded = true;
     });
   }
-
   BitmapDescriptor _iconFor(AdminVehiculoEstado estado) {
     if (!_iconsLoaded) {
       return switch (estado) {
