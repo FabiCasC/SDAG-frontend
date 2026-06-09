@@ -6,7 +6,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
-import '../../../shared/widgets/reusable_ui_components.dart' hide SeatMapWidget;
+import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
 import 'seat_map_screen.dart';
 
@@ -42,11 +42,11 @@ class ReservaResumenScreen extends ConsumerWidget {
           children: [
             AbsorbPointer(
               child: SeatMapWidget(
-                capacidad: driver.totalSeats,
-                asientosOcupados: occupiedSeats,
-                asientosSeleccionados: seats,
-                onSeatTapped: (_) {},
-              ),
+  seatCount: driver.totalSeats,
+  occupiedSeats: Set<int>.from(occupiedSeats),
+  selectedSeats: Set<int>.from(seats),
+  onSeatTap: (_) {},
+),
             ),
             const SizedBox(height: AppSpacing.lg),
             DecoratedBox(
