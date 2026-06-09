@@ -29,6 +29,7 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
 
   /// Indica si se está cargando datos
   bool _cargando = false;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -42,11 +43,22 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
   /// Consulta Supabase y actualiza la lista de viajes
   Future<void> _cargarViajes(String direction) async {
     setState(() => _cargando = true);
-    final viajes = await _service.buscarViajes(direction);
-    setState(() {
-      _viajes = viajes;
-      _cargando = false;
-    });
+    try {
+      final viajes = await _service.buscarViajes(direction);
+      if (!mounted) return;
+      setState(() {
+        _viajes = viajes;
+        _errorMessage = null;
+        _cargando = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _viajes = [];
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _cargando = false;
+      });
+    }
   }
 
   @override
@@ -77,6 +89,7 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
                 setState(() {
                   _direction = value;
                   _viajes = [];
+                  _errorMessage = null;
                 });
                 _cargarViajes(value);
               },
@@ -94,6 +107,8 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
                   child: CircularProgressIndicator(),
                 ),
               )
+            else if (_errorMessage != null)
+              _ErrorDriversState(message: _errorMessage!)
             else if (_viajes.isEmpty)
               const _EmptyDriversState()
             else
@@ -103,7 +118,7 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
                   child: _DriverCard(
                     viaje: v,
                     onTap: () => context.push(
-                      '${AppRoutes.passengerDriverDetail}?id=${v.driverId}',
+                      '${AppRoutes.passengerDriverDetail}?id=${v.driverId}&tripId=${v.tripId}',
                     ),
                   ),
                 ),
@@ -200,6 +215,7 @@ class _DriverCard extends StatelessWidget {
     final theme = Theme.of(context);
     final initials = _initials(viaje.driverName);
     final (seatBg, seatFg, seatLabel) = _seatBadge(viaje.availableSeats);
+    final (statusBg, statusFg, statusLabel) = _statusBadge(viaje.status);
 
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.r16),
@@ -271,6 +287,11 @@ class _DriverCard extends StatelessWidget {
                           fg: seatFg,
                           label: seatLabel,
                         ),
+                        _Badge(
+                          bg: statusBg,
+                          fg: statusFg,
+                          label: statusLabel,
+                        ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.sm),
@@ -283,7 +304,7 @@ class _DriverCard extends StatelessWidget {
                         ),
                         const SizedBox(width: AppSpacing.xs),
                         Text(
-                          '${viaje.totalSeats} asientos',
+                          '${viaje.totalSeats} asientos · ${viaje.vehicleType}',
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: AppColors.textSecondary,
                           ),
@@ -338,6 +359,20 @@ class _DriverCard extends StatelessWidget {
       return (AppColors.seatWarnBg, AppColors.warning, '$available disponibles');
     }
     return (AppColors.seatBadBg, AppColors.error, '1 disponible');
+  }
+
+  static (Color bg, Color fg, String label) _statusBadge(String status) {
+    final normalized = status.trim().toLowerCase();
+    switch (normalized) {
+      case 'ocupado':
+        return (AppColors.seatWarnBg, AppColors.warning, 'Ocupado');
+      case 'en_ruta':
+      case 'en ruta':
+        return (AppColors.infoSurface, AppColors.primaryBlue, 'En ruta');
+      case 'disponible':
+      default:
+        return (AppColors.seatOkBg, AppColors.success, 'Disponible');
+    }
   }
 }
 
@@ -398,6 +433,48 @@ class _EmptyDriversState extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Text(
               'Intenta cambiar la dirección o vuelve a intentarlo más tarde.',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorDriversState extends StatelessWidget {
+  const _ErrorDriversState({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.xxl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 56,
+              color: AppColors.error,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'No se pudo cargar la busqueda',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: AppColors.textPrimary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              message,
               style: theme.textTheme.bodyLarge?.copyWith(
                 color: AppColors.textSecondary,
               ),

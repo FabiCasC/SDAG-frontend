@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 
-class HistorialScreen extends StatelessWidget {
+class HistorialScreen extends ConsumerWidget {
   const HistorialScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final trips = MockData.tripHistory;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tripsAsync = ref.watch(passengerTripHistoryProvider);
 
     return Column(
       children: [
@@ -29,22 +30,27 @@ class HistorialScreen extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: trips.isEmpty
-              ? const _EmptyHistory()
-              : ListView.builder(
-                  padding: const EdgeInsets.all(AppSpacing.p20),
-                  itemCount: trips.length,
-                  itemBuilder: (context, index) {
-                    final t = trips[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: _TripCard(
-                        trip: t,
-                        onTap: () => context.push('${AppRoutes.passengerTripDetail}?id=${t.id}'),
-                      ),
-                    );
-                  },
-                ),
+          child: tripsAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _HistoryError(message: error.toString()),
+            data: (trips) {
+              if (trips.isEmpty) return const _EmptyHistory();
+              return ListView.builder(
+                padding: const EdgeInsets.all(AppSpacing.p20),
+                itemCount: trips.length,
+                itemBuilder: (context, index) {
+                  final t = trips[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _TripCard(
+                      trip: t,
+                      onTap: () => context.push('${AppRoutes.passengerTripDetail}?id=${t.id}'),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ],
     );
@@ -54,17 +60,13 @@ class HistorialScreen extends StatelessWidget {
 class _TripCard extends StatelessWidget {
   const _TripCard({required this.trip, required this.onTap});
 
-  final MockTripHistoryItem trip;
+  final _PassengerTripHistoryItem trip;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final completed = trip.status == MockTripStatus.completado;
-
-    final (chipBg, chipFg, chipLabel, icon) = completed
-        ? (AppColors.seatOkBg, AppColors.success, 'Completado', Icons.check_circle_rounded)
-        : (AppColors.seatBadBg, AppColors.error, 'Cancelado', Icons.cancel_rounded);
+    final (chipBg, chipFg, chipLabel, icon) = _statusVisual(trip.status);
 
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.r16),
@@ -126,7 +128,7 @@ class _TripCard extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.xs),
               Text(
-                '${trip.driverName} · ${trip.plate}',
+                '${trip.driverName} · ${trip.plate} · Asientos ${trip.seatsLabel}',
                 style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
               ),
               const SizedBox(height: AppSpacing.sm),
@@ -141,24 +143,10 @@ class _TripCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (trip.ratingStars == null)
-                    Text(
-                      'Sin calificar',
-                      style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-                    )
-                  else
-                    Row(
-                      children: [
-                        ...List.generate(
-                          5,
-                          (i) => Icon(
-                            Icons.star_rounded,
-                            size: 18,
-                            color: i < trip.ratingStars! ? AppColors.ratingStar : AppColors.border,
-                          ),
-                        ),
-                      ],
-                    ),
+                  Text(
+                    trip.statusLabel,
+                    style: theme.textTheme.bodyMedium?.copyWith(color: chipFg),
+                  ),
                 ],
               ),
             ],
@@ -166,6 +154,116 @@ class _TripCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+final passengerTripHistoryProvider =
+    FutureProvider.autoDispose<List<_PassengerTripHistoryItem>>((ref) async {
+  final userId = Supabase.instance.client.auth.currentUser?.id;
+  if (userId == null) return const <_PassengerTripHistoryItem>[];
+
+  final reservas = await Supabase.instance.client
+      .from('reservations')
+      .select('*, trips(*, routes(*), drivers(*, profiles(*)))')
+      .eq('passenger_profile_id', userId)
+      .order('created_at', ascending: false);
+
+  return (reservas as List)
+      .cast<Map<String, dynamic>>()
+      .map(_PassengerTripHistoryItem.fromMap)
+      .toList();
+});
+
+class _PassengerTripHistoryItem {
+  const _PassengerTripHistoryItem({
+    required this.id,
+    required this.dateLabel,
+    required this.routeLabel,
+    required this.driverName,
+    required this.plate,
+    required this.seats,
+    required this.amount,
+    required this.status,
+  });
+
+  final String id;
+  final String dateLabel;
+  final String routeLabel;
+  final String driverName;
+  final String plate;
+  final List<int> seats;
+  final double amount;
+  final String status;
+
+  String get seatsLabel => seats.isEmpty ? '-' : seats.map((seat) => '#$seat').join(', ');
+
+  String get statusLabel {
+    switch (status.toLowerCase()) {
+      case 'cancelada':
+        return 'Cancelado';
+      case 'completada':
+      case 'completado':
+        return 'Completado';
+      case 'activa':
+      default:
+        return 'Activo';
+    }
+  }
+
+  factory _PassengerTripHistoryItem.fromMap(Map<String, dynamic> map) {
+    final trip = map['trips'] is Map ? Map<String, dynamic>.from(map['trips'] as Map) : <String, dynamic>{};
+    final route = trip['routes'] is Map ? Map<String, dynamic>.from(trip['routes'] as Map) : <String, dynamic>{};
+    final driver = trip['drivers'] is Map ? Map<String, dynamic>.from(trip['drivers'] as Map) : <String, dynamic>{};
+    final profile = driver['profiles'] is Map ? Map<String, dynamic>.from(driver['profiles'] as Map) : <String, dynamic>{};
+
+    final firstName = profile['first_name']?.toString().trim() ?? '';
+    final lastName = profile['last_name']?.toString().trim() ?? '';
+    final fullName = '$firstName $lastName'.trim();
+    final routeName = route['name']?.toString().trim();
+    final fromLabel = route['from_label']?.toString().trim() ?? '';
+    final toLabel = route['to_label']?.toString().trim() ?? '';
+    final createdAtRaw =
+        trip['scheduled_departure_at']?.toString() ?? map['created_at']?.toString() ?? '';
+
+    return _PassengerTripHistoryItem(
+      id: map['id'].toString(),
+      dateLabel: _formatDate(createdAtRaw),
+      routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$fromLabel → $toLabel',
+      driverName: (profile['name']?.toString().trim().isNotEmpty ?? false)
+          ? profile['name'].toString().trim()
+          : (fullName.isNotEmpty ? fullName : 'Conductor sin nombre'),
+      plate: driver['plate']?.toString() ?? 'Sin placa',
+      seats: ((map['seats'] as List?) ?? const <dynamic>[])
+          .whereType<int>()
+          .toList(),
+      amount: (map['amount'] as num?)?.toDouble() ?? 0,
+      status: map['status']?.toString() ?? '',
+    );
+  }
+}
+
+String _formatDate(String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return 'Fecha no disponible';
+  final local = parsed.toLocal();
+  final dd = local.day.toString().padLeft(2, '0');
+  final mm = local.month.toString().padLeft(2, '0');
+  final yyyy = local.year.toString();
+  final hh = local.hour.toString().padLeft(2, '0');
+  final min = local.minute.toString().padLeft(2, '0');
+  return '$dd/$mm/$yyyy $hh:$min';
+}
+
+(Color, Color, String, IconData) _statusVisual(String status) {
+  switch (status.toLowerCase()) {
+    case 'cancelada':
+      return (AppColors.seatBadBg, AppColors.error, 'Cancelado', Icons.cancel_rounded);
+    case 'completada':
+    case 'completado':
+      return (AppColors.seatOkBg, AppColors.success, 'Completado', Icons.check_circle_rounded);
+    case 'activa':
+    default:
+      return (AppColors.infoSurface, AppColors.primaryBlue, 'Activo', Icons.directions_bus_rounded);
   }
 }
 
@@ -194,6 +292,43 @@ class _EmptyHistory extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Text(
               'Cuando completes tu primer viaje, aparecerá aquí.',
+              style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HistoryError extends StatelessWidget {
+  const _HistoryError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.p20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded, size: 56, color: AppColors.error),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'No se pudo cargar tu historial',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              message,
               style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
               textAlign: TextAlign.center,
             ),

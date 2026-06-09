@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 
-class NoticiasScreen extends StatelessWidget {
+class NoticiasScreen extends ConsumerWidget {
   const NoticiasScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final items = MockData.newsPosts;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final noticiasAsync = ref.watch(passengerNewsPostsProvider);
 
     return Column(
       children: [
@@ -29,24 +30,29 @@ class NoticiasScreen extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: items.isEmpty
-              ? const _EmptyNews()
-              : ListView.builder(
-                  padding: const EdgeInsets.all(AppSpacing.p20),
-                  itemCount: items.length,
-                  itemBuilder: (context, index) {
-                    final n = items[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: _NewsCard(
-                        news: n,
-                        onTap: () => context.push(
-                          '${AppRoutes.passengerNewsDetail}?id=${n.id}',
-                        ),
+          child: noticiasAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _NewsError(message: error.toString()),
+            data: (items) {
+              if (items.isEmpty) return const _EmptyNews();
+              return ListView.builder(
+                padding: const EdgeInsets.all(AppSpacing.p20),
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final n = items[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _NewsCard(
+                      news: n,
+                      onTap: () => context.push(
+                        '${AppRoutes.passengerNewsDetail}?id=${n.id}',
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ],
     );
@@ -56,15 +62,15 @@ class NoticiasScreen extends StatelessWidget {
 class _NewsCard extends StatelessWidget {
   const _NewsCard({required this.news, required this.onTap});
 
-  final MockNewsPost news;
+  final _PassengerNewsPost news;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final (badgeBg, badgeFg, badgeLabel) = switch (news.type) {
-      MockNewsType.incidencia => (AppColors.seatBadBg, AppColors.error, 'Incidencia'),
-      MockNewsType.novedad => (AppColors.infoSurface, AppColors.primaryBlue, 'Novedad'),
+      'incidencia' => (AppColors.seatBadBg, AppColors.error, 'Incidencia'),
+      _ => (AppColors.infoSurface, AppColors.primaryBlue, 'Novedad'),
     };
 
     return InkWell(
@@ -174,6 +180,63 @@ class _NewsCard extends StatelessWidget {
   }
 }
 
+final passengerNewsPostsProvider = FutureProvider.autoDispose<List<_PassengerNewsPost>>((ref) async {
+  final noticias = await Supabase.instance.client
+      .from('news_posts')
+      .select('*, profiles(name)')
+      .order('created_at', ascending: false);
+
+  return (noticias as List)
+      .cast<Map<String, dynamic>>()
+      .map(_PassengerNewsPost.fromMap)
+      .toList();
+});
+
+class _PassengerNewsPost {
+  const _PassengerNewsPost({
+    required this.id,
+    required this.type,
+    required this.title,
+    required this.text,
+    required this.driverName,
+    required this.dateLabel,
+  });
+
+  final String id;
+  final String type;
+  final String title;
+  final String text;
+  final String driverName;
+  final String dateLabel;
+
+  factory _PassengerNewsPost.fromMap(Map<String, dynamic> map) {
+    final profile = map['profiles'] is Map ? Map<String, dynamic>.from(map['profiles'] as Map) : <String, dynamic>{};
+    final createdAt = map['created_at']?.toString() ?? '';
+    return _PassengerNewsPost(
+      id: map['id'].toString(),
+      type: map['type']?.toString() ?? 'novedad',
+      title: map['title']?.toString() ?? 'Sin titulo',
+      text: (map['text'] ?? map['body'] ?? '').toString(),
+      driverName: profile['name']?.toString().trim().isNotEmpty == true
+          ? profile['name'].toString().trim()
+          : (map['driver_name']?.toString().trim().isNotEmpty == true
+              ? map['driver_name'].toString().trim()
+              : 'SDAG'),
+      dateLabel: _formatNewsDate(createdAt),
+    );
+  }
+}
+
+String _formatNewsDate(String raw) {
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) return 'Fecha no disponible';
+  final local = parsed.toLocal();
+  final dd = local.day.toString().padLeft(2, '0');
+  final mm = local.month.toString().padLeft(2, '0');
+  final yyyy = local.year.toString();
+  return '$dd/$mm/$yyyy';
+}
+
 class _EmptyNews extends StatelessWidget {
   const _EmptyNews();
 
@@ -194,6 +257,43 @@ class _EmptyNews extends StatelessWidget {
                 color: AppColors.textPrimary,
                 fontWeight: FontWeight.w700,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NewsError extends StatelessWidget {
+  const _NewsError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.p20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded, size: 56, color: AppColors.error),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'No se pudieron cargar las noticias',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              message,
+              style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
+              textAlign: TextAlign.center,
             ),
           ],
         ),

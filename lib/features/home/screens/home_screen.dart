@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../features/viaje/screens/historial_screen.dart';
 import '../../../features/noticias/screens/noticias_screen.dart';
 import '../../../features/perfil/screens/perfil_screen.dart';
-import '../../../features/reserva/providers/favorite_pickups_provider.dart';
 import '../../../features/reserva/providers/reserva_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
@@ -61,12 +60,50 @@ class HomeScreen extends ConsumerWidget {
         ? account!.name!.trim()
         : fullName.isNotEmpty
             ? fullName
-            : MockData.passengerName;
+            : 'Pasajero';
     final reserva = ref.watch(reservaProvider);
     final hasActiveReservation = reserva.conductorSeleccionado != null &&
         reserva.reservaId != null &&
         reserva.asientosSeleccionados.isNotEmpty;
-    final favoritePickups = ref.watch(favoritePickupsProvider);
+
+    Widget currentTab() {
+      switch (index) {
+        case 1:
+          return const HistorialScreen();
+        case 2:
+          return const NoticiasScreen();
+        case 3:
+          return const PerfilScreen();
+        case 0:
+        default:
+          final homeAsync = ref.watch(passengerHomeDataProvider);
+          return homeAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _ScreenMessage(
+              title: 'No se pudo cargar el inicio',
+              message: error.toString(),
+            ),
+            data: (homeData) => _PassengerHomeTab(
+              name: name,
+              hasActiveReservation: hasActiveReservation,
+              routes: homeData.routes,
+              preferredPickup: homeData.preferredPickup,
+              latestNews: homeData.latestNews,
+              onSelectRoute: (direction) {
+                context.push(
+                  '${AppRoutes.passengerSearch}?direction=$direction',
+                );
+              },
+              onSelectFavoritePickup: (value) {
+                ref.read(reservaProvider.notifier).setPickup(value);
+                AppSnackbars.success(context, 'Punto de recojo seleccionado');
+              },
+              onOpenNews: () => context.go(AppRoutes.passengerNews),
+              onOpenReservationDetail: () => context.go(AppRoutes.passengerReservaActiva),
+            ),
+          );
+      }
+    }
 
     return AppScaffold(
       title: 'RutasChosica',
@@ -77,64 +114,7 @@ class HomeScreen extends ConsumerWidget {
         currentIndex: index,
         onTap: (value) => context.go(_routeFromIndex(value)),
       ),
-      body: IndexedStack(
-        index: index,
-        children: [
-          _PassengerHomeTab(
-            name: name,
-            hasActiveReservation: hasActiveReservation,
-            favoritePickups: favoritePickups,
-            onSelectRoute: (direction) {
-              context.push(
-                '${AppRoutes.passengerSearch}?direction=$direction',
-              );
-            },
-            onSelectFavoritePickup: (value) {
-              ref.read(reservaProvider.notifier).setPickup(value);
-              AppSnackbars.success(context, 'Punto de recojo seleccionado');
-            },
-            onAddFavoritePickup: () async {
-              final controller = TextEditingController();
-              final result = await showDialog<String>(
-                context: context,
-                builder: (context) {
-                  return AlertDialog(
-                    title: const Text('Agregar punto favorito'),
-                    content: TextField(
-                      controller: controller,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Punto de recojo',
-                        hintText: 'Ej: Cruce con Av. Javier Prado...',
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Cancelar'),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.of(context).pop(controller.text),
-                        child: const Text('Guardar'),
-                      ),
-                    ],
-                  );
-                },
-              );
-              final value = result?.trim();
-              if (value == null || value.length < 3) return;
-              await ref.read(favoritePickupsProvider.notifier).add(value);
-              if (!context.mounted) return;
-              AppSnackbars.success(context, 'Punto favorito guardado');
-            },
-            onOpenNews: () => context.go(AppRoutes.passengerNews),
-            onOpenReservationDetail: () => context.go(AppRoutes.passengerReservaActiva),
-          ),
-          const HistorialScreen(),
-          const NoticiasScreen(),
-          const PerfilScreen(),
-        ],
-      ),
+      body: currentTab(),
     );
   }
 }
@@ -191,20 +171,22 @@ class _PassengerHomeTab extends StatelessWidget {
   const _PassengerHomeTab({
     required this.name,
     required this.hasActiveReservation,
-    required this.favoritePickups,
+    required this.routes,
+    required this.preferredPickup,
+    required this.latestNews,
     required this.onSelectRoute,
     required this.onSelectFavoritePickup,
-    required this.onAddFavoritePickup,
     required this.onOpenNews,
     required this.onOpenReservationDetail,
   });
 
   final String name;
   final bool hasActiveReservation;
-  final List<String> favoritePickups;
+  final List<_HomeRouteItem> routes;
+  final String? preferredPickup;
+  final List<_HomeNewsItem> latestNews;
   final ValueChanged<String> onSelectRoute;
   final ValueChanged<String> onSelectFavoritePickup;
-  final VoidCallback onAddFavoritePickup;
   final VoidCallback onOpenNews;
   final VoidCallback onOpenReservationDetail;
 
@@ -255,71 +237,60 @@ class _PassengerHomeTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
-              _RouteCard(
-                title: 'San Isidro → Chosica',
-                subtitle: 'Vía La Priale o Javier Prado',
-                icon: Icons.route_rounded,
-                onTap: () => onSelectRoute('si_cho'),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              _RouteCard(
-                title: 'Chosica → San Isidro',
-                subtitle: 'Múltiples rutas disponibles',
-                icon: Icons.route_rounded,
-                onTap: () => onSelectRoute('cho_si'),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Destinos favoritos',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: onAddFavoritePickup,
-                    child: const Text('Agregar'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              if (favoritePickups.isEmpty)
+              if (routes.isEmpty)
                 Text(
-                  'Aún no tienes puntos guardados.',
+                  'No hay rutas disponibles por el momento.',
                   style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
                 )
               else
-                ...favoritePickups.map(
-                  (p) => Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(AppRadius.r16),
-                      onTap: () => onSelectFavoritePickup(p),
-                      child: AppCard(
-                        child: Padding(
-                          padding: const EdgeInsets.all(AppSpacing.md),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.place_rounded, color: AppColors.primaryBlue),
-                              const SizedBox(width: AppSpacing.md),
-                              Expanded(
-                                child: Text(
-                                  p,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodyLarge?.copyWith(
-                                    color: AppColors.textPrimary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
+                ...routes.map(
+                  (route) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _RouteCard(
+                      title: route.title,
+                      subtitle: route.subtitle,
+                      icon: Icons.route_rounded,
+                      onTap: () => onSelectRoute(route.direction),
+                    ),
+                  ),
+                ),
+              const SizedBox(height: AppSpacing.lg),
+              Text(
+                'Destinos favoritos',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              if (preferredPickup == null || preferredPickup!.trim().isEmpty)
+                Text(
+                  'No tienes un punto de recojo preferido. Configuralo en tu perfil.',
+                  style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
+                )
+              else
+                InkWell(
+                  borderRadius: BorderRadius.circular(AppRadius.r16),
+                  onTap: () => onSelectFavoritePickup(preferredPickup!.trim()),
+                  child: AppCard(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.place_rounded, color: AppColors.primaryBlue),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Text(
+                              preferredPickup!.trim(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: AppColors.textPrimary,
+                                fontWeight: FontWeight.w600,
                               ),
-                              const Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
-                            ],
+                            ),
                           ),
-                        ),
+                          const Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
+                        ],
                       ),
                     ),
                   ),
@@ -345,20 +316,168 @@ class _PassengerHomeTab extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: AppSpacing.md),
-              ...MockData.latestNews.take(2).map(
-                    (n) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                      child: _NewsCard(
-                        title: n.title,
-                        subtitle: n.subtitle,
-                        onTap: onOpenNews,
-                      ),
+              if (latestNews.isEmpty)
+                Text(
+                  'No hay noticias publicadas todavía.',
+                  style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
+                )
+              else
+                ...latestNews.map(
+                  (n) => Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _NewsCard(
+                      title: n.title,
+                      subtitle: n.subtitle,
+                      onTap: onOpenNews,
                     ),
                   ),
+                ),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+final passengerHomeDataProvider = FutureProvider.autoDispose<_PassengerHomeData>((ref) async {
+  final client = Supabase.instance.client;
+  final userId = client.auth.currentUser?.id;
+
+  final routesResponse = await client
+      .from('routes')
+      .select('id, name, from_label, to_label')
+      .eq('active', true)
+      .order('created_at', ascending: false);
+
+  final newsResponse = await client
+      .from('news_posts')
+      .select('id, title, body, text, created_at')
+      .order('created_at', ascending: false)
+      .limit(3);
+
+  String? preferredPickup;
+  if (userId != null) {
+    final profileResponse = await client
+        .from('profiles')
+        .select('preferred_pickup')
+        .eq('id', userId)
+        .single();
+    preferredPickup = profileResponse['preferred_pickup']?.toString();
+  }
+
+  final routes = (routesResponse as List)
+      .cast<Map<String, dynamic>>()
+      .map(_HomeRouteItem.fromMap)
+      .toList();
+  final latestNews = (newsResponse as List)
+      .cast<Map<String, dynamic>>()
+      .map(_HomeNewsItem.fromMap)
+      .toList();
+
+  return _PassengerHomeData(
+    routes: routes,
+    preferredPickup: preferredPickup,
+    latestNews: latestNews,
+  );
+});
+
+class _PassengerHomeData {
+  const _PassengerHomeData({
+    required this.routes,
+    required this.preferredPickup,
+    required this.latestNews,
+  });
+
+  final List<_HomeRouteItem> routes;
+  final String? preferredPickup;
+  final List<_HomeNewsItem> latestNews;
+}
+
+class _HomeRouteItem {
+  const _HomeRouteItem({
+    required this.id,
+    required this.title,
+    required this.subtitle,
+    required this.direction,
+  });
+
+  final String id;
+  final String title;
+  final String subtitle;
+  final String direction;
+
+  factory _HomeRouteItem.fromMap(Map<String, dynamic> map) {
+    final fromLabel = map['from_label']?.toString().trim() ?? '';
+    final toLabel = map['to_label']?.toString().trim() ?? '';
+    final name = map['name']?.toString().trim() ?? '';
+
+    return _HomeRouteItem(
+      id: map['id'].toString(),
+      title: '$fromLabel → $toLabel',
+      subtitle: name.isNotEmpty ? name : 'Ruta disponible',
+      direction: fromLabel.toLowerCase() == 'san isidro' ? 'si_cho' : 'cho_si',
+    );
+  }
+}
+
+class _HomeNewsItem {
+  const _HomeNewsItem({
+    required this.id,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String id;
+  final String title;
+  final String subtitle;
+
+  factory _HomeNewsItem.fromMap(Map<String, dynamic> map) {
+    final body = (map['text'] ?? map['body'] ?? '').toString().trim();
+    return _HomeNewsItem(
+      id: map['id'].toString(),
+      title: map['title']?.toString().trim() ?? 'Sin titulo',
+      subtitle: body.isEmpty ? 'Sin descripcion' : body,
+    );
+  }
+}
+
+class _ScreenMessage extends StatelessWidget {
+  const _ScreenMessage({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.p20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              message,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
