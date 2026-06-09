@@ -37,7 +37,6 @@ import '../../features/conductor/screens/conductor_manifiesto_screen.dart';
 import '../../features/conductor/screens/conductor_mapa_screen.dart';
 import '../../features/conductor/screens/conductor_noticias_screen.dart';
 import '../../features/conductor/screens/conductor_qr_scanner_screen.dart';
-import '../../features/conductor/providers/conductor_noticias_provider.dart';
 import '../../features/conductor/screens/nueva_noticia_screen.dart';
 import '../../features/admin/screens/admin_analitica_screen.dart';
 import '../../features/admin/screens/admin_calificaciones_screen.dart';
@@ -130,12 +129,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.passengerDriverDetail,
         builder: (context, state) => ConductorDetalleScreen(
           driverId: state.uri.queryParameters['id'],
+          tripId: state.uri.queryParameters['tripId'],
         ),
       ),
       GoRoute(
         path: AppRoutes.passengerSeatMap,
         builder: (context, state) => SeatMapScreen(
           driverId: state.uri.queryParameters['id'],
+          tripId: state.uri.queryParameters['tripId'],
         ),
       ),
       GoRoute(
@@ -276,12 +277,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.driverNoticiasDetalle,
         builder: (context, state) {
           final id = state.pathParameters['id'];
-          return Consumer(
-            builder: (context, ref, _) {
-              final posts = ref.watch(conductorNoticiasProvider).items;
-              return NoticiaDetalleScreen(newsId: id, posts: posts);
-            },
-          );
+          return NoticiaDetalleScreen(newsId: id);
         },
       ),
       GoRoute(

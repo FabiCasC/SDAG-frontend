@@ -10,7 +10,6 @@ import 'dart:convert';
 
 import '../../../app/router/app_routes.dart';
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -510,11 +509,10 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     }
 
     final amountTotal = seats.length * 15.0;
-    final tripId = await _getOrCreateTripIdForDriver(
-      driverPlate: driver.plate,
-      direction: driver.direction,
-      amount: amountTotal,
-    );
+    final tripId = driver.tripId;
+    if (tripId.trim().isEmpty) {
+      throw const AuthException('No se encontró el viaje del conductor');
+    }
 
     final row = await Supabase.instance.client.from('reservations').insert({
       'trip_id': tripId,
@@ -544,54 +542,6 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     } catch (_) {}
 
     return reservaId;
-  }
-
-  Future<String?> _getOrCreateTripIdForDriver({
-    required String driverPlate,
-    required MockTripDirection direction,
-    required double amount,
-  }) async {
-    try {
-      final driver = await Supabase.instance.client
-          .from('drivers')
-          .select('id')
-          .eq('plate', driverPlate)
-          .maybeSingle();
-      final driverId = driver?['id']?.toString();
-      if (driverId == null) return null;
-
-      final existing = await Supabase.instance.client
-          .from('trips')
-          .select('id, status')
-          .eq('driver_id', driverId)
-          .neq('status', 'completado')
-          .neq('status', 'cancelado')
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-      final existingId = existing?['id']?.toString();
-      if (existingId != null) return existingId;
-
-      final routeName = direction == MockTripDirection.sanIsidroToChosica
-          ? 'San Isidro → Chosica'
-          : 'Chosica → San Isidro';
-      final route = await Supabase.instance.client
-          .from('routes')
-          .select('id')
-          .eq('name', routeName)
-          .maybeSingle();
-      final routeId = route?['id']?.toString();
-
-      final created = await Supabase.instance.client.from('trips').insert({
-        'route_id': routeId,
-        'driver_id': driverId,
-        'status': 'pendiente',
-        'amount': amount,
-      }).select('id').single();
-      return created['id']?.toString();
-    } catch (_) {
-      return null;
-    }
   }
 }
 

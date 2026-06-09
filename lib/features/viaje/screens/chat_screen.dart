@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../core/mock/mock_data.dart';
 import '../../../features/reserva/providers/reserva_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
@@ -35,15 +35,50 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final activeReserva = ref.watch(reservaProvider);
     final activeViaje = ref.watch(viajeProvider);
     final activeController = ref.read(viajeProvider.notifier);
+    if (readonly) {
+      return FutureBuilder<_ReadonlyChatData?>(
+        future: _loadReadonlyChatData(tripId),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const AppScaffold(
+              title: 'Chat',
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
 
-    final historyTrip = readonly
-        ? MockData.tripHistory.where((t) => t.id == tripId).cast<MockTripHistoryItem?>().firstOrNull
-        : null;
+          if (snapshot.hasError) {
+            return AppScaffold(
+              title: 'Chat',
+              body: PlaceholderPage(
+                title: 'Chat no disponible',
+                subtitle: snapshot.error.toString(),
+              ),
+            );
+          }
 
-    final driverName = readonly
-        ? historyTrip?.driverName
-        : activeReserva.conductorSeleccionado?.name;
+          final data = snapshot.data;
+          if (data == null) {
+            return const AppScaffold(
+              title: 'Chat',
+              body: PlaceholderPage(
+                title: 'Chat no disponible',
+                subtitle: 'No se encontró información del viaje.',
+              ),
+            );
+          }
 
+          return _buildChatScaffold(
+            context: context,
+            driverName: data.driverName,
+            messages: data.messages,
+            readOnly: true,
+            activeController: activeController,
+          );
+        },
+      );
+    }
+
+    final driverName = activeReserva.conductorSeleccionado?.name;
     if (driverName == null) {
       return const AppScaffold(
         title: 'Chat',
@@ -54,13 +89,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       );
     }
 
+    final messages = activeViaje.messages
+        .map((m) => _ChatEntry(isDriver: m.isDriver, text: m.text, time: _formatTime(m.timestamp)))
+        .toList();
+
+    return _buildChatScaffold(
+      context: context,
+      driverName: driverName,
+      messages: messages,
+      readOnly: activeViaje.readOnlyChat,
+      activeController: activeController,
+    );
+  }
+
+  void _send(ViajeController controller, bool readOnly) {
+    if (readOnly) return;
+    final text = _controller.text;
+    controller.sendMessage(text);
+    _controller.clear();
+  }
+
+  Widget _buildChatScaffold({
+    required BuildContext context,
+    required String driverName,
+    required List<_ChatEntry> messages,
+    required bool readOnly,
+    required ViajeController activeController,
+  }) {
     final initials = _initials(driverName);
-    final messages = readonly
-        ? historyTrip?.chatMessages.map((m) => _ChatEntry(isDriver: m.isDriver, text: m.text, time: m.timestampLabel)).toList() ??
-            const <_ChatEntry>[]
-        : activeViaje.messages
-            .map((m) => _ChatEntry(isDriver: m.isDriver, text: m.text, time: _formatTime(m.timestamp)))
-            .toList();
 
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
@@ -91,7 +147,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            if (readonly || activeViaje.readOnlyChat)
+            if (readOnly)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(AppSpacing.md),
@@ -106,17 +162,30 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ),
               ),
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(AppSpacing.p20),
-                itemCount: messages.length,
-                itemBuilder: (context, index) {
-                  final m = messages[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: _MessageBubble(message: m),
-                  );
-                },
-              ),
+              child: messages.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.p20),
+                        child: Text(
+                          'No hubo mensajes en este viaje.',
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(AppSpacing.p20),
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final m = messages[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                          child: _MessageBubble(message: m),
+                        );
+                      },
+                    ),
             ),
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
@@ -129,11 +198,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   Expanded(
                     child: TextField(
                       controller: _controller,
-                      enabled: !(readonly || activeViaje.readOnlyChat),
+                      enabled: !readOnly,
                       decoration: const InputDecoration(
                         labelText: 'Mensaje',
                       ),
-                      onSubmitted: (_) => _send(activeController, readonly || activeViaje.readOnlyChat),
+                      onSubmitted: (_) => _send(activeController, readOnly),
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
@@ -146,9 +215,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         borderRadius: BorderRadius.circular(AppRadius.r12),
                       ),
                     ),
-                    onPressed: (readonly || activeViaje.readOnlyChat)
-                        ? null
-                        : () => _send(activeController, false),
+                    onPressed: readOnly ? null : () => _send(activeController, false),
                     child: const Icon(Icons.send_rounded),
                   ),
                 ],
@@ -158,13 +225,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       ),
     );
-  }
-
-  void _send(ViajeController controller, bool readOnly) {
-    if (readOnly) return;
-    final text = _controller.text;
-    controller.sendMessage(text);
-    _controller.clear();
   }
 
   static String _initials(String name) {
@@ -245,6 +305,78 @@ String _formatTime(DateTime dt) {
   return '$h:$m';
 }
 
-extension<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
+Future<_ReadonlyChatData?> _loadReadonlyChatData(String? reservationId) async {
+  if (reservationId == null || reservationId.trim().isEmpty) return null;
+
+  final reservation = await Supabase.instance.client
+      .from('reservations')
+      .select('''
+        id,
+        trip_id,
+        trips (
+          drivers (
+            profiles (
+              name,
+              first_name,
+              last_name
+            )
+          )
+        )
+      ''')
+      .eq('id', reservationId)
+      .maybeSingle();
+
+  if (reservation == null) return null;
+
+  final reservationMap = Map<String, dynamic>.from(reservation);
+  final tripId = reservationMap['trip_id']?.toString();
+  if (tripId == null || tripId.isEmpty) return null;
+
+  final trip = reservationMap['trips'] is Map ? Map<String, dynamic>.from(reservationMap['trips'] as Map) : <String, dynamic>{};
+  final driver = trip['drivers'] is Map ? Map<String, dynamic>.from(trip['drivers'] as Map) : <String, dynamic>{};
+  final profile = driver['profiles'] is Map ? Map<String, dynamic>.from(driver['profiles'] as Map) : <String, dynamic>{};
+  final firstName = profile['first_name']?.toString().trim() ?? '';
+  final lastName = profile['last_name']?.toString().trim() ?? '';
+  final fullName = '$firstName $lastName'.trim();
+  final driverName = (profile['name']?.toString().trim().isNotEmpty ?? false)
+      ? profile['name'].toString().trim()
+      : (fullName.isNotEmpty ? fullName : 'Conductor');
+
+  final rows = await Supabase.instance.client
+      .from('trip_messages')
+      .select('id, sender_role, body, created_at')
+      .eq('trip_id', tripId)
+      .order('created_at', ascending: true);
+
+  final messages = (rows as List)
+      .cast<Map<String, dynamic>>()
+      .map(
+        (row) => _ChatEntry(
+          isDriver: row['sender_role']?.toString() == 'driver',
+          text: row['body']?.toString() ?? '',
+          time: _formatRawTime(row['created_at']?.toString()),
+        ),
+      )
+      .toList();
+
+  return _ReadonlyChatData(
+    driverName: driverName,
+    messages: messages,
+  );
+}
+
+String _formatRawTime(String? raw) {
+  final dt = DateTime.tryParse(raw ?? '')?.toLocal();
+  if (dt == null) return '--:--';
+  return _formatTime(dt);
+}
+
+class _ReadonlyChatData {
+  const _ReadonlyChatData({
+    required this.driverName,
+    required this.messages,
+  });
+
+  final String driverName;
+  final List<_ChatEntry> messages;
 }

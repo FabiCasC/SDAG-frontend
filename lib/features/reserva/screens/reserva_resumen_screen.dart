@@ -17,7 +17,7 @@ class ReservaResumenScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(reservaProvider);
     final driver = state.conductorSeleccionado;
-    final occupiedAsync = ref.watch(occupiedSeatsByPlateProvider(driver?.plate ?? ''));
+    final occupiedAsync = ref.watch(occupiedSeatsByTripProvider(driver?.tripId ?? ''));
 
     if (driver == null) {
       return const AppScaffold(

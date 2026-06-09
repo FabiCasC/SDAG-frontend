@@ -1,14 +1,9 @@
-import 'dart:convert';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -16,170 +11,188 @@ import '../../../shared/widgets/reusable_ui_components.dart';
 import '../../reserva/providers/reserva_provider.dart';
 
 class ConductorDetalleScreen extends ConsumerWidget {
-  const ConductorDetalleScreen({required this.driverId, super.key});
+  const ConductorDetalleScreen({
+    required this.driverId,
+    required this.tripId,
+    super.key,
+  });
 
   final String? driverId;
+  final String? tripId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final driver = MockData.drivers.where((d) => d.id == driverId).cast<MockDriver?>().firstOrNull;
+    final lookup = _DriverTripLookup(driverId: driverId, tripId: tripId);
+    final detailAsync = ref.watch(driverTripDetailProvider(lookup));
 
-    if (driver == null) {
-      return const AppScaffold(
+    return detailAsync.when(
+      loading: () => const AppScaffold(
+        title: 'Conductor',
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, _) => AppScaffold(
         title: 'Conductor',
         body: PlaceholderPage(
-          title: 'Conductor no encontrado',
-          subtitle: 'Vuelve a la búsqueda para seleccionar otro conductor.',
+          title: 'No se pudo cargar el conductor',
+          subtitle: error.toString(),
         ),
-      );
-    }
+      ),
+      data: (driver) {
+        final theme = Theme.of(context);
+        final initials = _initials(driver.name);
 
-    final initials = _initials(driver.name);
-    final map = _StaticRouteMap(routeLabel: driver.routeLabel);
-
-    return Scaffold(
-      backgroundColor: AppColors.backgroundLight,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            pinned: true,
-            expandedHeight: 220,
-            backgroundColor: AppColors.primaryBlue,
-            foregroundColor: AppColors.white,
-            title: const Text('Conductor'),
-            flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Container(color: AppColors.primaryBlue),
-                  Container(color: AppColors.primaryTint18),
-                  Align(
-                    alignment: Alignment.bottomLeft,
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.p20),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          CircleAvatar(
-                            radius: 40,
-                            backgroundColor: AppColors.white,
-                            child: Text(
-                              initials,
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                color: AppColors.primaryBlue,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: AppSpacing.md),
-                          Expanded(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  driver.name,
-                                  style: theme.textTheme.headlineSmall?.copyWith(color: AppColors.white),
+        return Scaffold(
+          backgroundColor: AppColors.backgroundLight,
+          body: CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                pinned: true,
+                expandedHeight: 220,
+                backgroundColor: AppColors.primaryBlue,
+                foregroundColor: AppColors.white,
+                title: const Text('Conductor'),
+                flexibleSpace: FlexibleSpaceBar(
+                  background: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Container(color: AppColors.primaryBlue),
+                      Container(color: AppColors.primaryTint18),
+                      Align(
+                        alignment: Alignment.bottomLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.p20),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              CircleAvatar(
+                                radius: 40,
+                                backgroundColor: AppColors.white,
+                                child: Text(
+                                  initials,
+                                  style: theme.textTheme.headlineSmall?.copyWith(
+                                    color: AppColors.primaryBlue,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
-                                const SizedBox(height: AppSpacing.xs),
-                                Row(
+                              ),
+                              const SizedBox(width: AppSpacing.md),
+                              Expanded(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    ...List.generate(
-                                      5,
-                                      (i) => Icon(
-                                        Icons.star_rounded,
-                                        size: 18,
-                                        color: i < driver.rating.round()
-                                            ? AppColors.ratingStar
-                                            : AppColors.primaryTint12,
-                                      ),
-                                    ),
-                                    const SizedBox(width: AppSpacing.sm),
                                     Text(
-                                      '${driver.rating.toStringAsFixed(1)} · ${driver.ratingCount} valoraciones',
-                                      style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.white),
+                                      driver.name,
+                                      style: theme.textTheme.headlineSmall?.copyWith(color: AppColors.white),
+                                    ),
+                                    const SizedBox(height: AppSpacing.xs),
+                                    Row(
+                                      children: [
+                                        ...List.generate(
+                                          5,
+                                          (i) => Icon(
+                                            Icons.star_rounded,
+                                            size: 18,
+                                            color: i < driver.rating.round()
+                                                ? AppColors.ratingStar
+                                                : AppColors.primaryTint12,
+                                          ),
+                                        ),
+                                        const SizedBox(width: AppSpacing.sm),
+                                        Expanded(
+                                          child: Text(
+                                            '${driver.rating.toStringAsFixed(1)} · ${driver.ratingCount} valoraciones',
+                                            style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.white),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.p20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  AppCard(
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.md),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _InfoRow(
-                            icon: Icons.confirmation_number_rounded,
-                            label: 'Placa',
-                            value: driver.plate,
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.p20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      AppCard(
+                        child: Padding(
+                          padding: const EdgeInsets.all(AppSpacing.md),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _InfoRow(
+                                icon: Icons.confirmation_number_rounded,
+                                label: 'Placa',
+                                value: driver.plate,
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              _InfoRow(
+                                icon: Icons.directions_bus_rounded,
+                                label: 'Vehiculo',
+                                value: driver.vehicleType,
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              _InfoRow(
+                                icon: Icons.event_seat_rounded,
+                                label: 'Capacidad',
+                                value: '${driver.totalSeats} asientos',
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              _InfoRow(
+                                icon: Icons.alt_route_rounded,
+                                label: 'Ruta',
+                                value: driver.routeLabel,
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
+                              _InfoRow(
+                                icon: Icons.info_outline_rounded,
+                                label: 'Estado',
+                                value: driver.status.isEmpty ? 'Sin estado' : driver.status,
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: AppSpacing.sm),
-                          _InfoRow(
-                            icon: Icons.directions_bus_rounded,
-                            label: 'Vehículo',
-                            value: driver.vehicleType,
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          _InfoRow(
-                            icon: Icons.event_seat_rounded,
-                            label: 'Capacidad',
-                            value: '${driver.totalSeats} asientos',
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          _InfoRow(
-                            icon: Icons.alt_route_rounded,
-                            label: 'Ruta',
-                            value: driver.routeLabel,
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadius.r16),
-                    child: SizedBox(height: 190, child: map),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.energeticOrange,
-                      foregroundColor: AppColors.white,
-                      minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.r12),
+                      const SizedBox(height: AppSpacing.lg),
+                      _RoutePreview(routeLabel: driver.routeLabel),
+                      const SizedBox(height: AppSpacing.lg),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.energeticOrange,
+                          foregroundColor: AppColors.white,
+                          minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.r12),
+                          ),
+                          textStyle: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        onPressed: () {
+                          ref.read(reservaProvider.notifier).startWithDriver(driver);
+                          context.push(
+                            '${AppRoutes.passengerSeatMap}?id=${driver.driverId}&tripId=${driver.tripId}',
+                          );
+                        },
+                        child: const Text('Seleccionar asientos'),
                       ),
-                      textStyle: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    onPressed: () {
-                      ref.read(reservaProvider.notifier).startWithDriver(driver);
-                      context.push('${AppRoutes.passengerSeatMap}?id=${driver.id}');
-                    },
-                    child: const Text('Seleccionar asientos'),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -190,6 +203,109 @@ class ConductorDetalleScreen extends ConsumerWidget {
     return ('${parts[0][0]}${parts[1][0]}').toUpperCase();
   }
 }
+
+final driverTripDetailProvider =
+    FutureProvider.autoDispose.family<ReservaDriverInfo, _DriverTripLookup>((ref, lookup) async {
+  final client = Supabase.instance.client;
+  dynamic response;
+
+  if (lookup.tripId != null && lookup.tripId!.trim().isNotEmpty) {
+    response = await client
+        .from('trips')
+        .select('''
+          id,
+          status,
+          drivers (
+            id,
+            plate,
+            vehicle_type,
+            capacity,
+            estado,
+            rating_avg,
+            rating_count,
+            profiles (
+              name,
+              first_name,
+              last_name
+            )
+          ),
+          routes (
+            name,
+            from_label,
+            to_label
+          )
+        ''')
+        .eq('id', lookup.tripId!)
+        .single();
+  } else if (lookup.driverId != null && lookup.driverId!.trim().isNotEmpty) {
+    response = await client
+        .from('trips')
+        .select('''
+          id,
+          status,
+          drivers!inner (
+            id,
+            plate,
+            vehicle_type,
+            capacity,
+            estado,
+            rating_avg,
+            rating_count,
+            profiles (
+              name,
+              first_name,
+              last_name
+            )
+          ),
+          routes (
+            name,
+            from_label,
+            to_label
+          )
+        ''')
+        .eq('driver_id', lookup.driverId!)
+        .neq('status', 'completado')
+        .neq('status', 'cancelado')
+        .order('scheduled_departure_at', ascending: true)
+        .limit(1)
+        .single();
+  } else {
+    throw Exception('Conductor no encontrado');
+  }
+
+  final row = Map<String, dynamic>.from(response as Map);
+  final driver = row['drivers'];
+  final route = row['routes'];
+
+  if (driver is! Map || route is! Map) {
+    throw Exception('Faltan datos del conductor o la ruta');
+  }
+
+  final driverMap = Map<String, dynamic>.from(driver);
+  final routeMap = Map<String, dynamic>.from(route);
+  final profile = driverMap['profiles'] is Map ? Map<String, dynamic>.from(driverMap['profiles'] as Map) : null;
+  final firstName = profile?['first_name']?.toString().trim() ?? '';
+  final lastName = profile?['last_name']?.toString().trim() ?? '';
+  final fullName = '$firstName $lastName'.trim();
+  final routeName = routeMap['name']?.toString().trim();
+  final routeFrom = routeMap['from_label']?.toString().trim() ?? '';
+  final routeTo = routeMap['to_label']?.toString().trim() ?? '';
+
+  return ReservaDriverInfo(
+    tripId: row['id'].toString(),
+    driverId: driverMap['id'].toString(),
+    name: (profile?['name']?.toString().trim().isNotEmpty ?? false)
+        ? profile!['name'].toString().trim()
+        : (fullName.isNotEmpty ? fullName : 'Conductor sin nombre'),
+    plate: driverMap['plate']?.toString() ?? 'Sin placa',
+    vehicleType: driverMap['vehicle_type']?.toString() ?? 'Vehiculo',
+    totalSeats: (driverMap['capacity'] as int?) ?? 0,
+    routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$routeFrom → $routeTo',
+    rating: (driverMap['rating_avg'] as num?)?.toDouble() ?? 0,
+    ratingCount: (driverMap['rating_count'] as int?) ?? 0,
+    status: driverMap['estado']?.toString() ?? (row['status']?.toString() ?? ''),
+  );
+});
 
 class _InfoRow extends StatelessWidget {
   const _InfoRow({required this.icon, required this.label, required this.value});
@@ -224,200 +340,60 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _StaticRouteMap extends StatefulWidget {
-  const _StaticRouteMap({required this.routeLabel});
-
-  final String routeLabel;
-
-  @override
-  State<_StaticRouteMap> createState() => _StaticRouteMapState();
-}
-
-class _StaticRouteMapState extends State<_StaticRouteMap> {
-  static const _apiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
-  static const _origin = LatLng(MockData.sanIsidroLat, MockData.sanIsidroLng);
-  static const _destination = LatLng(MockData.chosicaLat, MockData.chosicaLng);
-  static const _mid = LatLng(MockData.midLat, MockData.midLng);
-
-  List<LatLng> _routePoints = const [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    if (!kIsWeb) _fetchRoute();
-  }
-
-  Future<void> _fetchRoute() async {
-    try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/directions/json'
-        '?origin=${_origin.latitude},${_origin.longitude}'
-        '&destination=${_destination.latitude},${_destination.longitude}'
-        '&key=$_apiKey'
-        '&language=es',
-      );
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['status'] == 'OK') {
-          final encoded = data['routes'][0]['overview_polyline']['points'] as String;
-          setState(() {
-            _routePoints = _decodePolyline(encoded);
-            _loading = false;
-          });
-          return;
-        }
-      }
-    } catch (_) {}
-    // Fallback a línea recta si falla la API
-    setState(() {
-      _routePoints = const [_origin, _mid, _destination];
-      _loading = false;
-    });
-  }
-
-  List<LatLng> _decodePolyline(String encoded) {
-    final points = <LatLng>[];
-    int index = 0;
-    int lat = 0, lng = 0;
-    while (index < encoded.length) {
-      int shift = 0, result = 0, b;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      lat += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
-      shift = 0; result = 0;
-      do {
-        b = encoded.codeUnitAt(index++) - 63;
-        result |= (b & 0x1f) << shift;
-        shift += 5;
-      } while (b >= 0x20);
-      lng += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
-      points.add(LatLng(lat / 1e5, lng / 1e5));
-    }
-    return points;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (kIsWeb) return _WebStaticMap(routeLabel: widget.routeLabel);
-
-    final polylinePoints = _routePoints.isEmpty ? const [_origin, _mid, _destination] : _routePoints;
-    final polyline = Polyline(
-      polylineId: const PolylineId('route'),
-      color: AppColors.primaryBlue,
-      width: 5,
-      points: polylinePoints,
-    );
-
-    return Stack(
-      children: [
-        GoogleMap(
-          initialCameraPosition: const CameraPosition(target: _mid, zoom: 10.8),
-          polylines: {polyline},
-          zoomControlsEnabled: false,
-          myLocationButtonEnabled: false,
-          compassEnabled: false,
-          rotateGesturesEnabled: false,
-          scrollGesturesEnabled: false,
-          tiltGesturesEnabled: false,
-          zoomGesturesEnabled: false,
-          liteModeEnabled: false,
-          markers: {
-            const Marker(markerId: MarkerId('si'), position: _origin),
-            const Marker(markerId: MarkerId('ch'), position: _destination),
-          },
-        ),
-        if (_loading)
-          const Positioned.fill(
-            child: Center(child: CircularProgressIndicator()),
-          ),
-        Positioned(
-          left: AppSpacing.md,
-          top: AppSpacing.md,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-            decoration: BoxDecoration(
-              color: AppColors.white,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.alt_route_rounded, size: 16, color: AppColors.primaryBlue),
-                const SizedBox(width: AppSpacing.xs),
-                Text(
-                  widget.routeLabel,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _WebStaticMap extends StatelessWidget {
-  const _WebStaticMap({required this.routeLabel});
+class _RoutePreview extends StatelessWidget {
+  const _RoutePreview({required this.routeLabel});
 
   final String routeLabel;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            color: AppColors.fieldFill,
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.circular(AppRadius.r16),
-          ),
-          child: CustomPaint(
-            painter: _WebRoutePainter(),
-            child: const SizedBox.expand(),
-          ),
-        ),
-        Positioned(
-          left: AppSpacing.md,
-          top: AppSpacing.md,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-            decoration: BoxDecoration(
-              color: AppColors.white,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.alt_route_rounded, size: 16, color: AppColors.primaryBlue),
-                const SizedBox(width: AppSpacing.xs),
-                Text(
-                  routeLabel,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ],
+    return Container(
+      height: 190,
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.r16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _RoutePainter(),
             ),
           ),
-        ),
-      ],
+          Positioned(
+            left: AppSpacing.md,
+            top: AppSpacing.md,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.alt_route_rounded, size: 16, color: AppColors.primaryBlue),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    routeLabel,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _WebRoutePainter extends CustomPainter {
+class _RoutePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final padding = size.shortestSide * 0.12;
@@ -445,6 +421,22 @@ class _WebRoutePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-extension<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
+class _DriverTripLookup {
+  const _DriverTripLookup({
+    required this.driverId,
+    required this.tripId,
+  });
+
+  final String? driverId;
+  final String? tripId;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _DriverTripLookup &&
+        other.driverId == driverId &&
+        other.tripId == tripId;
+  }
+
+  @override
+  int get hashCode => Object.hash(driverId, tripId);
 }

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
 import '../../../app/providers/passenger/validators/passenger_auth_validators.dart';
@@ -23,15 +24,19 @@ class PerfilState {
     required this.originalName,
     required this.originalEmail,
     required this.originalPhone,
+    required this.originalDni,
     required this.originalPickup,
     required this.name,
     required this.email,
     required this.phone,
+    required this.dni,
     required this.pickup,
     required this.emailError,
     required this.phoneError,
+    required this.dniError,
     required this.pickupError,
     required this.metodoPago,
+    required this.errorMessage,
   });
 
   final bool isLoading;
@@ -40,27 +45,32 @@ class PerfilState {
   final String originalName;
   final String originalEmail;
   final String originalPhone;
+  final String originalDni;
   final String originalPickup;
 
   final String name;
   final String email;
   final String phone;
+  final String dni;
   final String pickup;
 
   final String? emailError;
   final String? phoneError;
+  final String? dniError;
   final String? pickupError;
 
   final PerfilMetodoPago? metodoPago;
+  final String? errorMessage;
 
   bool get hasChanges =>
       name.trim() != originalName.trim() ||
       email.trim() != originalEmail.trim() ||
       phone.trim() != originalPhone.trim() ||
+      dni.trim() != originalDni.trim() ||
       pickup.trim() != originalPickup.trim();
 
   bool get isValid =>
-      emailError == null && phoneError == null && pickupError == null;
+      emailError == null && phoneError == null && dniError == null && pickupError == null;
 
   PerfilState copyWith({
     bool? isLoading,
@@ -68,15 +78,19 @@ class PerfilState {
     String? originalName,
     String? originalEmail,
     String? originalPhone,
+    String? originalDni,
     String? originalPickup,
     String? name,
     String? email,
     String? phone,
+    String? dni,
     String? pickup,
     String? emailError,
     String? phoneError,
+    String? dniError,
     String? pickupError,
     PerfilMetodoPago? metodoPago,
+    String? errorMessage,
     bool clearMetodoPago = false,
   }) {
     return PerfilState(
@@ -85,15 +99,19 @@ class PerfilState {
       originalName: originalName ?? this.originalName,
       originalEmail: originalEmail ?? this.originalEmail,
       originalPhone: originalPhone ?? this.originalPhone,
+      originalDni: originalDni ?? this.originalDni,
       originalPickup: originalPickup ?? this.originalPickup,
       name: name ?? this.name,
       email: email ?? this.email,
       phone: phone ?? this.phone,
+      dni: dni ?? this.dni,
       pickup: pickup ?? this.pickup,
       emailError: emailError,
       phoneError: phoneError,
+      dniError: dniError,
       pickupError: pickupError,
       metodoPago: clearMetodoPago ? null : (metodoPago ?? this.metodoPago),
+      errorMessage: errorMessage,
     );
   }
 
@@ -103,15 +121,19 @@ class PerfilState {
     originalName: '',
     originalEmail: '',
     originalPhone: '',
+    originalDni: '',
     originalPickup: '',
     name: '',
     email: '',
     phone: '',
+    dni: '',
     pickup: '',
     emailError: null,
     phoneError: null,
+    dniError: null,
     pickupError: null,
     metodoPago: null,
+    errorMessage: null,
   );
 }
 
@@ -122,47 +144,68 @@ class PerfilController extends StateNotifier<PerfilState> {
 
   final Ref ref;
 
-  static const _prefsNameKey = 'sdag_profile_name';
-  static const _prefsEmailKey = 'sdag_profile_email';
-  static const _prefsPhoneKey = 'sdag_profile_phone';
-  static const _prefsPickupKey = 'sdag_profile_pickup';
-
   static const _prefsPaymentTypeKey = 'sdag_payment_type';
   static const _prefsPaymentLast4Key = 'sdag_payment_last4';
 
   Future<void> _load() async {
-    final session = ref.read(passengerSessionProvider);
-    final account = session.account;
-    final prefs = await SharedPreferences.getInstance();
+    state = state.copyWith(isLoading: true, errorMessage: null);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) {
+        state = PerfilState.empty.copyWith(
+          isLoading: false,
+          errorMessage: 'No hay una sesion activa.',
+        );
+        return;
+      }
 
-    final id = account?.id ?? 'anon';
-    final name = prefs.getString('$_prefsNameKey/$id') ?? (account?.name ?? '');
-    final email = prefs.getString('$_prefsEmailKey/$id') ?? (account?.email ?? '');
-    final phone = prefs.getString('$_prefsPhoneKey/$id') ?? (account?.phone ?? '');
-    final pickup = prefs.getString('$_prefsPickupKey/$id') ?? (account?.preferredPickup ?? '');
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select()
+          .eq('id', userId)
+          .single();
 
-    final payType = prefs.getString(_prefsPaymentTypeKey);
-    final payLast4 = prefs.getString(_prefsPaymentLast4Key);
-    final metodoPago =
-        (payType != null && payLast4 != null) ? PerfilMetodoPago(type: payType, last4: payLast4) : null;
+      final name = profile['name']?.toString() ?? '';
+      final email = profile['email']?.toString() ?? '';
+      final phone = profile['phone']?.toString() ?? '';
+      final dni = profile['dni']?.toString() ?? '';
+      final pickup = profile['preferred_pickup']?.toString() ?? '';
 
-    state = PerfilState(
-      isLoading: false,
-      isSaving: false,
-      originalName: name,
-      originalEmail: email,
-      originalPhone: phone,
-      originalPickup: pickup,
-      name: name,
-      email: email,
-      phone: phone,
-      pickup: pickup,
-      emailError: _emailError(email: email, originalEmail: email),
-      phoneError: _phoneError(phone),
-      pickupError: _pickupError(pickup),
-      metodoPago: metodoPago,
-    );
+      final payType = prefs.getString(_prefsPaymentTypeKey);
+      final payLast4 = prefs.getString(_prefsPaymentLast4Key);
+      final metodoPago =
+          (payType != null && payLast4 != null) ? PerfilMetodoPago(type: payType, last4: payLast4) : null;
+
+      state = PerfilState(
+        isLoading: false,
+        isSaving: false,
+        originalName: name,
+        originalEmail: email,
+        originalPhone: phone,
+        originalDni: dni,
+        originalPickup: pickup,
+        name: name,
+        email: email,
+        phone: phone,
+        dni: dni,
+        pickup: pickup,
+        emailError: _emailError(email: email, originalEmail: email),
+        phoneError: _phoneError(phone),
+        dniError: _dniError(dni),
+        pickupError: _pickupError(pickup),
+        metodoPago: metodoPago,
+        errorMessage: null,
+      );
+    } catch (e) {
+      state = PerfilState.empty.copyWith(
+        isLoading: false,
+        errorMessage: 'No se pudo cargar tu perfil: $e',
+      );
+    }
   }
+
+  Future<void> reload() => _load();
 
   void setName(String value) {
     state = state.copyWith(name: value);
@@ -183,6 +226,13 @@ class PerfilController extends StateNotifier<PerfilState> {
     );
   }
 
+  void setDni(String value) {
+    state = state.copyWith(
+      dni: value,
+      dniError: _dniError(value),
+    );
+  }
+
   void setPickup(String value) {
     state = state.copyWith(
       pickup: value,
@@ -190,39 +240,64 @@ class PerfilController extends StateNotifier<PerfilState> {
     );
   }
 
-  Future<void> updatePerfil() async {
-    if (!state.hasChanges || !state.isValid) return;
+  Future<bool> updatePerfil() async {
+    if (!state.hasChanges || !state.isValid) return false;
 
-    state = state.copyWith(isSaving: true);
-    await Future<void>.delayed(const Duration(seconds: 1));
-
-    final prefs = await SharedPreferences.getInstance();
-    final sessionCtrl = ref.read(passengerSessionProvider.notifier);
-    final current = ref.read(passengerSessionProvider).account;
-    final id = current?.id ?? 'anon';
-
-    await prefs.setString('$_prefsNameKey/$id', state.name.trim());
-    await prefs.setString('$_prefsEmailKey/$id', state.email.trim());
-    await prefs.setString('$_prefsPhoneKey/$id', _digitsOnly(state.phone));
-    await prefs.setString('$_prefsPickupKey/$id', state.pickup.trim());
-
-    if (current != null) {
-      final updated = current.copyWith(
-        name: state.name.trim(),
-        email: state.email.trim(),
-        phone: _digitsOnly(state.phone),
-        preferredPickup: state.pickup.trim().isEmpty ? null : state.pickup.trim(),
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) {
+      state = state.copyWith(
+        isSaving: false,
+        errorMessage: 'No hay una sesion activa.',
       );
-      sessionCtrl.state = sessionCtrl.state.copyWith(account: updated);
+      return false;
     }
 
-    state = state.copyWith(
-      isSaving: false,
-      originalName: state.name.trim(),
-      originalEmail: state.email.trim(),
-      originalPhone: _digitsOnly(state.phone),
-      originalPickup: state.pickup.trim(),
-    );
+    state = state.copyWith(isSaving: true, errorMessage: null);
+
+    try {
+      await Supabase.instance.client.from('profiles').update({
+        'name': state.name.trim(),
+        'email': state.email.trim().toLowerCase(),
+        'phone': _digitsOnly(state.phone),
+        'dni': _digitsOnly(state.dni),
+        'preferred_pickup': state.pickup.trim().isEmpty ? null : state.pickup.trim(),
+      }).eq('id', userId);
+
+      final sessionCtrl = ref.read(passengerSessionProvider.notifier);
+      final current = ref.read(passengerSessionProvider).account;
+      if (current != null) {
+        final updated = current.copyWith(
+          name: state.name.trim(),
+          email: state.email.trim().toLowerCase(),
+          phone: _digitsOnly(state.phone),
+          dni: _digitsOnly(state.dni),
+          preferredPickup: state.pickup.trim().isEmpty ? null : state.pickup.trim(),
+        );
+        sessionCtrl.state = sessionCtrl.state.copyWith(account: updated);
+      }
+
+      state = state.copyWith(
+        isSaving: false,
+        originalName: state.name.trim(),
+        originalEmail: state.email.trim().toLowerCase(),
+        originalPhone: _digitsOnly(state.phone),
+        originalDni: _digitsOnly(state.dni),
+        originalPickup: state.pickup.trim(),
+        name: state.name.trim(),
+        email: state.email.trim().toLowerCase(),
+        phone: _digitsOnly(state.phone),
+        dni: _digitsOnly(state.dni),
+        pickup: state.pickup.trim(),
+        errorMessage: null,
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        isSaving: false,
+        errorMessage: 'No se pudo guardar tu perfil: $e',
+      );
+      return false;
+    }
   }
 
   Future<void> removeMetodoPago() async {
@@ -259,6 +334,13 @@ class PerfilController extends StateNotifier<PerfilState> {
     final digits = _digitsOnly(value);
     if (digits.isEmpty) return null;
     if (digits.length != 9) return 'Debe tener 9 dígitos';
+    return null;
+  }
+
+  static String? _dniError(String value) {
+    final digits = _digitsOnly(value);
+    if (digits.isEmpty) return null;
+    if (digits.length != 8) return 'Debe tener 8 dígitos';
     return null;
   }
 

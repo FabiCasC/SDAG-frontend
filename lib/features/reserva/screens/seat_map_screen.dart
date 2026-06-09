@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -11,9 +11,14 @@ import '../../../shared/widgets/reusable_ui_components.dart' hide SeatMapWidget;
 import '../providers/reserva_provider.dart';
 
 class SeatMapScreen extends ConsumerStatefulWidget {
-  const SeatMapScreen({required this.driverId, super.key});
+  const SeatMapScreen({
+    required this.driverId,
+    required this.tripId,
+    super.key,
+  });
 
   final String? driverId;
+  final String? tripId;
 
   @override
   ConsumerState<SeatMapScreen> createState() => _SeatMapScreenState();
@@ -22,44 +27,69 @@ class SeatMapScreen extends ConsumerStatefulWidget {
 class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
   bool _initScheduled = false;
 
-  MockDriver? _findDriver(String? id) {
-    if (id == null) return null;
-    for (final d in MockData.drivers) {
-      if (d.id == id) return d;
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(reservaProvider);
     final controller = ref.read(reservaProvider.notifier);
-    final driverFromQuery = _findDriver(widget.driverId);
-    final driver = state.conductorSeleccionado ?? driverFromQuery;
-    final occupiedAsync = ref.watch(occupiedSeatsByPlateProvider(driver?.plate ?? ''));
+    final stateDriver = state.conductorSeleccionado;
+    final hasMatchingStateDriver = stateDriver != null &&
+        ((widget.tripId != null && stateDriver.tripId == widget.tripId) ||
+            (widget.driverId != null && stateDriver.driverId == widget.driverId));
+    final fallbackAsync = ref.watch(_seatMapDriverProvider(_SeatMapLookup(
+      driverId: widget.driverId,
+      tripId: widget.tripId,
+    )));
 
-    if (driver == null) {
-      return const AppScaffold(
-        title: 'Seleccionar asientos',
-        body: PlaceholderPage(
-          title: 'Conductor no seleccionado',
-          subtitle: 'Vuelve a la búsqueda y selecciona un conductor.',
-        ),
+    if (hasMatchingStateDriver) {
+      return _buildLoaded(
+        context: context,
+        ref: ref,
+        controller: controller,
+        driver: stateDriver,
+        state: state,
       );
     }
 
-    if (!_initScheduled &&
-        driverFromQuery != null &&
-        state.conductorSeleccionado?.id != driverFromQuery.id) {
-      _initScheduled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        controller.startWithDriver(driverFromQuery);
-      });
-    }
+    return fallbackAsync.when(
+      loading: () => const AppScaffold(
+        title: 'Seleccionar asientos',
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, _) => AppScaffold(
+        title: 'Seleccionar asientos',
+        body: PlaceholderPage(
+          title: 'No se pudo cargar el viaje',
+          subtitle: error.toString(),
+        ),
+      ),
+      data: (driver) {
+        if (!_initScheduled) {
+          _initScheduled = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            controller.startWithDriver(driver);
+          });
+        }
+        return _buildLoaded(
+          context: context,
+          ref: ref,
+          controller: controller,
+          driver: driver,
+          state: state,
+        );
+      },
+    );
+  }
 
+  Widget _buildLoaded({
+    required BuildContext context,
+    required WidgetRef ref,
+    required ReservaController controller,
+    required ReservaDriverInfo driver,
+    required ReservaState state,
+  }) {
+    final occupiedAsync = ref.watch(occupiedSeatsByTripProvider(driver.tripId));
     final selectedSeats = state.asientosSeleccionados.toSet();
     final occupiedSeats = occupiedAsync.valueOrNull?.toSet() ?? <int>{};
-
     final canContinue = selectedSeats.isNotEmpty;
 
     return Scaffold(
@@ -110,10 +140,10 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
                       ),
                 ),
                 const SizedBox(height: AppSpacing.md),
-                SeatMapWidget(
-                  capacidad: driver.totalSeats,
-                  asientosOcupados: occupiedSeats.toList()..sort(),
-                  asientosSeleccionados: state.asientosSeleccionados,
+                _VehicleLayout(
+                  totalSeats: driver.totalSeats,
+                  occupiedSeats: occupiedSeats.toList()..sort(),
+                  selectedSeats: state.asientosSeleccionados,
                   onSeatTapped: (seatNumber) {
                     if (occupiedSeats.contains(seatNumber)) return;
 
@@ -156,48 +186,44 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
   }
 }
 
-class SeatMapWidget extends StatelessWidget {
-  const SeatMapWidget({
-    required this.capacidad,
-    required this.asientosOcupados,
-    required this.asientosSeleccionados,
+class _VehicleLayout extends StatelessWidget {
+  const _VehicleLayout({
+    required this.totalSeats,
+    required this.occupiedSeats,
+    required this.selectedSeats,
     required this.onSeatTapped,
-    super.key,
   });
 
-  final int capacidad;
-  final List<int> asientosOcupados;
-  final List<int> asientosSeleccionados;
+  final int totalSeats;
+  final List<int> occupiedSeats;
+  final List<int> selectedSeats;
   final ValueChanged<int> onSeatTapped;
 
   @override
   Widget build(BuildContext context) {
-    final occupied = asientosOcupados.toSet();
-    final selected = asientosSeleccionados.toSet();
+    final occupied = occupiedSeats.toSet();
+    final selected = selectedSeats.toSet();
 
-    Widget buildPassengerSeat(int seatNumber) {
-      final state = occupied.contains(seatNumber)
+    Widget passengerSeat(int seatNumber) {
+      final visualState = occupied.contains(seatNumber)
           ? _SeatVisualState.occupied
           : selected.contains(seatNumber)
               ? _SeatVisualState.selected
               : _SeatVisualState.available;
 
-      final enabled = state != _SeatVisualState.occupied;
+      final enabled = visualState != _SeatVisualState.occupied;
 
       return _SeatTile(
         seatNumber: seatNumber,
-        state: state,
+        state: visualState,
         enabled: enabled,
         onTap: () => onSeatTapped(seatNumber),
       );
     }
 
-    Widget buildDriverSeat() => const _DriverSeatTile();
+    Widget driverSeat() => const _DriverSeatTile();
 
-    Widget row2({
-      required Widget left,
-      required Widget right,
-    }) {
+    Widget twoColumnRow(Widget left, Widget right) {
       return Row(
         children: [
           Expanded(child: left),
@@ -207,11 +233,7 @@ class SeatMapWidget extends StatelessWidget {
       );
     }
 
-    Widget row3({
-      required Widget left,
-      required Widget middle,
-      required Widget right,
-    }) {
+    Widget threeColumnRow(Widget left, Widget middle, Widget right) {
       return Row(
         children: [
           Expanded(child: left),
@@ -223,10 +245,7 @@ class SeatMapWidget extends StatelessWidget {
       );
     }
 
-    Widget rowAisle({
-      required Widget left,
-      required Widget right,
-    }) {
+    Widget aisleRow(Widget left, Widget right) {
       return Row(
         children: [
           Expanded(child: left),
@@ -236,77 +255,61 @@ class SeatMapWidget extends StatelessWidget {
       );
     }
 
-    List<Widget> layoutRows() {
-      switch (capacidad) {
-        case 4:
-          return [
-            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
-            const SizedBox(height: AppSpacing.sm),
-            row3(
-              left: buildPassengerSeat(2),
-              middle: buildPassengerSeat(3),
-              right: buildPassengerSeat(4),
-            ),
-          ];
-        case 6:
-          return [
-            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
-            const SizedBox(height: AppSpacing.sm),
-            row2(left: buildPassengerSeat(2), right: buildPassengerSeat(3)),
-            const SizedBox(height: AppSpacing.sm),
-            row3(
-              left: buildPassengerSeat(4),
-              middle: buildPassengerSeat(5),
-              right: buildPassengerSeat(6),
-            ),
-          ];
-        case 8:
-          return [
-            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
-            const SizedBox(height: AppSpacing.sm),
-            row2(left: buildPassengerSeat(2), right: buildPassengerSeat(3)),
-            const SizedBox(height: AppSpacing.sm),
-            row2(left: buildPassengerSeat(4), right: buildPassengerSeat(5)),
-            const SizedBox(height: AppSpacing.sm),
-            row3(
-              left: buildPassengerSeat(6),
-              middle: buildPassengerSeat(7),
-              right: buildPassengerSeat(8),
-            ),
-          ];
-        case 15:
-          final rows = <Widget>[
-            row2(left: buildDriverSeat(), right: buildPassengerSeat(1)),
-          ];
-          for (var seat = 2; seat <= 15; seat += 2) {
-            rows.add(const SizedBox(height: AppSpacing.sm));
-            rows.add(
-              rowAisle(
-                left: buildPassengerSeat(seat),
-                right: buildPassengerSeat(seat + 1),
-              ),
-            );
-          }
-          return rows;
-        default:
-          final perRow = 2;
-          final totalRows = (capacidad / perRow).ceil();
-          final widgets = <Widget>[];
-          for (var r = 0; r < totalRows; r++) {
-            if (r > 0) widgets.add(const SizedBox(height: AppSpacing.sm));
-            final leftSeat = r * perRow + 1;
-            final rightSeat = r * perRow + 2;
-            widgets.add(
-              row2(
-                left: buildPassengerSeat(leftSeat),
-                right: rightSeat <= capacidad
-                    ? buildPassengerSeat(rightSeat)
-                    : const SizedBox.shrink(),
-              ),
-            );
-          }
-          return widgets;
+    Widget emptySeat() => const SizedBox(
+          width: AppSpacing.seatSize,
+          height: AppSpacing.seatSize,
+        );
+
+    List<Widget> rows = [];
+
+    void addRow(Widget row) {
+      if (rows.isNotEmpty) {
+        rows.add(const SizedBox(height: AppSpacing.md));
       }
+      rows.add(row);
+    }
+
+    switch (totalSeats) {
+      case 4:
+        addRow(twoColumnRow(driverSeat(), passengerSeat(1)));
+        addRow(threeColumnRow(passengerSeat(2), passengerSeat(3), passengerSeat(4)));
+        break;
+      case 6:
+        addRow(twoColumnRow(driverSeat(), passengerSeat(1)));
+        addRow(twoColumnRow(passengerSeat(2), passengerSeat(3)));
+        addRow(threeColumnRow(passengerSeat(4), passengerSeat(5), passengerSeat(6)));
+        break;
+      case 8:
+        addRow(twoColumnRow(driverSeat(), passengerSeat(1)));
+        addRow(twoColumnRow(passengerSeat(2), passengerSeat(3)));
+        addRow(twoColumnRow(passengerSeat(4), passengerSeat(5)));
+        addRow(threeColumnRow(passengerSeat(6), passengerSeat(7), passengerSeat(8)));
+        break;
+      case 14:
+      case 15:
+        addRow(twoColumnRow(driverSeat(), passengerSeat(1)));
+        for (var seat = 2; seat <= totalSeats; seat += 2) {
+          final rightSeatNumber = seat + 1;
+          addRow(
+            aisleRow(
+              passengerSeat(seat),
+              rightSeatNumber <= totalSeats ? passengerSeat(rightSeatNumber) : emptySeat(),
+            ),
+          );
+        }
+        break;
+      default:
+        addRow(twoColumnRow(driverSeat(), totalSeats >= 1 ? passengerSeat(1) : emptySeat()));
+        for (var seat = 2; seat <= totalSeats; seat += 2) {
+          final rightSeatNumber = seat + 1;
+          addRow(
+            twoColumnRow(
+              passengerSeat(seat),
+              rightSeatNumber <= totalSeats ? passengerSeat(rightSeatNumber) : emptySeat(),
+            ),
+          );
+        }
+        break;
     }
 
     return Column(
@@ -322,7 +325,20 @@ class SeatMapWidget extends StatelessWidget {
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: layoutRows(),
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Distribución del vehículo',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              ...rows,
+            ],
           ),
         ),
         const SizedBox(height: AppSpacing.md),
@@ -387,7 +403,7 @@ class _SeatTile extends StatelessWidget {
 
     final (bg, border, fg) = switch (state) {
       _SeatVisualState.available => (AppColors.seatOkBg, AppColors.success, AppColors.success),
-      _SeatVisualState.occupied => (AppColors.fieldFill, AppColors.border, AppColors.textSecondary),
+      _SeatVisualState.occupied => (AppColors.seatBadBg, AppColors.error, AppColors.error),
       _SeatVisualState.selected => (AppColors.infoSurface, AppColors.primaryBlue, AppColors.primaryBlue),
     };
 
@@ -400,14 +416,14 @@ class _SeatTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(AppRadius.r8),
-          border: Border.all(color: border),
+          border: Border.all(color: border, width: 1.4),
         ),
         child: Center(
           child: Text(
             '$seatNumber',
             style: theme.textTheme.titleMedium?.copyWith(
               color: fg,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ),
@@ -463,9 +479,9 @@ class _SeatLegend extends StatelessWidget {
         ),
         item(
           icon: const _LegendBox(
-            bg: AppColors.fieldFill,
-            border: AppColors.border,
-            fg: AppColors.textSecondary,
+            bg: AppColors.seatBadBg,
+            border: AppColors.error,
+            fg: AppColors.error,
             label: '1',
           ),
           label: 'Ocupado',
@@ -477,6 +493,129 @@ class _SeatLegend extends StatelessWidget {
       ],
     );
   }
+}
+
+final _seatMapDriverProvider =
+    FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, lookup) async {
+  final client = Supabase.instance.client;
+  dynamic response;
+
+  if (lookup.tripId != null && lookup.tripId!.trim().isNotEmpty) {
+    response = await client
+        .from('trips')
+        .select('''
+          id,
+          status,
+          drivers (
+            id,
+            plate,
+            vehicle_type,
+            capacity,
+            estado,
+            rating_avg,
+            rating_count,
+            profiles (
+              name,
+              first_name,
+              last_name
+            )
+          ),
+          routes (
+            name,
+            from_label,
+            to_label
+          )
+        ''')
+        .eq('id', lookup.tripId!)
+        .single();
+  } else if (lookup.driverId != null && lookup.driverId!.trim().isNotEmpty) {
+    response = await client
+        .from('trips')
+        .select('''
+          id,
+          status,
+          drivers!inner (
+            id,
+            plate,
+            vehicle_type,
+            capacity,
+            estado,
+            rating_avg,
+            rating_count,
+            profiles (
+              name,
+              first_name,
+              last_name
+            )
+          ),
+          routes (
+            name,
+            from_label,
+            to_label
+          )
+        ''')
+        .eq('driver_id', lookup.driverId!)
+        .neq('status', 'completado')
+        .neq('status', 'cancelado')
+        .order('scheduled_departure_at', ascending: true)
+        .limit(1)
+        .single();
+  } else {
+    throw Exception('No se encontro el viaje seleccionado');
+  }
+
+  final row = Map<String, dynamic>.from(response as Map);
+  final driver = row['drivers'];
+  final route = row['routes'];
+
+  if (driver is! Map || route is! Map) {
+    throw Exception('Faltan datos del conductor o la ruta');
+  }
+
+  final driverMap = Map<String, dynamic>.from(driver);
+  final routeMap = Map<String, dynamic>.from(route);
+  final profile = driverMap['profiles'] is Map ? Map<String, dynamic>.from(driverMap['profiles'] as Map) : null;
+  final firstName = profile?['first_name']?.toString().trim() ?? '';
+  final lastName = profile?['last_name']?.toString().trim() ?? '';
+  final fullName = '$firstName $lastName'.trim();
+  final routeName = routeMap['name']?.toString().trim();
+  final routeFrom = routeMap['from_label']?.toString().trim() ?? '';
+  final routeTo = routeMap['to_label']?.toString().trim() ?? '';
+
+  return ReservaDriverInfo(
+    tripId: row['id'].toString(),
+    driverId: driverMap['id'].toString(),
+    name: (profile?['name']?.toString().trim().isNotEmpty ?? false)
+        ? profile!['name'].toString().trim()
+        : (fullName.isNotEmpty ? fullName : 'Conductor sin nombre'),
+    plate: driverMap['plate']?.toString() ?? 'Sin placa',
+    vehicleType: driverMap['vehicle_type']?.toString() ?? 'Vehiculo',
+    totalSeats: (driverMap['capacity'] as int?) ?? 0,
+    routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$routeFrom → $routeTo',
+    rating: (driverMap['rating_avg'] as num?)?.toDouble() ?? 0,
+    ratingCount: (driverMap['rating_count'] as int?) ?? 0,
+    status: driverMap['estado']?.toString() ?? (row['status']?.toString() ?? ''),
+  );
+});
+
+class _SeatMapLookup {
+  const _SeatMapLookup({
+    required this.driverId,
+    required this.tripId,
+  });
+
+  final String? driverId;
+  final String? tripId;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _SeatMapLookup &&
+        other.driverId == driverId &&
+        other.tripId == tripId;
+  }
+
+  @override
+  int get hashCode => Object.hash(driverId, tripId);
 }
 
 class _LegendBox extends StatelessWidget {

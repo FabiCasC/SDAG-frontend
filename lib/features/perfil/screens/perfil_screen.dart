@@ -23,6 +23,7 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
   late final TextEditingController _nameController;
   late final TextEditingController _emailController;
   late final TextEditingController _phoneController;
+  late final TextEditingController _dniController;
   late final TextEditingController _pickupController;
 
   @override
@@ -31,6 +32,7 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
     _nameController = TextEditingController();
     _emailController = TextEditingController();
     _phoneController = TextEditingController();
+    _dniController = TextEditingController();
     _pickupController = TextEditingController();
   }
 
@@ -39,6 +41,7 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
     _nameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
+    _dniController.dispose();
     _pickupController.dispose();
     super.dispose();
   }
@@ -47,6 +50,7 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
     if (_nameController.text != state.name) _nameController.text = state.name;
     if (_emailController.text != state.email) _emailController.text = state.email;
     if (_phoneController.text != state.phone) _phoneController.text = state.phone;
+    if (_dniController.text != state.dni) _dniController.text = state.dni;
     if (_pickupController.text != state.pickup) _pickupController.text = state.pickup;
   }
 
@@ -59,6 +63,36 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
 
     if (perfil.isLoading) {
       return const Center(child: CircularProgressIndicator());
+    }
+
+    if (perfil.errorMessage != null &&
+        perfil.name.isEmpty &&
+        perfil.email.isEmpty &&
+        perfil.phone.isEmpty &&
+        perfil.dni.isEmpty &&
+        perfil.pickup.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.p20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                perfil.errorMessage!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AppPrimaryButton(
+                label: 'Reintentar',
+                onPressed: controller.reload,
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     _syncControllers(perfil);
@@ -163,6 +197,16 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
                         decoration: InputDecoration(
                           labelText: 'Teléfono',
                           errorText: perfil.phoneError,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      TextField(
+                        controller: _dniController,
+                        onChanged: controller.setDni,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'DNI',
+                          errorText: perfil.dniError,
                         ),
                       ),
                     ],
@@ -279,9 +323,16 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
                 onPressed: (!perfil.hasChanges || !perfil.isValid || perfil.isSaving)
                     ? null
                     : () async {
-                        await controller.updatePerfil();
+                        final ok = await controller.updatePerfil();
                         if (!context.mounted) return;
-                        AppSnackbars.success(context, 'Perfil actualizado correctamente');
+                        if (ok) {
+                          AppSnackbars.success(context, 'Perfil actualizado correctamente');
+                        } else {
+                          AppSnackbars.error(
+                            context,
+                            ref.read(perfilProvider).errorMessage ?? 'No se pudo actualizar el perfil',
+                          );
+                        }
                       },
               ),
               const SizedBox(height: AppSpacing.lg),

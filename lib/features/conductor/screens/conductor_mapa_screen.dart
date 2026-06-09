@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
@@ -15,6 +16,8 @@ import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_viaje_provider.dart';
+
+const _driverMapsApiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
 
 class ConductorMapaScreen extends ConsumerStatefulWidget {
   const ConductorMapaScreen({super.key});
@@ -25,248 +28,59 @@ class ConductorMapaScreen extends ConsumerStatefulWidget {
 
 class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
   GoogleMapController? _mapController;
-  Timer? _moveTimer;
-  int _routeIndex = 0;
-  LatLng _vehicle = const LatLng(-12.0464, -76.9156);
-  bool _routeSheetShown = false;
-  BitmapDescriptor? _vehicleIcon;
-  BitmapDescriptor? _pendingIcon;
-  BitmapDescriptor? _pickedIcon;
-  BitmapDescriptor? _absentIcon;
-
-  final Map<ConductorRuta, List<LatLng>> _realRoutes = {};
+  Timer? _refreshTimer;
+  LatLng? _driverPosition;
+  String? _tripId;
+  bool _loading = true;
+  String? _errorMessage;
+  List<_PickupMarkerData> _pickupMarkers = const <_PickupMarkerData>[];
 
   @override
   void initState() {
     super.initState();
     if (!kIsWeb) {
-      _loadMarkerIcons();
-      _prefetchRoutes();
-    }
-  }
-
-  Future<void> _prefetchRoutes() async {
-    const apiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
-    const origin = LatLng(-12.0931, -76.9662);
-    const destination = LatLng(-11.9333, -76.7000);
-
-    final priale = await _fetchRoute(apiKey, origin, destination, waypoints: []);
-    final javierPrado = await _fetchRoute(apiKey, origin, destination,
-        waypoints: [const LatLng(-12.0762, -77.0903)]);
-
-    if (mounted) {
-      setState(() {
-        _realRoutes[ConductorRuta.priale] = priale;
-        _realRoutes[ConductorRuta.javierPrado] = javierPrado;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadDriverMap();
+        _refreshTimer = Timer.periodic(
+          const Duration(seconds: 15),
+          (_) => _loadDriverMap(silent: true),
+        );
       });
     }
   }
 
-  Future<List<LatLng>> _fetchRoute(String apiKey, LatLng origin, LatLng destination,
-      {required List<LatLng> waypoints}) async {
-    String waypointsParam = '';
-    if (waypoints.isNotEmpty) {
-      waypointsParam = '&waypoints=${waypoints.map((w) => '${w.latitude},${w.longitude}').join('|')}';
-    }
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/directions/json'
-      '?origin=${origin.latitude},${origin.longitude}'
-      '&destination=${destination.latitude},${destination.longitude}'
-      '$waypointsParam'
-      '&key=$apiKey&language=es',
-    );
-    try {
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['status'] == 'OK') {
-          final encoded = data['routes'][0]['overview_polyline']['points'] as String;
-          return _decodePolyline(encoded);
-        }
-      }
-    } catch (_) {}
-    return _fallbackRoutePoints(null) + [destination];
-  }
-
-  List<LatLng> _decodePolyline(String encoded) {
-    final points = <LatLng>[];
-    int index = 0, lat = 0, lng = 0;
-    while (index < encoded.length) {
-      int shift = 0, result = 0, b;
-      do { b = encoded.codeUnitAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-      lat += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
-      shift = 0; result = 0;
-      do { b = encoded.codeUnitAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-      lng += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
-      points.add(LatLng(lat / 1e5, lng / 1e5));
-    }
-    return points;
-  }
-
   @override
   void dispose() {
-    _moveTimer?.cancel();
+    _refreshTimer?.cancel();
     _mapController?.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadMarkerIcons() async {
-    final vehicle = await _circleMarker(const Color(0xFF2563EB), 'C');
-    final pending = await _circleMarker(const Color(0xFFF97316), '');
-    final picked = await _circleMarker(const Color(0xFF16A34A), '');
-    final absent = await _circleMarker(const Color(0xFF62748E), '');
-    if (!mounted) return;
-    setState(() {
-      _vehicleIcon = vehicle;
-      _pendingIcon = pending;
-      _pickedIcon = picked;
-      _absentIcon = absent;
-    });
-  }
-
-  Future<BitmapDescriptor> _circleMarker(Color color, String label) async {
-    const size = 96.0;
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    final paint = Paint()..color = color;
-    canvas.drawCircle(const Offset(size / 2, size / 2), size / 2, paint);
-
-    if (label.trim().isNotEmpty) {
-      final pb = ui.ParagraphBuilder(
-        ui.ParagraphStyle(
-          textAlign: TextAlign.center,
-          fontSize: 44,
-          fontWeight: FontWeight.w800,
-        ),
-      )..pushStyle(ui.TextStyle(color: const Color(0xFFFFFFFF)));
-      pb.addText(label);
-      final paragraph = pb.build();
-      paragraph.layout(const ui.ParagraphConstraints(width: size));
-      canvas.drawParagraph(paragraph, Offset(0, (size - paragraph.height) / 2));
-    }
-
-    final picture = recorder.endRecording();
-    final img = await picture.toImage(size.toInt(), size.toInt());
-    final bytes = await img.toByteData(format: ui.ImageByteFormat.png);
-    final data = bytes?.buffer.asUint8List();
-    if (data == null) return BitmapDescriptor.defaultMarker;
-    return BitmapDescriptor.bytes(data);
   }
 
   @override
   Widget build(BuildContext context) {
     final viaje = ref.watch(conductorViajeProvider);
-    final controller = ref.read(conductorViajeProvider.notifier);
-
-    final route = viaje.rutaSeleccionada;
-    if (route == null && !_routeSheetShown) {
-      _routeSheetShown = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!context.mounted) return;
-        final selected = await showModalBottomSheet<ConductorRuta>(
-          context: context,
-          isDismissible: false,
-          enableDrag: false,
-          showDragHandle: false,
-          builder: (context) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.p20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Selecciona tu ruta para este viaje',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2563EB),
-                        foregroundColor: AppColors.white,
-                        minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadius.r12),
-                        ),
-                      ),
-                      onPressed: () => Navigator.of(context).pop(ConductorRuta.priale),
-                      child: const Text('Vía La Priale (~35 min)'),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2563EB),
-                        foregroundColor: AppColors.white,
-                        minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadius.r12),
-                        ),
-                      ),
-                      onPressed: () => Navigator.of(context).pop(ConductorRuta.javierPrado),
-                      child: const Text('Vía Javier Prado/Santa Mónica (~42 min)'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-        if (selected == null) return;
-        controller.seleccionarRuta(selected);
-        _resetMovement(selected);
-      });
-    }
-
-    final routePoints = _realRoutes[route] ?? _fallbackRoutePoints(route);
-    if (_moveTimer == null && routePoints.isNotEmpty) {
-      _startMovement(routePoints);
-    }
-
     final pasajeros = [...viaje.pasajerosViaje]..sort((a, b) => a.asiento.compareTo(b.asiento));
-    final nextStop = pasajeros.where((p) => p.estado == EstadoPasajero.pendiente).cast<PasajeroViaje?>().firstWhere(
-          (p) => p != null,
-          orElse: () => null,
-        );
-    final nextEta = nextStop == null ? null : 4 + (nextStop.asiento % 5);
 
-    final markers = <Marker>{};
-    markers.add(Marker(
-      markerId: const MarkerId('vehicle'),
-      position: _vehicle,
-      icon: _vehicleIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-      infoWindow: const InfoWindow(title: 'Vehículo'),
-    ));
-
-    final pickups = _pickupCoordsBySeat();
-    for (final p in pasajeros) {
-      final pos = pickups[p.asiento] ?? const LatLng(-12.0464, -76.9156);
-      final icon = switch (p.estado) {
-        EstadoPasajero.pendiente => _pendingIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-        EstadoPasajero.abordo => _pickedIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        EstadoPasajero.noAbordo => _absentIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-      };
-      markers.add(Marker(
-        markerId: MarkerId('p_${p.id}'),
-        position: pos,
-        icon: icon,
-        infoWindow: InfoWindow(title: '${p.nombre} · #${p.asiento}', snippet: p.puntoRecojo),
-      ));
-    }
-
-    final polyline = routePoints.isEmpty
-        ? const <Polyline>{}
-        : {
-            Polyline(
-              polylineId: const PolylineId('route'),
-              color: const Color(0xFF2563EB),
-              width: 5,
-              points: routePoints,
-            ),
-          };
+    final markers = <Marker>{
+      if (_driverPosition != null)
+        Marker(
+          markerId: const MarkerId('driver'),
+          position: _driverPosition!,
+          infoWindow: const InfoWindow(title: 'Tu ubicación'),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+        ),
+      ..._pickupMarkers.map(
+        (pickup) => Marker(
+          markerId: MarkerId('pickup_${pickup.id}'),
+          position: pickup.position,
+          infoWindow: InfoWindow(
+            title: pickup.title,
+            snippet: pickup.subtitle,
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        ),
+      ),
+    };
 
     return Scaffold(
       body: Stack(
@@ -276,14 +90,20 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
           else
             GoogleMap(
               initialCameraPosition: CameraPosition(
-                target: routePoints.isNotEmpty ? routePoints[(routePoints.length / 2).floor()] : _vehicle,
-                zoom: 12,
+                target: _driverPosition ?? const LatLng(-12.0464, -76.9156),
+                zoom: 13,
               ),
-              onMapCreated: (c) => _mapController = c,
+              onMapCreated: (controller) {
+                _mapController = controller;
+                _fitBounds();
+              },
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
               markers: markers,
-              polylines: polyline,
+            ),
+          if (_loading && !kIsWeb)
+            const Positioned.fill(
+              child: Center(child: CircularProgressIndicator()),
             ),
           Positioned(
             top: AppSpacing.lg,
@@ -313,9 +133,9 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
           ),
           Positioned.fill(
             child: DraggableScrollableSheet(
-              initialChildSize: 0.24,
-              minChildSize: 0.16,
-              maxChildSize: 0.46,
+              initialChildSize: 0.28,
+              minChildSize: 0.18,
+              maxChildSize: 0.52,
               builder: (context, scrollController) {
                 return Container(
                   decoration: BoxDecoration(
@@ -323,7 +143,11 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.r16)),
                     border: Border.all(color: AppColors.border),
                     boxShadow: const [
-                      BoxShadow(color: AppColors.shadow, blurRadius: AppSpacing.shadowBlur, offset: Offset(0, -2)),
+                      BoxShadow(
+                        color: AppColors.shadow,
+                        blurRadius: AppSpacing.shadowBlur,
+                        offset: Offset(0, -2),
+                      ),
                     ],
                   ),
                   child: ListView(
@@ -332,7 +156,8 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
                     children: [
                       Center(
                         child: Container(
-                          width: 44, height: 5,
+                          width: 44,
+                          height: 5,
                           decoration: BoxDecoration(
                             color: const Color(0xFFE5E7EB),
                             borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -340,95 +165,104 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
                         ),
                       ),
                       const SizedBox(height: AppSpacing.md),
-                      Text('Próxima parada',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: AppColors.textPrimary, fontWeight: FontWeight.w900, fontSize: 16)),
+                      Text(
+                        'Mapa del viaje',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
                       const SizedBox(height: AppSpacing.sm),
-                      if (nextStop == null)
-                        Text('No hay paradas pendientes.',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: AppColors.textSecondary, fontWeight: FontWeight.w700))
-                      else
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Text('${nextStop.nombre} · Asiento #${nextStop.asiento}',
-                                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                    color: AppColors.textPrimary, fontWeight: FontWeight.w900)),
-                            const SizedBox(height: 2),
-                            Text(nextStop.puntoRecojo,
-                                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    color: AppColors.textSecondary, fontWeight: FontWeight.w700)),
-                            const SizedBox(height: AppSpacing.sm),
-                            Row(children: [
-                              const Icon(Icons.timer_rounded, color: AppColors.primaryBlue),
-                              const SizedBox(width: AppSpacing.sm),
-                              Text('ETA: ~${nextEta ?? 5} min',
-                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      color: AppColors.textPrimary, fontWeight: FontWeight.w900)),
-                            ]),
-                          ],
+                      Text(
+                        _tripId == null
+                            ? 'No hay un viaje activo en este momento.'
+                            : 'Tu GPS se actualiza en tiempo real y se muestran los puntos de recojo de tus pasajeros.',
+                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                      ),
+                      if (_errorMessage != null) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          _errorMessage!,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: AppColors.error,
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
+                      ],
                       const SizedBox(height: AppSpacing.lg),
-                      Text('Paradas',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: AppColors.textPrimary, fontWeight: FontWeight.w900)),
+                      Text(
+                        'Paradas',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
                       const SizedBox(height: AppSpacing.sm),
-                      SizedBox(
-                        height: 86,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: pasajeros.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
-                          itemBuilder: (context, i) {
-                            final p = pasajeros[i];
-                            final color = switch (p.estado) {
-                              EstadoPasajero.pendiente => const Color(0xFFF97316),
-                              EstadoPasajero.abordo => const Color(0xFF16A34A),
-                              EstadoPasajero.noAbordo => const Color(0xFF62748E),
-                            };
-                            return Container(
-                              width: 150,
+                      if (pasajeros.isEmpty)
+                        Text(
+                          'No hay pasajeros activos para este viaje.',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                        )
+                      else
+                        ...pasajeros.map(
+                          (p) => Padding(
+                            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                            child: Container(
                               decoration: BoxDecoration(
                                 color: AppColors.white,
                                 borderRadius: BorderRadius.circular(AppRadius.r16),
                                 border: Border.all(color: AppColors.border),
                               ),
-                              padding: const EdgeInsets.all(AppSpacing.sm),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              padding: const EdgeInsets.all(AppSpacing.md),
+                              child: Row(
                                 children: [
-                                  Row(children: [
-                                    Container(
-                                      width: 22, height: 22,
-                                      alignment: Alignment.center,
-                                      decoration: BoxDecoration(
-                                        color: color.withAlpha(34),
-                                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                                        border: Border.all(color: color),
-                                      ),
-                                      child: Text('${i + 1}',
-                                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                              color: color, fontWeight: FontWeight.w900)),
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.infoSurface,
+                                      borderRadius: BorderRadius.circular(AppRadius.pill),
                                     ),
-                                    const SizedBox(width: AppSpacing.xs),
-                                    Expanded(
-                                      child: Text(_shortName(p.nombre),
-                                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                                    child: Text(
+                                      '${p.asiento}',
+                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                            color: AppColors.primaryBlue,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: AppSpacing.md),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          p.nombre,
+                                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                                color: AppColors.textPrimary,
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          p.puntoRecojo,
                                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                              color: AppColors.textPrimary, fontWeight: FontWeight.w800)),
+                                                color: AppColors.textSecondary,
+                                              ),
+                                        ),
+                                      ],
                                     ),
-                                  ]),
-                                  const Spacer(),
-                                  Text('Asiento #${p.asiento}',
-                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: AppColors.textSecondary, fontWeight: FontWeight.w700)),
+                                  ),
                                 ],
                               ),
-                            );
-                          },
+                            ),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 );
@@ -440,12 +274,17 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
             bottom: 120,
             child: Column(
               children: [
-                _FabCircle(icon: Icons.my_location_rounded, bg: const Color(0xFF2563EB), onTap: _center),
+                _FabCircle(
+                  icon: Icons.my_location_rounded,
+                  bg: const Color(0xFF2563EB),
+                  onTap: _center,
+                ),
                 const SizedBox(height: AppSpacing.sm),
                 _FabCircle(
-                    icon: Icons.qr_code_scanner_rounded,
-                    bg: const Color(0xFFF97316),
-                    onTap: () => context.push(AppRoutes.driverQrScanner)),
+                  icon: Icons.qr_code_scanner_rounded,
+                  bg: const Color(0xFFF97316),
+                  onTap: () => context.push(AppRoutes.driverQrScanner),
+                ),
               ],
             ),
           ),
@@ -454,35 +293,214 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
     );
   }
 
-  void _center() {
-    _mapController?.animateCamera(CameraUpdate.newCameraPosition(CameraPosition(target: _vehicle, zoom: 14)));
-  }
+  Future<void> _loadDriverMap({bool silent = false}) async {
+    if (!mounted || kIsWeb) return;
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _errorMessage = null;
+      });
+    }
 
-  void _resetMovement(ConductorRuta route) {
-    final points = _realRoutes[route] ?? _fallbackRoutePoints(route);
-    if (points.isEmpty) return;
-    setState(() { _routeIndex = 0; _vehicle = points.first; });
-    _startMovement(points);
-    _center();
-  }
+    try {
+      await _ensureDriverLocationPermission();
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        throw Exception('No hay sesión activa del conductor.');
+      }
 
-  void _startMovement(List<LatLng> points) {
-    _moveTimer?.cancel();
-    if (points.isEmpty) return;
-    if (_routeIndex >= points.length) _routeIndex = 0;
-    _vehicle = points[_routeIndex];
-    _moveTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      final position = await Geolocator.getCurrentPosition();
+      final driverPosition = LatLng(position.latitude, position.longitude);
+
+      final driverRow = await Supabase.instance.client
+          .from('drivers')
+          .select('id, capacity')
+          .eq('profile_id', user.id)
+          .single();
+      final driverId = driverRow['id']?.toString();
+      if (driverId == null || driverId.isEmpty) {
+        throw Exception('No se encontró el conductor autenticado.');
+      }
+
+      final tripRow = await Supabase.instance.client
+          .from('trips')
+          .select('id')
+          .eq('driver_id', driverId)
+          .neq('status', 'completado')
+          .neq('status', 'cancelado')
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      final tripId = tripRow?['id']?.toString();
+
+      await Supabase.instance.client.from('driver_locations').upsert({
+        'driver_id': driverId,
+        'trip_id': tripId,
+        'lat': driverPosition.latitude,
+        'lng': driverPosition.longitude,
+        'occupied_seats': ref.read(conductorViajeProvider).asientosOcupados.length,
+        'capacity': (driverRow['capacity'] as int?) ?? 0,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      final pickups = tripId == null ? const <_PickupMarkerData>[] : await _loadPickupMarkers(tripId);
+
       if (!mounted) return;
       setState(() {
-        _routeIndex = (_routeIndex + 1) % points.length;
-        _vehicle = points[_routeIndex];
+        _tripId = tripId;
+        _driverPosition = driverPosition;
+        _pickupMarkers = pickups;
+        _loading = false;
+        _errorMessage = null;
       });
-    });
+      _fitBounds();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  Future<List<_PickupMarkerData>> _loadPickupMarkers(String tripId) async {
+    final reservations = await Supabase.instance.client
+        .from('reservations')
+        .select('''
+          id,
+          pickup_point,
+          pickup_point_id,
+          seats,
+          profiles(name),
+          pickup_points(address, lat, lng)
+        ''')
+        .eq('trip_id', tripId)
+        .eq('status', 'activa');
+
+    final markers = <_PickupMarkerData>[];
+    for (final raw in (reservations as List).cast<Map<String, dynamic>>()) {
+      final row = Map<String, dynamic>.from(raw);
+      final profile = row['profiles'] is Map ? Map<String, dynamic>.from(row['profiles'] as Map) : <String, dynamic>{};
+      final pickupPoint = row['pickup_points'] is Map ? Map<String, dynamic>.from(row['pickup_points'] as Map) : <String, dynamic>{};
+      final lat = (pickupPoint['lat'] as num?)?.toDouble();
+      final lng = (pickupPoint['lng'] as num?)?.toDouble();
+      LatLng? position;
+
+      if (lat != null && lng != null) {
+        position = LatLng(lat, lng);
+      } else {
+        final address = row['pickup_point']?.toString().trim();
+        if (address != null && address.isNotEmpty && address != '—') {
+          position = await _geocodeAddress(address);
+        }
+      }
+
+      if (position == null) continue;
+
+      final seats = ((row['seats'] as List?) ?? const <dynamic>[]).whereType<int>().toList()..sort();
+      final passengerName = profile['name']?.toString().trim().isNotEmpty == true
+          ? profile['name'].toString().trim()
+          : 'Pasajero';
+
+      markers.add(
+        _PickupMarkerData(
+          id: row['id'].toString(),
+          position: position,
+          title: passengerName,
+          subtitle: '${row['pickup_point'] ?? pickupPoint['address'] ?? 'Punto de recojo'} · ${seats.map((s) => '#$s').join(', ')}',
+        ),
+      );
+    }
+
+    return markers;
+  }
+
+  Future<LatLng?> _geocodeAddress(String address) async {
+    final url = Uri.parse(
+      'https://maps.googleapis.com/maps/api/geocode/json'
+      '?address=${Uri.encodeComponent('$address, Lima, Peru')}'
+      '&key=$_driverMapsApiKey&language=es',
+    );
+
+    try {
+      final response = await http.get(url);
+      if (response.statusCode != 200) return null;
+      final json = jsonDecode(response.body);
+      if (json['status'] != 'OK') return null;
+      final location = json['results'][0]['geometry']['location'];
+      final lat = (location['lat'] as num?)?.toDouble();
+      final lng = (location['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) return null;
+      return LatLng(lat, lng);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _fitBounds() async {
+    final controller = _mapController;
+    final driver = _driverPosition;
+    if (controller == null || driver == null) return;
+
+    final points = <LatLng>[driver, ..._pickupMarkers.map((e) => e.position)];
+    if (points.length == 1) {
+      await controller.animateCamera(CameraUpdate.newCameraPosition(
+        CameraPosition(target: driver, zoom: 14),
+      ));
+      return;
+    }
+
+    double minLat = points.first.latitude;
+    double maxLat = points.first.latitude;
+    double minLng = points.first.longitude;
+    double maxLng = points.first.longitude;
+
+    for (final point in points.skip(1)) {
+      if (point.latitude < minLat) minLat = point.latitude;
+      if (point.latitude > maxLat) maxLat = point.latitude;
+      if (point.longitude < minLng) minLng = point.longitude;
+      if (point.longitude > maxLng) maxLng = point.longitude;
+    }
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+
+    await controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 72));
+  }
+
+  void _center() {
+    if (_driverPosition == null) return;
+    _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: _driverPosition!, zoom: 14),
+      ),
+    );
   }
 }
 
+class _PickupMarkerData {
+  const _PickupMarkerData({
+    required this.id,
+    required this.position,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String id;
+  final LatLng position;
+  final String title;
+  final String subtitle;
+}
+
 class _FabCircle extends StatelessWidget {
-  const _FabCircle({required this.icon, required this.bg, required this.onTap});
+  const _FabCircle({
+    required this.icon,
+    required this.bg,
+    required this.onTap,
+  });
+
   final IconData icon;
   final Color bg;
   final VoidCallback onTap;
@@ -493,11 +511,18 @@ class _FabCircle extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.pill),
       onTap: onTap,
       child: Ink(
-        width: 54, height: 54,
+        width: 54,
+        height: 54,
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(AppRadius.pill),
-          boxShadow: const [BoxShadow(color: AppColors.shadow, blurRadius: AppSpacing.shadowBlur, offset: Offset(0, AppSpacing.shadowOffsetY))],
+          boxShadow: const [
+            BoxShadow(
+              color: AppColors.shadow,
+              blurRadius: AppSpacing.shadowBlur,
+              offset: Offset(0, AppSpacing.shadowOffsetY),
+            ),
+          ],
         ),
         child: Icon(icon, color: AppColors.white),
       ),
@@ -521,9 +546,13 @@ class _WebMapFallback extends StatelessWidget {
               children: [
                 const Icon(Icons.map_rounded, color: AppColors.primaryBlue, size: 42),
                 const SizedBox(height: AppSpacing.sm),
-                Text('Mapa no disponible en Web',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary, fontWeight: FontWeight.w700)),
+                Text(
+                  'Mapa no disponible en Web',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
               ],
             ),
           ),
@@ -533,37 +562,17 @@ class _WebMapFallback extends StatelessWidget {
   }
 }
 
-List<LatLng> _fallbackRoutePoints(ConductorRuta? route) {
-  if (route == null) return const [];
-  const sanIsidro = LatLng(-12.0931, -76.9662);
-  const mid1 = LatLng(-12.0670, -76.9450);
-  const mid2 = LatLng(-12.0464, -76.9156);
-  const mid3 = LatLng(-12.0000, -76.8600);
-  const chosica = LatLng(-11.9333, -76.7000);
-  switch (route) {
-    case ConductorRuta.priale:
-      return const [sanIsidro, mid2, mid3, chosica];
-    case ConductorRuta.javierPrado:
-      return const [sanIsidro, mid1, mid2, chosica];
+Future<void> _ensureDriverLocationPermission() async {
+  final enabled = await Geolocator.isLocationServiceEnabled();
+  if (!enabled) {
+    throw Exception('Activa la ubicación del dispositivo para usar el mapa.');
   }
-}
 
-Map<int, LatLng> _pickupCoordsBySeat() {
-  return const {
-    1: LatLng(-12.0829, -76.9635),
-    2: LatLng(-12.1142, -77.0306),
-    3: LatLng(-12.0762, -77.0903),
-    4: LatLng(-12.0469, -76.9434),
-    5: LatLng(-12.0360, -76.8990),
-    6: LatLng(-11.9348, -76.7078),
-    7: LatLng(-12.0540, -76.8900),
-    8: LatLng(-12.0100, -76.8200),
-  };
-}
-
-String _shortName(String name) {
-  final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-  if (parts.isEmpty) return name;
-  if (parts.length == 1) return parts.first;
-  return '${parts.first} ${parts[1][0]}.';
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
+  if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+    throw Exception('La app no tiene permiso para acceder a tu ubicación.');
+  }
 }

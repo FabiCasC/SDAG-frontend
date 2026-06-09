@@ -1,8 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../core/mock/mock_data.dart';
-
 class ReservaAcompanante {
   const ReservaAcompanante({
     required this.seatNumber,
@@ -15,6 +13,32 @@ class ReservaAcompanante {
   final String fullName;
   final String dni;
   final String phone;
+}
+
+class ReservaDriverInfo {
+  const ReservaDriverInfo({
+    required this.tripId,
+    required this.driverId,
+    required this.name,
+    required this.plate,
+    required this.vehicleType,
+    required this.totalSeats,
+    required this.routeLabel,
+    required this.rating,
+    required this.ratingCount,
+    required this.status,
+  });
+
+  final String tripId;
+  final String driverId;
+  final String name;
+  final String plate;
+  final String vehicleType;
+  final int totalSeats;
+  final String routeLabel;
+  final double rating;
+  final int ratingCount;
+  final String status;
 }
 
 class ReservaState {
@@ -30,7 +54,7 @@ class ReservaState {
   });
 
   final String? reservaId;
-  final MockDriver? conductorSeleccionado;
+  final ReservaDriverInfo? conductorSeleccionado;
   final List<int> asientosSeleccionados;
   final Map<int, ReservaAcompanante> acompanantes;
   final String? puntoRecojo;
@@ -43,7 +67,7 @@ class ReservaState {
 
   ReservaState copyWith({
     String? reservaId,
-    MockDriver? conductorSeleccionado,
+    ReservaDriverInfo? conductorSeleccionado,
     List<int>? asientosSeleccionados,
     Map<int, ReservaAcompanante>? acompanantes,
     String? puntoRecojo,
@@ -83,7 +107,7 @@ class ReservaState {
 class ReservaController extends StateNotifier<ReservaState> {
   ReservaController() : super(ReservaState.empty);
 
-  void startWithDriver(MockDriver driver) {
+  void startWithDriver(ReservaDriverInfo driver) {
     state = ReservaState(
       reservaId: null,
       conductorSeleccionado: driver,
@@ -144,28 +168,10 @@ final reservaProvider = StateNotifierProvider<ReservaController, ReservaState>(
   (ref) => ReservaController(),
 );
 
-final occupiedSeatsByPlateProvider = FutureProvider.autoDispose.family<List<int>, String>(
-  (ref, plate) async {
+final occupiedSeatsByTripProvider = FutureProvider.autoDispose.family<List<int>, String>(
+  (ref, tripId) async {
     try {
-      final driver = await Supabase.instance.client
-          .from('drivers')
-          .select('id')
-          .eq('plate', plate)
-          .maybeSingle();
-      final driverId = driver?['id']?.toString();
-      if (driverId == null) return const <int>[];
-
-      final trip = await Supabase.instance.client
-          .from('trips')
-          .select('id, status')
-          .eq('driver_id', driverId)
-          .neq('status', 'completado')
-          .neq('status', 'cancelado')
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-      final tripId = trip?['id']?.toString();
-      if (tripId == null) return const <int>[];
+      if (tripId.trim().isEmpty) return const <int>[];
 
       final rows = await Supabase.instance.client
           .from('reservations')

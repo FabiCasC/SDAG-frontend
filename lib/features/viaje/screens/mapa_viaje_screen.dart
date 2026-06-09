@@ -1,12 +1,15 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../features/reserva/providers/reserva_provider.dart';
@@ -15,6 +18,8 @@ import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/viaje_provider.dart';
+
+const _mapsApiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
 
 List<LatLng> _decodePolyline(String encoded) {
   final points = <LatLng>[];
@@ -41,12 +46,11 @@ List<LatLng> _decodePolyline(String encoded) {
 }
 
 Future<List<LatLng>> _fetchDirections(LatLng origin, LatLng destination) async {
-  const apiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
   final url = Uri.parse(
     'https://maps.googleapis.com/maps/api/directions/json'
     '?origin=${origin.latitude},${origin.longitude}'
     '&destination=${destination.latitude},${destination.longitude}'
-    '&key=$apiKey&language=es',
+    '&key=$_mapsApiKey&language=es',
   );
   try {
     final response = await http.get(url);
@@ -69,21 +73,26 @@ class MapaViajeScreen extends ConsumerStatefulWidget {
 }
 
 class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
-  static const _origin = LatLng(-12.0931, -76.9662);
-  static const _destination = LatLng(-11.9333, -76.7000);
-  static const _mid = LatLng(-12.0464, -76.9156);
-
-  List<LatLng> _routePoints = const [_origin, _mid, _destination];
+  GoogleMapController? _mapController;
+  Timer? _refreshTimer;
+  List<LatLng> _routePoints = const <LatLng>[];
+  LatLng? _passengerPosition;
+  LatLng? _driverPosition;
+  int? _driverEta;
+  String? _errorMessage;
   bool _loadingRoute = true;
+  bool _initialized = false;
 
   @override
   void initState() {
     super.initState();
-    if (!kIsWeb) {
-      _fetchDirections(_origin, _destination).then((points) {
-        if (mounted) setState(() { _routePoints = points; _loadingRoute = false; });
-      });
-    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _mapController?.dispose();
+    super.dispose();
   }
 
   @override
@@ -107,7 +116,18 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
       );
     }
 
-    final vehicle = LatLng(viaje.vehiclePosition.lat, viaje.vehiclePosition.lng);
+    if (!kIsWeb && !_initialized) {
+      _initialized = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadMapData(driver.driverId);
+        _refreshTimer?.cancel();
+        _refreshTimer = Timer.periodic(
+          const Duration(seconds: 15),
+          (_) => _loadMapData(driver.driverId, silent: true),
+        );
+      });
+    }
+
     final polyline = Polyline(
       polylineId: const PolylineId('route'),
       color: AppColors.primaryBlue,
@@ -122,15 +142,30 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
             _WebMapFallback(vehicleLabel: '${driver.name} · ${driver.plate}')
           else
             GoogleMap(
-              initialCameraPosition: const CameraPosition(target: _mid, zoom: 11),
-              polylines: {polyline},
+              initialCameraPosition: CameraPosition(
+                target: _cameraTarget(),
+                zoom: 13,
+              ),
+              onMapCreated: (controller) {
+                _mapController = controller;
+                _fitBounds();
+              },
+              polylines: _routePoints.length >= 2 ? {polyline} : const <Polyline>{},
               markers: {
-                Marker(
-                  markerId: const MarkerId('vehicle'),
-                  position: vehicle,
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-                ),
-                const Marker(markerId: MarkerId('pickup'), position: _origin),
+                if (_passengerPosition != null)
+                  Marker(
+                    markerId: const MarkerId('passenger'),
+                    position: _passengerPosition!,
+                    infoWindow: const InfoWindow(title: 'Tu ubicación'),
+                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                  ),
+                if (_driverPosition != null)
+                  Marker(
+                    markerId: const MarkerId('driver'),
+                    position: _driverPosition!,
+                    infoWindow: InfoWindow(title: driver.name, snippet: driver.plate),
+                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                  ),
               },
               myLocationButtonEnabled: false,
               zoomControlsEnabled: false,
@@ -185,7 +220,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Llegas en ~35 min',
+                          'Conductor en camino',
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                 color: AppColors.textPrimary,
                                 fontWeight: FontWeight.w700,
@@ -198,6 +233,25 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                                 color: AppColors.textSecondary,
                               ),
                         ),
+                        if (_errorMessage != null) ...[
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            _errorMessage!,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: AppColors.error,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ] else ...[
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            'ETA estimado: ${_driverEta ?? viaje.etaMinutes} min',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
                         const SizedBox(height: AppSpacing.md),
                         FilledButton(
                           style: FilledButton.styleFrom(
@@ -250,6 +304,99 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
       },
     );
     return result ?? false;
+  }
+
+  Future<void> _loadMapData(String driverId, {bool silent = false}) async {
+    if (!mounted || kIsWeb) return;
+    if (!silent) {
+      setState(() {
+        _loadingRoute = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      await _ensureLocationPermission();
+      final position = await Geolocator.getCurrentPosition();
+      final passengerLatLng = LatLng(position.latitude, position.longitude);
+
+      final driverLocation = await Supabase.instance.client
+          .from('driver_locations')
+          .select('lat, lng, eta_minutes')
+          .eq('driver_id', driverId)
+          .single();
+
+      final driverLat = (driverLocation['lat'] as num?)?.toDouble();
+      final driverLng = (driverLocation['lng'] as num?)?.toDouble();
+      if (driverLat == null || driverLng == null) {
+        throw Exception('La ubicación del conductor aún no está disponible.');
+      }
+
+      final driverLatLng = LatLng(driverLat, driverLng);
+      final directions = await _fetchDirections(passengerLatLng, driverLatLng);
+
+      if (!mounted) return;
+      setState(() {
+        _passengerPosition = passengerLatLng;
+        _driverPosition = driverLatLng;
+        _driverEta = driverLocation['eta_minutes'] as int?;
+        _routePoints = directions;
+        _errorMessage = null;
+        _loadingRoute = false;
+      });
+      _fitBounds();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _loadingRoute = false;
+      });
+    }
+  }
+
+  LatLng _cameraTarget() {
+    if (_passengerPosition != null && _driverPosition != null) {
+      return LatLng(
+        (_passengerPosition!.latitude + _driverPosition!.latitude) / 2,
+        (_passengerPosition!.longitude + _driverPosition!.longitude) / 2,
+      );
+    }
+    return _passengerPosition ?? _driverPosition ?? const LatLng(-12.0464, -76.9156);
+  }
+
+  Future<void> _fitBounds() async {
+    final controller = _mapController;
+    final passenger = _passengerPosition;
+    final driver = _driverPosition;
+    if (controller == null || passenger == null || driver == null) return;
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(
+        passenger.latitude < driver.latitude ? passenger.latitude : driver.latitude,
+        passenger.longitude < driver.longitude ? passenger.longitude : driver.longitude,
+      ),
+      northeast: LatLng(
+        passenger.latitude > driver.latitude ? passenger.latitude : driver.latitude,
+        passenger.longitude > driver.longitude ? passenger.longitude : driver.longitude,
+      ),
+    );
+
+    await controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 72));
+  }
+}
+
+Future<void> _ensureLocationPermission() async {
+  final enabled = await Geolocator.isLocationServiceEnabled();
+  if (!enabled) {
+    throw Exception('Activa la ubicación del dispositivo para ver el mapa.');
+  }
+
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
+  if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+    throw Exception('La app no tiene permiso para acceder a tu ubicación.');
   }
 }
 
