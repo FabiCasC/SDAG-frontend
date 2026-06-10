@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
@@ -17,12 +18,17 @@ class ConductorComisionesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(conductorComisionesProvider);
     final auth = ref.watch(conductorAuthProvider);
+    final pendingConfirmAsync = ref.watch(_pendingPayoutConfirmProvider);
 
     final date = '${state.hoy.day.toString().padLeft(2, '0')}/'
         '${state.hoy.month.toString().padLeft(2, '0')}/${state.hoy.year}';
     final total = state.totalDia;
     final comision = state.comisionDia;
     final pct = (state.porcentajeComision * 100).round();
+    final canConfirmReceipt = pendingConfirmAsync.maybeWhen(
+      data: (info) => info.hasPending,
+      orElse: () => false,
+    );
 
     return SafeArea(
       child: ListView(
@@ -138,6 +144,7 @@ class ConductorComisionesScreen extends ConsumerWidget {
           _SolicitudPagoSection(
             estado: state.estadoSolicitud,
             monto: comision,
+            canConfirmReceipt: canConfirmReceipt,
             onSolicitar: () async {
               final ok = await showDialog<bool>(
                 context: context,
@@ -160,10 +167,41 @@ class ConductorComisionesScreen extends ConsumerWidget {
               );
               if (ok != true) return;
               await ref.read(conductorComisionesProvider.notifier).solicitarPago();
+              ref.invalidate(_pendingPayoutConfirmProvider);
               if (!context.mounted) return;
               AppSnackbars.success(context, 'Solicitud enviada');
             },
             onConfirmarRecepcion: () async {
+              final user = Supabase.instance.client.auth.currentUser;
+              if (user == null) {
+                AppSnackbars.error(context, 'No tienes ningún pago pendiente de confirmar.');
+                return;
+              }
+
+              try {
+                final driver = await Supabase.instance.client
+                    .from('drivers')
+                    .select('id')
+                    .eq('profile_id', user.id)
+                    .single();
+
+                final pendiente = await Supabase.instance.client
+                    .from('driver_payout_requests')
+                    .select('id, amount')
+                    .eq('driver_id', driver['id'])
+                    .eq('status', 'pendiente')
+                    .maybeSingle();
+
+                final montoPendiente = ((pendiente?['amount'] as num?) ?? 0).toDouble();
+                if (pendiente == null || montoPendiente <= 0) {
+                  AppSnackbars.error(context, 'No tienes ningún pago pendiente de confirmar.');
+                  return;
+                }
+              } catch (_) {
+                AppSnackbars.error(context, 'No tienes ningún pago pendiente de confirmar.');
+                return;
+              }
+
               final ok = await showDialog<bool>(
                 context: context,
                 builder: (context) {
@@ -188,6 +226,7 @@ class ConductorComisionesScreen extends ConsumerWidget {
               );
               if (ok != true) return;
               await ref.read(conductorComisionesProvider.notifier).confirmarRecepcion();
+              ref.invalidate(_pendingPayoutConfirmProvider);
               if (!context.mounted) return;
               AppSnackbars.success(
                 context,
@@ -341,12 +380,14 @@ class _SolicitudPagoSection extends StatelessWidget {
   const _SolicitudPagoSection({
     required this.estado,
     required this.monto,
+    required this.canConfirmReceipt,
     required this.onSolicitar,
     required this.onConfirmarRecepcion,
   });
 
   final ConductorEstadoSolicitudPago estado;
   final double monto;
+  final bool canConfirmReceipt;
   final VoidCallback onSolicitar;
   final VoidCallback onConfirmarRecepcion;
 
@@ -380,17 +421,20 @@ class _SolicitudPagoSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFF97316),
-              foregroundColor: AppColors.white,
-              minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.r12),
+          Tooltip(
+            message: canConfirmReceipt ? '' : 'Sin pagos pendientes',
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: canConfirmReceipt ? const Color(0xFFF97316) : const Color(0xFFCBD5E1),
+                foregroundColor: AppColors.white,
+                minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.r12),
+                ),
               ),
+              onPressed: canConfirmReceipt ? onConfirmarRecepcion : null,
+              child: Text('Confirmar recepción (S/ ${monto.toStringAsFixed(0)})'),
             ),
-            onPressed: onConfirmarRecepcion,
-            child: Text('Confirmar recepción (S/ ${monto.toStringAsFixed(0)})'),
           ),
         ],
       );
@@ -464,6 +508,43 @@ class _SolicitudPagoSection extends StatelessWidget {
     );
   }
 }
+
+class _PendingPayoutConfirmInfo {
+  const _PendingPayoutConfirmInfo({
+    required this.hasPending,
+  });
+
+  final bool hasPending;
+}
+
+final _pendingPayoutConfirmProvider = FutureProvider.autoDispose<_PendingPayoutConfirmInfo>((ref) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) {
+    return const _PendingPayoutConfirmInfo(hasPending: false);
+  }
+
+  try {
+    final driver = await Supabase.instance.client
+        .from('drivers')
+        .select('id')
+        .eq('profile_id', user.id)
+        .single();
+
+    final pendiente = await Supabase.instance.client
+        .from('driver_payout_requests')
+        .select('id, amount')
+        .eq('driver_id', driver['id'])
+        .eq('status', 'pendiente')
+        .maybeSingle();
+
+    final amount = ((pendiente?['amount'] as num?) ?? 0).toDouble();
+    return _PendingPayoutConfirmInfo(
+      hasPending: pendiente != null && amount > 0,
+    );
+  } catch (_) {
+    return const _PendingPayoutConfirmInfo(hasPending: false);
+  }
+});
 
 class _PagoRow extends StatelessWidget {
   const _PagoRow({

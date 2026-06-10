@@ -6,15 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_manifiesto_provider.dart';
-import '../providers/conductor_viaje_provider.dart';
 
-enum _OverlayState { idle, ok, error }
+enum _ScanResultType { idle, success, error }
 
 class ConductorQrScannerScreen extends ConsumerStatefulWidget {
   const ConductorQrScannerScreen({super.key});
@@ -29,162 +29,172 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
     detectionSpeed: DetectionSpeed.noDuplicates,
   );
 
-  _OverlayState _overlay = _OverlayState.idle;
-  Timer? _overlayTimer;
   bool _processing = false;
-  ManifiestoItem? _current;
+  bool _scannerPaused = false;
+  bool _cooldownFinished = true;
+  Timer? _cooldownTimer;
+  _ScanOutcome? _result;
 
   @override
   void dispose() {
-    _overlayTimer?.cancel();
+    _cooldownTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  void _setOverlay(_OverlayState state) {
-    _overlayTimer?.cancel();
-    setState(() => _overlay = state);
-    if (state == _OverlayState.idle) return;
-    _overlayTimer = Timer(const Duration(seconds: 2), () {
+  Future<void> _pauseScannerForCooldown() async {
+    _cooldownTimer?.cancel();
+    _cooldownFinished = false;
+    _scannerPaused = true;
+    await _controller.stop();
+    _cooldownTimer = Timer(const Duration(seconds: 3), () {
       if (!mounted) return;
-      setState(() => _overlay = _OverlayState.idle);
+      setState(() {
+        _cooldownFinished = true;
+      });
     });
   }
 
-  void _onDetect(BarcodeCapture capture) async {
-    if (_processing) return;
-    final raw = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue : null;
-    if (raw == null || raw.trim().isEmpty) return;
+  Future<void> _resetScanner() async {
+    if (!_cooldownFinished || _processing) return;
+    setState(() {
+      _result = null;
+      _scannerPaused = false;
+    });
+    await _controller.start();
+  }
+
+  Future<void> _setErrorResult(String message) async {
+    await _pauseScannerForCooldown();
+    if (!mounted) return;
+    setState(() {
+      _result = _ScanOutcome.error(message: message);
+    });
+  }
+
+  Future<void> _onDetect(BarcodeCapture capture) async {
+    if (_processing || _scannerPaused || _result != null) return;
+    final qrValue = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue?.trim() : null;
+    if (qrValue == null || qrValue.isEmpty) return;
+
     _processing = true;
     try {
-      final parsed = _parseQr(raw);
-      final manifiesto = ref.read(conductorManifiestoProvider).listaPasajeros;
+      final reserva = await Supabase.instance.client
+          .from('reservations')
+          .select('''
+            id, status, seats, pickup_point, trip_id, passenger_profile_id,
+            profiles:passenger_profile_id(name, first_name, last_name, dni, phone)
+          ''')
+          .eq('id', qrValue)
+          .maybeSingle();
 
-      ManifiestoItem? passenger;
-      if (parsed.passengerId != null) {
-        passenger = manifiesto.where((p) => p.id == parsed.passengerId).cast<ManifiestoItem?>().firstWhere(
-              (p) => p != null,
-              orElse: () => null,
-            );
-      }
-      passenger ??= manifiesto.where((p) => p.asiento == parsed.seat).cast<ManifiestoItem?>().firstWhere(
-            (p) => p != null,
-            orElse: () => null,
-          );
-
-      if (passenger == null || parsed.seat == null) {
-        _setOverlay(_OverlayState.error);
-        if (!mounted) return;
-        AppSnackbars.error(context, 'QR inválido o ya utilizado');
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        await _setErrorResult('No hay una sesión activa');
         return;
       }
 
-      if (passenger.estado == ManifiestoEstadoPasajero.subio) {
-        if (!mounted) return;
-        AppSnackbars.warning(context, 'Este pasajero ya abordó');
+      final driver = await Supabase.instance.client
+          .from('drivers')
+          .select('id')
+          .eq('profile_id', user.id)
+          .single();
+
+      final tripActivo = await Supabase.instance.client
+          .from('trips')
+          .select('id')
+          .eq('driver_id', driver['id'])
+          .inFilter('status', ['esperando', 'en_ruta'])
+          .maybeSingle();
+
+      if (reserva == null) {
+        await _setErrorResult('QR inválido');
         return;
       }
 
-      if (passenger.estado == ManifiestoEstadoPasajero.noSubio) {
-        _setOverlay(_OverlayState.error);
-        if (!mounted) return;
-        AppSnackbars.error(context, 'QR inválido o ya utilizado');
+      if (tripActivo == null) {
+        await _setErrorResult('No tienes un viaje activo');
         return;
       }
 
+      if (reserva['trip_id']?.toString() != tripActivo['id']?.toString()) {
+        await _setErrorResult('Este pasajero no pertenece a tu viaje');
+        return;
+      }
+
+      if (reserva['status']?.toString() != 'activa') {
+        await _setErrorResult('Esta reserva ya fue usada o cancelada');
+        return;
+      }
+
+      final manifest = await Supabase.instance.client
+          .from('manifests')
+          .select('id')
+          .eq('trip_id', tripActivo['id'])
+          .single();
+
+      final passengerProfileId = reserva['passenger_profile_id']?.toString();
+      if (passengerProfileId == null || passengerProfileId.isEmpty) {
+        await _setErrorResult('QR inválido');
+        return;
+      }
+
+      final existingEntries = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('boarding_status')
+          .eq('manifest_id', manifest['id'])
+          .eq('passenger_profile_id', passengerProfileId);
+
+      final alreadyBoarded = (existingEntries as List).any(
+        (entry) => (entry as Map)['boarding_status']?.toString() == 'abordo',
+      );
+
+      if (alreadyBoarded) {
+        await _setErrorResult('Este pasajero ya abordó');
+        return;
+      }
+
+      await Supabase.instance.client
+          .from('manifest_entries')
+          .update({'boarding_status': 'abordo'})
+          .eq('manifest_id', manifest['id'])
+          .eq('passenger_profile_id', passengerProfileId);
+
+      ref.invalidate(conductorManifiestoProvider);
       HapticFeedback.mediumImpact();
-      _setOverlay(_OverlayState.ok);
+
+      final profile = _asMap(reserva['profiles']);
+      final seats = _parseSeats(reserva['seats']);
+      final outcome = _ScanOutcome.success(
+        passengerName: _passengerName(profile),
+        seatsLabel: seats.isEmpty ? '—' : seats.map((seat) => '#$seat').join(', '),
+        pickupPoint: reserva['pickup_point']?.toString() ?? '—',
+      );
+
+      await _pauseScannerForCooldown();
       if (!mounted) return;
-      setState(() => _current = passenger);
+      setState(() {
+        _result = outcome;
+      });
+    } catch (e) {
+      await _setErrorResult('No se pudo validar el QR: $e');
     } finally {
       _processing = false;
     }
   }
 
-  Future<void> _confirmBoarding(ManifiestoItem p) async {
-    await ref.read(conductorManifiestoProvider.notifier).marcarAbordaje(p.id);
-    ref.read(conductorViajeProvider.notifier).actualizarEstadoPasajero(
-          pasajeroId: p.id,
-          estado: EstadoPasajero.abordo,
-        );
-    if (!mounted) return;
-    AppSnackbars.success(context, '${p.nombreCompleto} abordó');
-    setState(() => _current = null);
-  }
-
-  Future<void> _markAbsent(ManifiestoItem p) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Marcar como no abordó'),
-          content: Text(
-            '¿Confirmas que ${p.nombreCompleto} no abordó?\nSu pago NO será reembolsado.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Confirmar'),
-            ),
-          ],
-        );
-      },
-    );
-    if (ok != true) return;
-
-    await ref.read(conductorManifiestoProvider.notifier).marcarAusencia(p.id);
-    ref.read(conductorViajeProvider.notifier).actualizarEstadoPasajero(
-          pasajeroId: p.id,
-          estado: EstadoPasajero.noAbordo,
-        );
-
-    if (!mounted) return;
-    final viaje = ref.read(conductorViajeProvider);
-    final canRevert = viaje.estadoViaje != ConductorEstadoViaje.enRuta;
-    final snack = SnackBar(
-      backgroundColor: AppColors.warning,
-      content: const Text(
-        'Ausencia registrada',
-        style: TextStyle(color: AppColors.white),
-      ),
-      action: !canRevert
-          ? null
-          : SnackBarAction(
-              label: 'Revertir',
-              textColor: AppColors.white,
-              onPressed: () async {
-                await ref.read(conductorManifiestoProvider.notifier).revertirAusencia(p.id);
-                ref.read(conductorViajeProvider.notifier).actualizarEstadoPasajero(
-                      pasajeroId: p.id,
-                      estado: EstadoPasajero.pendiente,
-                    );
-              },
-            ),
-    );
-    ScaffoldMessenger.of(context).showSnackBar(snack);
-    setState(() => _current = null);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final manifiesto = ref.watch(conductorManifiestoProvider).listaPasajeros;
-    final pendientes = manifiesto.where((p) => p.estado == ManifiestoEstadoPasajero.pendiente).toList()
-      ..sort((a, b) => a.asiento.compareTo(b.asiento));
-
-    final overlayColor = switch (_overlay) {
-      _OverlayState.ok => const Color(0xFF16A34A),
-      _OverlayState.error => const Color(0xFFDC2626),
-      _OverlayState.idle => Colors.transparent,
+    final overlayColor = switch (_result?.type) {
+      _ScanResultType.success => const Color(0xFF16A34A),
+      _ScanResultType.error => const Color(0xFFDC2626),
+      _ => Colors.transparent,
     };
 
-    final overlayIcon = switch (_overlay) {
-      _OverlayState.ok => Icons.check_circle_rounded,
-      _OverlayState.error => Icons.cancel_rounded,
-      _OverlayState.idle => null,
+    final overlayIcon = switch (_result?.type) {
+      _ScanResultType.success => Icons.check_circle_rounded,
+      _ScanResultType.error => Icons.cancel_rounded,
+      _ => null,
     };
 
     return Scaffold(
@@ -240,15 +250,12 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
               top: false,
               child: Padding(
                 padding: const EdgeInsets.all(AppSpacing.p20),
-                child: _current == null
-                    ? _PendingListCard(
-                        pendientes: pendientes,
-                        onMarkAbsent: (p) => _markAbsent(p),
-                      )
-                    : _ScannedPassengerCard(
-                        passenger: _current!,
-                        onConfirm: () => _confirmBoarding(_current!),
-                        onAbsent: () => _markAbsent(_current!),
+                child: _result == null
+                    ? const _ScannerInstructionsCard()
+                    : _ScanResultCard(
+                        result: _result!,
+                        canScanNext: _cooldownFinished,
+                        onScanNext: _resetScanner,
                       ),
               ),
             ),
@@ -259,127 +266,43 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
   }
 }
 
-class _ParsedQr {
-  const _ParsedQr({required this.passengerId, required this.seat});
-
-  final String? passengerId;
-  final int? seat;
-}
-
-_ParsedQr _parseQr(String raw) {
-  final parts = raw.trim().split('|');
-  if (parts.length >= 3) {
-    final passengerId = parts[1].trim().isEmpty ? null : parts[1].trim();
-    final seat = int.tryParse(parts[2].trim());
-    return _ParsedQr(passengerId: passengerId, seat: seat);
-  }
-  return const _ParsedQr(passengerId: null, seat: null);
-}
-
-class _ScannedPassengerCard extends StatelessWidget {
-  const _ScannedPassengerCard({
-    required this.passenger,
-    required this.onConfirm,
-    required this.onAbsent,
+class _ScanOutcome {
+  const _ScanOutcome({
+    required this.type,
+    required this.message,
+    this.passengerName,
+    this.seatsLabel,
+    this.pickupPoint,
   });
 
-  final ManifiestoItem passenger;
-  final VoidCallback onConfirm;
-  final VoidCallback onAbsent;
+  const _ScanOutcome.success({
+    required String passengerName,
+    required String seatsLabel,
+    required String pickupPoint,
+  }) : this(
+          type: _ScanResultType.success,
+          message: 'Abordaje confirmado',
+          passengerName: passengerName,
+          seatsLabel: seatsLabel,
+          pickupPoint: pickupPoint,
+        );
 
-  @override
-  Widget build(BuildContext context) {
-    final initials = _initials(passenger.nombres, passenger.apellidos);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(AppRadius.r16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: AppColors.primaryTint12,
-                  child: Text(
-                    initials,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: AppColors.primaryBlue,
-                          fontWeight: FontWeight.w900,
-                        ),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        passenger.nombreCompleto,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w900,
-                            ),
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        'DNI ${passenger.dni} · Asiento #${passenger.asiento}',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              passenger.puntoRecojo,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A),
-                foregroundColor: AppColors.white,
-                minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-              ),
-              onPressed: onConfirm,
-              child: const Text('Confirmar abordaje'),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFDC2626),
-                side: const BorderSide(color: Color(0xFFDC2626)),
-                minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-              ),
-              onPressed: onAbsent,
-              child: const Text('Marcar como no abordó'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  const _ScanOutcome.error({
+    required String message,
+  }) : this(
+          type: _ScanResultType.error,
+          message: message,
+        );
+
+  final _ScanResultType type;
+  final String message;
+  final String? passengerName;
+  final String? seatsLabel;
+  final String? pickupPoint;
 }
 
-class _PendingListCard extends StatelessWidget {
-  const _PendingListCard({required this.pendientes, required this.onMarkAbsent});
-
-  final List<ManifiestoItem> pendientes;
-  final ValueChanged<ManifiestoItem> onMarkAbsent;
+class _ScannerInstructionsCard extends StatelessWidget {
+  const _ScannerInstructionsCard();
 
   @override
   Widget build(BuildContext context) {
@@ -396,57 +319,142 @@ class _PendingListCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Pendientes',
+              'Escanea el QR del pasajero',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: AppColors.textPrimary,
                     fontWeight: FontWeight.w900,
                   ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            if (pendientes.isEmpty)
-              Text(
-                'No hay pasajeros pendientes.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-              )
-            else
-              ...pendientes.take(4).map(
-                    (p) => Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${p.nombreCompleto} · #${p.asiento}',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: AppColors.textPrimary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () => onMarkAbsent(p),
-                            child: const Text('No abordó'),
-                          ),
-                        ],
-                      ),
-                    ),
+            Text(
+              'El sistema validará la reserva en Supabase y confirmará el abordaje solo si pertenece a tu viaje activo.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w600,
                   ),
-            if (pendientes.length > 4)
-              Text(
-                'y ${pendientes.length - 4} más…',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
+
+class _ScanResultCard extends StatelessWidget {
+  const _ScanResultCard({
+    required this.result,
+    required this.canScanNext,
+    required this.onScanNext,
+  });
+
+  final _ScanOutcome result;
+  final bool canScanNext;
+  final Future<void> Function() onScanNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final isSuccess = result.type == _ScanResultType.success;
+    final color = isSuccess ? const Color(0xFF16A34A) : const Color(0xFFDC2626);
+    final icon = isSuccess ? Icons.check_circle_rounded : Icons.cancel_rounded;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.r16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(icon, color: color, size: 88),
+            const SizedBox(height: AppSpacing.md),
+            if (result.passengerName != null)
+              Text(
+                result.passengerName!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+            if (result.passengerName != null) const SizedBox(height: AppSpacing.sm),
+            if (result.seatsLabel != null)
+              Text(
+                'Asientos: ${result.seatsLabel}',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            if (result.pickupPoint != null) const SizedBox(height: AppSpacing.xs),
+            if (result.pickupPoint != null)
+              Text(
+                result.pickupPoint!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              result.message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: canScanNext ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1),
+                foregroundColor: AppColors.white,
+                minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
+              ),
+              onPressed: canScanNext ? onScanNext : null,
+              child: Text(canScanNext ? 'Escanear siguiente' : 'Espera 3 segundos...'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Map<String, dynamic>? _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return value.cast<String, dynamic>();
+  return null;
+}
+
+List<int> _parseSeats(dynamic rawSeats) {
+  if (rawSeats is! List) return const [];
+  final out = <int>[];
+  for (final seat in rawSeats) {
+    if (seat is int) out.add(seat);
+    if (seat is num) out.add(seat.toInt());
+    if (seat is String) {
+      final parsed = int.tryParse(seat);
+      if (parsed != null) out.add(parsed);
+    }
+  }
+  out.sort();
+  return out;
+}
+
+String _passengerName(Map<String, dynamic>? profile) {
+  if (profile == null) return 'Pasajero';
+  final name = profile['name']?.toString().trim() ?? '';
+  if (name.isNotEmpty) return name;
+  final first = profile['first_name']?.toString().trim() ?? '';
+  final last = profile['last_name']?.toString().trim() ?? '';
+  final full = '$first $last'.trim();
+  return full.isEmpty ? 'Pasajero' : full;
 }
 
 class _ScannerOverlayPainter extends CustomPainter {

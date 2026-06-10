@@ -55,6 +55,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       AppSnackbars.error(context, error);
       return;
     }
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
     context.go('${AppRoutes.passengerProfile}?onboarding=1');
   }
 

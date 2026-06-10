@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/reusable_ui_components.dart';
 import '../../conductor/providers/conductor_chat_grupal_provider.dart';
 
+/// Chat grupal (admin): usa [conductorChatGrupalAccesoProvider] (admin siempre) y
+/// [conductorChatGrupalProvider] para mensajes, igual que la pantalla del conductor.
 class AdminChatGrupalScreen extends ConsumerStatefulWidget {
   const AdminChatGrupalScreen({super.key});
 
@@ -67,17 +71,85 @@ class _AdminChatGrupalScreenState extends ConsumerState<AdminChatGrupalScreen> {
     });
   }
 
+  void _popChatOrGoAdminHome(BuildContext context) {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(AppRoutes.adminHome);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final accesoAsync = ref.watch(conductorChatGrupalAccesoProvider);
     final state = ref.watch(conductorChatGrupalProvider);
-    final messages = state.messages;
 
+    return accesoAsync.when(
+      loading: () => Scaffold(
+        backgroundColor: AppColors.backgroundLight,
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => _popChatOrGoAdminHome(context),
+          ),
+          title: const Text('Chat grupal (Admin + conductores)'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, _) => _accesoDenegadoScaffold(context),
+      data: (puede) {
+        if (!puede) return _accesoDenegadoScaffold(context);
+        return _chatScaffold(context, state);
+      },
+    );
+  }
+
+  Widget _accesoDenegadoScaffold(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
+          onPressed: () => _popChatOrGoAdminHome(context),
+        ),
+        title: const Text('Chat grupal (Admin + conductores)'),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.p20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_rounded, size: 72, color: AppColors.textSecondary),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'No tienes acceso al chat en este momento.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              AppPrimaryButton(
+                label: 'Volver',
+                onPressed: () => _popChatOrGoAdminHome(context),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chatScaffold(BuildContext context, ConductorChatGrupalState state) {
+    final messages = state.messages;
+    return Scaffold(
+      backgroundColor: AppColors.backgroundLight,
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => _popChatOrGoAdminHome(context),
         ),
         title: Row(
           children: [
@@ -163,16 +235,20 @@ class _AdminChatGrupalScreenState extends ConsumerState<AdminChatGrupalScreen> {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFF97316),
-                      foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.r12),
+                  SizedBox(
+                    width: 52,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        backgroundColor: const Color(0xFFF97316),
+                        foregroundColor: AppColors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.r12),
+                        ),
                       ),
+                      onPressed: _send,
+                      child: const Icon(Icons.send_rounded),
                     ),
-                    onPressed: _send,
-                    child: const Icon(Icons.send_rounded),
                   ),
                 ],
               ),
@@ -213,7 +289,9 @@ class _GroupBubble extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  '${message.senderName} · ${message.senderRole}',
+                  message.senderPlate.trim().isNotEmpty
+                      ? '${message.senderName} · ${message.senderPlate}'
+                      : message.senderName,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,

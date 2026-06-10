@@ -6,7 +6,6 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
-import '../providers/conductor_auth_provider.dart';
 import '../providers/conductor_chat_grupal_provider.dart';
 
 class ConductorChatGrupalScreen extends ConsumerStatefulWidget {
@@ -66,12 +65,11 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(conductorAuthProvider);
+    final accesoAsync = ref.watch(conductorChatGrupalAccesoProvider);
     final state = ref.watch(conductorChatGrupalProvider);
 
-    final canAccess = auth.estadoActual == ConductorEstadoActual.enRuta;
-    if (!canAccess) {
-      return Scaffold(
+    return accesoAsync.when(
+      loading: () => Scaffold(
         backgroundColor: AppColors.backgroundLight,
         appBar: AppBar(
           title: const Text('Chat grupal (Admin + conductores)'),
@@ -80,34 +78,55 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
             onPressed: () => context.pop(),
           ),
         ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.p20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.lock_rounded, size: 72, color: AppColors.textSecondary),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  'Este chat se habilita solo cuando estás en ruta',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                AppPrimaryButton(
-                  label: 'Volver',
-                  onPressed: () => context.pop(),
-                ),
-              ],
-            ),
+        body: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, _) => _accesoDenegadoScaffold(context),
+      data: (puede) {
+        if (!puede) return _accesoDenegadoScaffold(context);
+        return _chatScaffold(context, state);
+      },
+    );
+  }
+
+  Widget _accesoDenegadoScaffold(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.backgroundLight,
+      appBar: AppBar(
+        title: const Text('Chat grupal (Admin + conductores)'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => context.pop(),
+        ),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.p20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_rounded, size: 72, color: AppColors.textSecondary),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'No tienes acceso al chat en este momento.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              AppPrimaryButton(
+                label: 'Volver',
+                onPressed: () => context.pop(),
+              ),
+            ],
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
 
+  Widget _chatScaffold(BuildContext context, ConductorChatGrupalState state) {
     final messages = state.messages;
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
@@ -239,6 +258,9 @@ class _GroupBubble extends StatelessWidget {
       bottomRight: Radius.circular(isMe ? 4 : 14),
     );
 
+    final plate = message.senderPlate.trim();
+    final meta = plate.isNotEmpty ? '${message.senderName} · $plate' : message.senderName;
+
     return Align(
       alignment: align,
       child: ConstrainedBox(
@@ -250,7 +272,7 @@ class _GroupBubble extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  '${message.senderName} · ${message.senderRole}',
+                  meta,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,

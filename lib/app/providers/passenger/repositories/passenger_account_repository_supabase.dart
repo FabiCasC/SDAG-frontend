@@ -53,21 +53,37 @@ class PassengerAccountRepositorySupabase implements PassengerAccountRepository {
         throw const GenericPassengerAuthFailure('No se pudo completar el registro');
       }
 
-      final payload = <String, dynamic>{
-        'id': user.id,
-        'role': AppRole.passenger.name,
-        'email': normalizedEmail,
-        'dni': normalizedDni,
-        'phone': normalizedPhone,
-        'first_name': firstName.trim(),
-        'last_name': lastName.trim(),
-        'birth_date': birthDate.toIso8601String().substring(0, 10),
-        'name': '${firstName.trim()} ${lastName.trim()}'.trim(),
-        'is_blocked': false,
-        'has_active_reservation': false,
-      };
+      // Espera un momento para que la sesión se establezca
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      final profile = await client.from('profiles').upsert(payload).select().single();
+      // Intenta actualizar el profile que el trigger ya creó
+      try {
+        await client.from('profiles').update({
+          'role': AppRole.passenger.name,
+          'dni': normalizedDni,
+          'phone': normalizedPhone,
+          'first_name': firstName.trim(),
+          'last_name': lastName.trim(),
+          'birth_date': birthDate.toIso8601String().substring(0, 10),
+          'name': '${firstName.trim()} ${lastName.trim()}'.trim(),
+          'is_blocked': false,
+          'has_active_reservation': false,
+        }).eq('id', user.id);
+      } catch (_) {
+        // Si falla el update, no bloqueamos el registro
+      }
+
+      // Refresca la sesión para asegurar que está activa
+      await client.auth.refreshSession();
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Lee el profile final
+      final profile = await client
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .single();
+
       return _mapProfile(profile);
     } on AuthException catch (e) {
       final msg = e.message.toLowerCase();

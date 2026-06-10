@@ -57,12 +57,8 @@ class _ConductorLoginScreenState extends ConsumerState<ConductorLoginScreen> {
         AppSnackbars.warning(context, 'Tu cuenta está desactivada. Contacta al administrador');
         return;
       case ConductorLoginResult.ok:
-        final auth = ref.read(conductorAuthProvider);
-        if (auth.pagoConfirmado) {
-          context.go(AppRoutes.driverHome);
-        } else {
-          context.go(AppRoutes.driverBlocked);
-        }
+        context.go(AppRoutes.driverHome);
+        return;
     }
   }
 

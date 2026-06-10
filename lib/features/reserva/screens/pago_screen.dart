@@ -222,7 +222,10 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
               TextField(
                 controller: _yapeController,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Número Yape'),
+                decoration: const InputDecoration(
+                  labelText: 'Número Yape',
+                  hintText: '9 dígitos (ej. 987654321)',
+                ),
               ),
             ],
             const SizedBox(height: AppSpacing.md),
@@ -346,35 +349,71 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
   }) async {
     setState(() => _paying = true);
 
-    if (option != _PaymentOption.card) {
-      if (!mounted) return;
-      setState(() => _paying = false);
-      AppSnackbars.error(context, 'Solo está habilitado el pago con tarjeta.');
-      return;
-    }
+    try {
+      if (payingAdditional) {
+        if (option == _PaymentOption.yape) {
+          final digits = _yapeController.text.replaceAll(RegExp(r'\D'), '');
+          if (digits.length < 9) {
+            if (!mounted) return;
+            setState(() => _paying = false);
+            AppSnackbars.error(context, 'Ingresa un número Yape válido (9 dígitos).');
+            return;
+          }
+          await Future.delayed(const Duration(seconds: 2));
+        } else if (option == _PaymentOption.saved) {
+          if (!mounted) return;
+          setState(() => _paying = false);
+          AppSnackbars.error(
+            context,
+            'Para el pago adicional usa Yape o Tarjeta con datos completos.',
+          );
+          return;
+        }
+        await _persistSavedIfNeeded(option);
+        ref.read(reservaProvider.notifier).setVehiculoPartio(true);
+        ref.read(reservaProvider.notifier).clearAdditionalCharge();
+        if (!mounted) return;
+        setState(() => _paying = false);
+        context.go('${AppRoutes.passengerReservaActiva}?extraPaid=1');
+        return;
+      }
 
-    if (_saveForFuture) {
+      await _persistSavedIfNeeded(option);
+
       if (option == _PaymentOption.yape) {
         final digits = _yapeController.text.replaceAll(RegExp(r'\D'), '');
-        final last4 = digits.length >= 4 ? digits.substring(digits.length - 4) : digits;
-        await _persistSaved(type: 'yape', last4: last4);
-      } else if (option == _PaymentOption.card || option == _PaymentOption.saved) {
-        final digits = _cardNumberController.text.replaceAll(RegExp(r'\D'), '');
-        final last4 = digits.length >= 4 ? digits.substring(digits.length - 4) : (_savedLast4 ?? '0000');
-        await _persistSaved(type: 'card', last4: last4);
+        if (digits.length < 9) {
+          if (!mounted) return;
+          setState(() => _paying = false);
+          AppSnackbars.error(context, 'Ingresa un número Yape válido (9 dígitos).');
+          return;
+        }
+        await Future.delayed(const Duration(seconds: 2));
+        final reservaId = await _payWithYapeSimulated(ref, yapeDigits: digits);
+        ref.read(reservaProvider.notifier).markPaid(reservaId: reservaId);
+        if (!mounted) return;
+        setState(() => _paying = false);
+        context.go('${AppRoutes.passengerConfirmacion}?reservaId=$reservaId');
+        return;
       }
-    }
 
-    if (payingAdditional) {
-      ref.read(reservaProvider.notifier).setVehiculoPartio(true);
-      ref.read(reservaProvider.notifier).clearAdditionalCharge();
-      if (!mounted) return;
-      setState(() => _paying = false);
-      context.go('${AppRoutes.passengerReservaActiva}?extraPaid=1');
-      return;
-    }
+      if (option == _PaymentOption.saved) {
+        if (!mounted) return;
+        setState(() => _paying = false);
+        AppSnackbars.error(
+          context,
+          'Para pagar con tarjeta elige la opción Tarjeta e ingresa los datos, o usa Yape.',
+        );
+        return;
+      }
 
-    try {
+      if (option != _PaymentOption.card) {
+        if (!mounted) return;
+        setState(() => _paying = false);
+        AppSnackbars.error(context, 'Selecciona un método de pago válido.');
+        return;
+      }
+
       final reservaId = await _payWithCulqi(ref);
       ref.read(reservaProvider.notifier).markPaid(reservaId: reservaId);
 
@@ -405,7 +444,6 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     final userId = user?.id ?? ref.read(passengerSessionProvider).account?.id;
     final reserva = ref.read(reservaProvider);
     final seats = [...reserva.asientosSeleccionados]..sort();
-    final pickup = reserva.puntoRecojo?.trim();
     final driver = reserva.conductorSeleccionado;
 
     if (email.isEmpty || userId == null) {
@@ -508,6 +546,29 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       throw const AuthException('Cargo fallido');
     }
 
+    return _insertReservationAndPayment(
+      ref: ref,
+      userId: userId,
+      receiptNumber: chargeId,
+      provider: 'culqi',
+    );
+  }
+
+  Future<String> _insertReservationAndPayment({
+    required WidgetRef ref,
+    required String userId,
+    required String receiptNumber,
+    required String provider,
+  }) async {
+    final reserva = ref.read(reservaProvider);
+    final seats = [...reserva.asientosSeleccionados]..sort();
+    final pickup = reserva.puntoRecojo?.trim();
+    final driver = reserva.conductorSeleccionado;
+
+    if (seats.isEmpty || driver == null) {
+      throw const AuthException('Reserva inválida');
+    }
+
     final amountTotal = seats.length * 15.0;
     final tripId = driver.tripId;
     if (tripId.trim().isEmpty) {
@@ -533,8 +594,8 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       'reservation_id': reservaId,
       'amount': amountTotal,
       'status': 'confirmado',
-      'receipt_number': chargeId,
-      'provider': 'culqi',
+      'receipt_number': receiptNumber,
+      'provider': provider,
     });
 
     try {
@@ -542,6 +603,36 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     } catch (_) {}
 
     return reservaId;
+  }
+
+  Future<String> _payWithYapeSimulated(WidgetRef ref, {required String yapeDigits}) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    final userId = user?.id ?? ref.read(passengerSessionProvider).account?.id;
+    if (userId == null) {
+      throw const AuthException('Sesión inválida');
+    }
+    final receipt = 'yape_${userId}_${DateTime.now().millisecondsSinceEpoch}_$yapeDigits';
+    return _insertReservationAndPayment(
+      ref: ref,
+      userId: userId,
+      receiptNumber: receipt,
+      provider: 'yape',
+    );
+  }
+
+  Future<void> _persistSavedIfNeeded(_PaymentOption option) async {
+    if (!_saveForFuture) return;
+    if (option == _PaymentOption.yape) {
+      final digits = _yapeController.text.replaceAll(RegExp(r'\D'), '');
+      final last4 = digits.length >= 4 ? digits.substring(digits.length - 4) : digits;
+      await _persistSaved(type: 'yape', last4: last4);
+    } else if (option == _PaymentOption.card || option == _PaymentOption.saved) {
+      final digits = _cardNumberController.text.replaceAll(RegExp(r'\D'), '');
+      final last4 = digits.length >= 4
+          ? digits.substring(digits.length - 4)
+          : (digits.isNotEmpty ? digits : (_savedLast4 ?? '0000'));
+      await _persistSaved(type: 'card', last4: last4);
+    }
   }
 }
 

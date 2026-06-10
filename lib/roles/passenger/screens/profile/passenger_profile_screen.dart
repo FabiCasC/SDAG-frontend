@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../app/providers/passenger/controllers/connectivity_controller.dart';
 import '../../../../app/providers/passenger/controllers/passenger_profile_controller.dart';
 import '../../../../app/providers/passenger/controllers/passenger_session_controller.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../shared/design/app_spacing.dart';
+import '../../../../shared/maps/preferred_pickup_places_dialog.dart';
 import '../../../../shared/widgets/reusable_ui_components.dart';
 
 class PassengerProfileScreen extends ConsumerStatefulWidget {
@@ -23,6 +25,7 @@ class _PassengerProfileScreenState extends ConsumerState<PassengerProfileScreen>
   late final TextEditingController _emailController;
   late final TextEditingController _phoneController;
   late final TextEditingController _pickupController;
+  bool _pickupPromptScheduled = false;
 
   @override
   void initState() {
@@ -31,6 +34,24 @@ class _PassengerProfileScreenState extends ConsumerState<PassengerProfileScreen>
     _emailController = TextEditingController();
     _phoneController = TextEditingController();
     _pickupController = TextEditingController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrapProfile());
+  }
+
+  Future<void> _bootstrapProfile() async {
+    final notifier = ref.read(passengerProfileControllerProvider.notifier);
+    await notifier.loadFromAuthProfile();
+    if (!mounted) return;
+    final st = ref.read(passengerProfileControllerProvider);
+    final pickup = st?.preferredPickup.trim() ?? '';
+    if (_pickupPromptScheduled) return;
+    if (widget.onboarding || pickup.isEmpty) {
+      _pickupPromptScheduled = true;
+      final saved = await showPreferredPickupPlacesDialog(context);
+      if (!mounted) return;
+      if (saved != null) {
+        await notifier.loadFromAuthProfile();
+      }
+    }
   }
 
   @override
@@ -53,6 +74,7 @@ class _PassengerProfileScreenState extends ConsumerState<PassengerProfileScreen>
 
   @override
   Widget build(BuildContext context) {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
     final session = ref.watch(passengerSessionProvider);
     final account = session.account;
     final online = ref.watch(connectivityProvider);
@@ -60,7 +82,7 @@ class _PassengerProfileScreenState extends ConsumerState<PassengerProfileScreen>
     final profileState = ref.watch(passengerProfileControllerProvider);
     final controller = ref.read(passengerProfileControllerProvider.notifier);
 
-    if (account == null || profileState == null) {
+    if (userId == null || profileState == null) {
       return const PlaceholderPage(
         title: 'Perfil',
         subtitle: 'No existe una cuenta asociada.',
@@ -274,7 +296,7 @@ class _PassengerProfileScreenState extends ConsumerState<PassengerProfileScreen>
                   label: 'Cerrar sesión',
                   icon: Icons.logout,
                   onPressed: () async {
-                    final confirmed = await _confirmLogout(context, account.hasActiveReservation);
+                    final confirmed = await _confirmLogout(context, account?.hasActiveReservation ?? false);
                     if (!context.mounted) return;
                     if (!confirmed) return;
 

@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../data/models/app_role.dart';
 import '../models/passenger_account.dart';
 import '../repositories/passenger_account_repository.dart';
 import '../validators/passenger_auth_validators.dart';
@@ -70,9 +72,20 @@ class PassengerProfileState {
 
 final passengerProfileControllerProvider = StateNotifierProvider.autoDispose<
     PassengerProfileController, PassengerProfileState?>((ref) {
-  final session = ref.watch(passengerSessionProvider).account;
-  if (session == null) return PassengerProfileController.empty(ref);
-  return PassengerProfileController(ref: ref, account: session);
+  final sessionAccount = ref.watch(passengerSessionProvider).account;
+  final authId = Supabase.instance.client.auth.currentUser?.id;
+  if (sessionAccount == null && authId == null) {
+    return PassengerProfileController.empty(ref);
+  }
+  final id = sessionAccount?.id ?? authId!;
+  final seed = sessionAccount ??
+      PassengerAccount(
+        id: id,
+        role: AppRole.passenger,
+        isBlocked: false,
+        hasActiveReservation: false,
+      );
+  return PassengerProfileController(ref: ref, account: seed);
 });
 
 class PassengerProfileController
@@ -90,6 +103,21 @@ class PassengerProfileController
       ref.read(passengerAccountRepositoryProvider);
 
   PassengerAccount? get _account => ref.read(passengerSessionProvider).account;
+
+  /// Perfil siempre desde `auth.currentUser` + fila en `profiles` (evita caché obsoleto).
+  Future<void> loadFromAuthProfile() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null || state == null) return;
+    try {
+      final account = await _repo.getAccountById(userId);
+      if (!mounted) return;
+      ref.read(passengerSessionProvider.notifier).state =
+          PassengerSessionState(isLoading: false, account: account);
+      state = PassengerProfileState.fromAccount(account);
+    } catch (_) {
+      // Sin red o RLS: no pisar el formulario
+    }
+  }
 
   void setName(String value) {
     if (state == null) return;

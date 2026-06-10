@@ -323,9 +323,16 @@ class ConductorComisionesController extends StateNotifier<ConductorComisionesSta
     final user = Supabase.instance.client.auth.currentUser;
     if (user != null) {
       try {
+        final driver = await Supabase.instance.client
+            .from('drivers')
+            .select('id')
+            .eq('profile_id', user.id)
+            .maybeSingle();
         await Supabase.instance.client.from('driver_payout_requests').insert({
+          'driver_id': driver?['id'],
           'profile_id': user.id,
           'status': 'pendiente',
+          'amount': state.comisionDia,
           'gross_amount': state.totalDia,
           'commission_amount': state.comisionDia,
           'created_at': now.toIso8601String(),

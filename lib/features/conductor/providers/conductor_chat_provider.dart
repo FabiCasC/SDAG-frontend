@@ -1,170 +1,212 @@
-import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class ConductorChatMessage {
-  const ConductorChatMessage({
+class ConductorTripChatMessage {
+  const ConductorTripChatMessage({
     required this.id,
-    required this.isConductor,
+    required this.senderProfileId,
     required this.text,
     required this.timestamp,
+    required this.isFromDriver,
   });
 
   final String id;
-  final bool isConductor;
+  final String senderProfileId;
   final String text;
   final DateTime timestamp;
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'isConductor': isConductor,
-        'text': text,
-        'timestamp': timestamp.toIso8601String(),
-      };
-
-  static ConductorChatMessage? fromJson(Map<String, dynamic> json) {
-    final id = json['id'] as String?;
-    final isConductor = json['isConductor'];
-    final text = json['text'] as String?;
-    final ts = json['timestamp'] as String?;
-    if (id == null || isConductor is! bool || text == null || ts == null) return null;
-    final timestamp = DateTime.tryParse(ts);
-    if (timestamp == null) return null;
-    return ConductorChatMessage(
-      id: id,
-      isConductor: isConductor,
-      text: text,
-      timestamp: timestamp,
-    );
-  }
+  final bool isFromDriver;
 }
 
-class ConductorChatController extends StateNotifier<Map<String, List<ConductorChatMessage>>> {
-  ConductorChatController() : super(const {}) {
-    _loadAll();
-  }
+class ConductorTripChatState {
+  const ConductorTripChatState({
+    required this.messages,
+    required this.loading,
+    required this.errorMessage,
+  });
 
-  static const _keyPrefix = 'sdag_conductor_chat_';
+  final List<ConductorTripChatMessage> messages;
+  final bool loading;
+  final String? errorMessage;
 
-  Future<void> _loadAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getKeys().where((k) => k.startsWith(_keyPrefix)).toList();
-    final next = <String, List<ConductorChatMessage>>{};
-    for (final k in keys) {
-      final passengerId = k.substring(_keyPrefix.length);
-      final raw = prefs.getString(k);
-      if (raw == null) continue;
-      final decoded = _decode(raw);
-      if (decoded.isNotEmpty) next[passengerId] = decoded;
-    }
-    state = next;
-  }
-
-  List<ConductorChatMessage> messagesFor(String passengerId) {
-    final existing = state[passengerId];
-    if (existing != null && existing.isNotEmpty) return existing;
-    final seeded = _seedMessages(passengerId);
-    state = {...state, passengerId: seeded};
-    _persist(passengerId, seeded);
-    return seeded;
-  }
-
-  Future<void> sendMessage({
-    required String passengerId,
-    required bool fromConductor,
-    required String text,
-  }) async {
-    final value = text.trim();
-    if (value.isEmpty) return;
-    final current = [...(state[passengerId] ?? messagesFor(passengerId))];
-    final next = [
-      ...current,
-      ConductorChatMessage(
-        id: 'm_${DateTime.now().microsecondsSinceEpoch}',
-        isConductor: fromConductor,
-        text: value,
-        timestamp: DateTime.now(),
-      ),
-    ];
-    state = {...state, passengerId: next};
-    await _persist(passengerId, next);
-  }
-
-  Future<void> sendAlternativePickup({
-    required String passengerId,
-    required String text,
-  }) async {
-    final v = text.trim();
-    if (v.isEmpty) return;
-    await sendMessage(
-      passengerId: passengerId,
-      fromConductor: true,
-      text: '📍 Punto de recojo alternativo: $v',
+  ConductorTripChatState copyWith({
+    List<ConductorTripChatMessage>? messages,
+    bool? loading,
+    String? errorMessage,
+    bool clearError = false,
+  }) {
+    return ConductorTripChatState(
+      messages: messages ?? this.messages,
+      loading: loading ?? this.loading,
+      errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
     );
   }
 
-  Future<void> _persist(String passengerId, List<ConductorChatMessage> messages) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = '$_keyPrefix$passengerId';
-    final raw = jsonEncode(messages.map((m) => m.toJson()).toList());
-    await prefs.setString(key, raw);
-  }
-
-  List<ConductorChatMessage> _decode(String raw) {
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return const [];
-      final out = <ConductorChatMessage>[];
-      for (final item in decoded) {
-        if (item is Map<String, dynamic>) {
-          final m = ConductorChatMessage.fromJson(item);
-          if (m != null) out.add(m);
-        } else if (item is Map) {
-          final m = ConductorChatMessage.fromJson(item.cast<String, dynamic>());
-          if (m != null) out.add(m);
-        }
-      }
-      out.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      return out;
-    } catch (_) {
-      return const [];
-    }
-  }
-
-  List<ConductorChatMessage> _seedMessages(String passengerId) {
-    final now = DateTime.now();
-    return [
-      ConductorChatMessage(
-        id: 'seed1_$passengerId',
-        isConductor: false,
-        text: 'Hola, ya estoy en el punto.',
-        timestamp: now.subtract(const Duration(minutes: 6)),
-      ),
-      ConductorChatMessage(
-        id: 'seed2_$passengerId',
-        isConductor: true,
-        text: 'Perfecto, en 3 min llego.',
-        timestamp: now.subtract(const Duration(minutes: 5)),
-      ),
-      ConductorChatMessage(
-        id: 'seed3_$passengerId',
-        isConductor: false,
-        text: 'Listo, estoy atento.',
-        timestamp: now.subtract(const Duration(minutes: 4)),
-      ),
-      ConductorChatMessage(
-        id: 'seed4_$passengerId',
-        isConductor: true,
-        text: 'Gracias, te aviso al llegar.',
-        timestamp: now.subtract(const Duration(minutes: 3)),
-      ),
-    ];
-  }
+  static const initial = ConductorTripChatState(
+    messages: [],
+    loading: true,
+    errorMessage: null,
+  );
 }
 
-final conductorChatProvider =
-    StateNotifierProvider<ConductorChatController, Map<String, List<ConductorChatMessage>>>(
-  (ref) => ConductorChatController(),
+/// Chat temporal trip ↔ pasajero. Clave: `tripId|passengerProfileId`.
+final conductorTripChatProvider =
+    StateNotifierProvider.autoDispose.family<ConductorTripChatController, ConductorTripChatState, String>(
+  (ref, key) {
+    final sep = key.indexOf('|');
+    if (sep <= 0 || sep >= key.length - 1) {
+      return ConductorTripChatController.invalid();
+    }
+    final tripId = key.substring(0, sep);
+    final passengerId = key.substring(sep + 1);
+    return ConductorTripChatController(
+      tripId: tripId,
+      passengerProfileId: passengerId,
+    );
+  },
 );
 
+class ConductorTripChatController extends StateNotifier<ConductorTripChatState> {
+  ConductorTripChatController({
+    required this.tripId,
+    required this.passengerProfileId,
+  }) : super(ConductorTripChatState.initial) {
+    _init();
+  }
+
+  ConductorTripChatController.invalid()
+      : tripId = '',
+        passengerProfileId = '',
+        super(
+          const ConductorTripChatState(
+            messages: [],
+            loading: false,
+            errorMessage: 'Parámetros inválidos.',
+          ),
+        );
+
+  final String tripId;
+  final String passengerProfileId;
+
+  StreamSubscription<List<Map<String, dynamic>>>? _subscription;
+  bool _alive = true;
+  String? _currentUserId;
+
+  bool get _invalid => tripId.isEmpty || passengerProfileId.isEmpty;
+
+  Future<void> _init() async {
+    if (_invalid) return;
+
+    final user = Supabase.instance.client.auth.currentUser;
+    _currentUserId = user?.id;
+    if (user == null) {
+      state = state.copyWith(loading: false, errorMessage: 'No hay una sesión activa.');
+      return;
+    }
+
+    try {
+      await _loadInitial();
+      _subscribe();
+    } catch (e) {
+      if (!_alive) return;
+      state = state.copyWith(loading: false, errorMessage: e.toString());
+    }
+  }
+
+  Future<void> _loadInitial() async {
+    final rows = await Supabase.instance.client
+        .from('trip_messages')
+        .select('id, message, body, sender_id, sender_profile_id, passenger_id, created_at')
+        .eq('trip_id', tripId)
+        .eq('passenger_id', passengerProfileId)
+        .order('created_at', ascending: true);
+
+    if (!_alive) return;
+
+    final list = (rows as List).cast<Map<String, dynamic>>();
+    final messages = _mapRows(list);
+    state = state.copyWith(messages: messages, loading: false, clearError: true);
+  }
+
+  void _subscribe() {
+    _subscription?.cancel();
+    _subscription = Supabase.instance.client
+        .from('trip_messages')
+        .stream(primaryKey: ['id'])
+        .eq('trip_id', tripId)
+        .order('created_at')
+        .listen((data) {
+          if (!_alive) return;
+          try {
+            final filtered = data.where((m) {
+              final pid = m['passenger_id']?.toString();
+              final sid = m['sender_id']?.toString() ?? m['sender_profile_id']?.toString();
+              return pid == passengerProfileId || sid == passengerProfileId;
+            }).toList();
+
+            final messages = _mapRows(filtered.cast<Map<String, dynamic>>());
+            state = state.copyWith(messages: messages, loading: false, clearError: true);
+          } catch (e) {
+            state = state.copyWith(loading: false, errorMessage: e.toString());
+          }
+        });
+  }
+
+  List<ConductorTripChatMessage> _mapRows(List<Map<String, dynamic>> rows) {
+    final uid = _currentUserId ?? Supabase.instance.client.auth.currentUser?.id ?? '';
+
+    final out = <ConductorTripChatMessage>[];
+    for (final r in rows) {
+      final id = r['id']?.toString() ?? '';
+      final sender = r['sender_id']?.toString() ?? r['sender_profile_id']?.toString() ?? '';
+      final text = r['message']?.toString() ?? r['body']?.toString();
+      final ts = DateTime.tryParse(r['created_at']?.toString() ?? '')?.toLocal();
+      if (text == null || text.trim().isEmpty || ts == null) continue;
+
+      final isDriver = sender == uid;
+      out.add(
+        ConductorTripChatMessage(
+          id: id,
+          senderProfileId: sender,
+          text: text.trim(),
+          timestamp: ts,
+          isFromDriver: isDriver,
+        ),
+      );
+    }
+    out.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return out;
+  }
+
+  Future<void> sendMessage(String text) async {
+    final value = text.trim();
+    if (value.isEmpty || _invalid) return;
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    await Supabase.instance.client.from('trip_messages').insert({
+      'trip_id': tripId,
+      'passenger_id': passengerProfileId,
+      'sender_id': user.id,
+      'sender_profile_id': user.id,
+      'message': value,
+      'body': value,
+      'sender_role': 'driver',
+      'message_type': 'normal',
+    });
+  }
+
+  Future<void> sendAlternativePickup(String text) async {
+    final v = text.trim();
+    if (v.isEmpty) return;
+    await sendMessage('📍 Punto de recojo alternativo: $v');
+  }
+
+  @override
+  void dispose() {
+    _alive = false;
+    _subscription?.cancel();
+    super.dispose();
+  }
+}

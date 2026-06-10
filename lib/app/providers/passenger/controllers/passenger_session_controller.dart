@@ -119,6 +119,7 @@ class PassengerSessionController extends StateNotifier<PassengerSessionState> {
       phone: phone,
       password: password,
     );
+    if (!mounted) return;
     state = PassengerSessionState(isLoading: false, account: account);
   }
 

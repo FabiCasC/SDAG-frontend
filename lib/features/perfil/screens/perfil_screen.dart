@@ -9,6 +9,7 @@ import '../../../features/reserva/providers/reserva_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/maps/preferred_pickup_places_dialog.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/perfil_provider.dart';
 
@@ -25,6 +26,7 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
   late final TextEditingController _phoneController;
   late final TextEditingController _dniController;
   late final TextEditingController _pickupController;
+  bool _pickupPromptDone = false;
 
   @override
   void initState() {
@@ -34,6 +36,29 @@ class _PerfilScreenState extends ConsumerState<PerfilScreen> {
     _phoneController = TextEditingController();
     _dniController = TextEditingController();
     _pickupController = TextEditingController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeOfferPreferredPickup());
+  }
+
+  Future<void> _maybeOfferPreferredPickup() async {
+    if (_pickupPromptDone || !mounted) return;
+    for (var i = 0; i < 40 && mounted; i++) {
+      final p = ref.read(perfilProvider);
+      if (!p.isLoading) break;
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+    }
+    if (!mounted) return;
+    final perfil = ref.read(perfilProvider);
+    if (perfil.errorMessage != null || perfil.pickup.trim().isNotEmpty) {
+      _pickupPromptDone = true;
+      return;
+    }
+    _pickupPromptDone = true;
+    final saved = await showPreferredPickupPlacesDialog(context);
+    if (!mounted) return;
+    if (saved != null) {
+      await ref.read(perfilProvider.notifier).reload();
+      await ref.read(passengerSessionProvider.notifier).refreshAccount();
+    }
   }
 
   @override

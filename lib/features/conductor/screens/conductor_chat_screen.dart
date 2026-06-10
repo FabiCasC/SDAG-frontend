@@ -8,10 +8,12 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_chat_provider.dart';
 import '../providers/conductor_manifiesto_provider.dart';
+import '../providers/conductor_viaje_provider.dart';
 
 class ConductorChatScreen extends ConsumerStatefulWidget {
   const ConductorChatScreen({required this.pasajeroId, super.key});
 
+  /// `passenger_profile_id` del pasajero.
   final String pasajeroId;
 
   @override
@@ -20,28 +22,36 @@ class ConductorChatScreen extends ConsumerStatefulWidget {
 
 class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
   late final TextEditingController _controller;
+  late final ScrollController _scrollController;
+  int _lastMessageCount = -1;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController();
+    _scrollController = ScrollController();
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    _controller.clear();
-    await ref.read(conductorChatProvider.notifier).sendMessage(
-          passengerId: widget.pasajeroId,
-          fromConductor: true,
-          text: text,
-        );
+    try {
+      _controller.clear();
+      final tripId = ref.read(conductorViajeProvider).tripId ?? '';
+      final key = '$tripId|${widget.pasajeroId}';
+      await ref.read(conductorTripChatProvider(key).notifier).sendMessage(text);
+    } catch (e) {
+      if (!mounted) return;
+      _controller.text = text;
+      AppSnackbars.error(context, e.toString());
+    }
   }
 
   Future<void> _sendAlternativePickup() async {
@@ -91,32 +101,95 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
     );
     final text = result?.trim();
     if (text == null || text.isEmpty) return;
-    await ref.read(conductorChatProvider.notifier).sendAlternativePickup(
-          passengerId: widget.pasajeroId,
-          text: text,
-        );
+    try {
+      final tripId = ref.read(conductorViajeProvider).tripId ?? '';
+      final key = '$tripId|${widget.pasajeroId}';
+      await ref.read(conductorTripChatProvider(key).notifier).sendAlternativePickup(text);
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, e.toString());
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final chatCtrl = ref.read(conductorChatProvider.notifier);
-    final messages = ref.watch(conductorChatProvider.select((m) => m[widget.pasajeroId])) ??
-        chatCtrl.messagesFor(widget.pasajeroId);
+    final viaje = ref.watch(conductorViajeProvider);
+    final tripId = viaje.tripId;
+
+    if (widget.pasajeroId.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.pop(),
+          ),
+          title: const Text('Chat'),
+        ),
+        body: const Center(child: Text('Pasajero no válido.')),
+      );
+    }
+
+    if (tripId == null || tripId.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.pop(),
+          ),
+          title: const Text('Chat'),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(AppSpacing.p20),
+            child: Text(
+              'No hay un viaje activo. Abre el chat desde la gestión del viaje cuando tengas un trip en curso.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final chatKey = '$tripId|${widget.pasajeroId}';
+    final chatState = ref.watch(conductorTripChatProvider(chatKey));
+
+    final n = chatState.messages.length;
+    if (n != _lastMessageCount) {
+      _lastMessageCount = n;
+      _scrollToBottom();
+    }
 
     final manifiesto = ref.watch(conductorManifiestoProvider).listaPasajeros;
-    final passenger = manifiesto
-        .where((p) => p.id == widget.pasajeroId)
-        .cast<ManifiestoItem?>()
-        .firstWhere((p) => p != null, orElse: () => null);
+    ManifiestoItem? passenger;
+    for (final p in manifiesto) {
+      if (p.id == widget.pasajeroId) {
+        passenger = p;
+        break;
+      }
+    }
 
-    final name = passenger?.nombreCompleto ?? 'Pasajero';
-    final initials = _initialsFromFullName(name);
-    final status = passenger?.estado ?? ManifiestoEstadoPasajero.pendiente;
-    final (chipBg, chipFg, chipLabel) = switch (status) {
-      ManifiestoEstadoPasajero.subio => (const Color(0xFFDCFCE7), const Color(0xFF16A34A), 'Abordó'),
-      ManifiestoEstadoPasajero.noSubio => (const Color(0xFFFEE2E2), const Color(0xFFDC2626), 'No abordó'),
-      ManifiestoEstadoPasajero.pendiente => (const Color(0xFFFEF9C3), const Color(0xFFD97706), 'Pendiente'),
-    };
+    PasajeroViaje? viajePasajero;
+    for (final p in viaje.pasajerosViaje) {
+      if (p.profileId == widget.pasajeroId) {
+        viajePasajero = p;
+        break;
+      }
+    }
+
+    final name = passenger?.nombreCompleto ?? viajePasajero?.nombre ?? 'Pasajero';
+
+    final messages = chatState.messages;
 
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
@@ -125,51 +198,13 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
           icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () => context.pop(),
         ),
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: AppColors.primaryTint12,
-              child: Text(
-                initials,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.primaryBlue,
-                      fontWeight: FontWeight.w900,
-                    ),
+        title: Text(
+          name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
               ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                  const SizedBox(height: 2),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: chipBg,
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                    ),
-                    child: Text(
-                      chipLabel,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: chipFg,
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
         ),
         actions: [
           IconButton(
@@ -181,19 +216,36 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
       ),
       body: Column(
         children: [
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(AppSpacing.p20),
-              itemCount: messages.length,
-              itemBuilder: (context, index) {
-                final m = messages[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: _ChatBubble(message: m),
-                );
-              },
+          if (chatState.errorMessage != null && messages.isEmpty)
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.p20),
+                  child: Text(
+                    chatState.errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.error),
+                  ),
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: chatState.loading && messages.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(AppSpacing.p20),
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final m = messages[index];
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                          child: _ChatBubble(message: m),
+                        );
+                      },
+                    ),
             ),
-          ),
           SafeArea(
             top: false,
             child: Container(
@@ -239,11 +291,11 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
 class _ChatBubble extends StatelessWidget {
   const _ChatBubble({required this.message});
 
-  final ConductorChatMessage message;
+  final ConductorTripChatMessage message;
 
   @override
   Widget build(BuildContext context) {
-    final isConductor = message.isConductor;
+    final isConductor = message.isFromDriver;
     final bg = isConductor ? const Color(0xFF2563EB) : const Color(0xFFF1F5F9);
     final fg = isConductor ? AppColors.white : const Color(0xFF314158);
     final align = isConductor ? Alignment.centerRight : Alignment.centerLeft;
@@ -297,14 +349,3 @@ String _formatTime(DateTime dt) {
   final m = dt.minute.toString().padLeft(2, '0');
   return '$h:$m';
 }
-
-String _initialsFromFullName(String name) {
-  final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-  if (parts.isEmpty) return 'P';
-  if (parts.length == 1) {
-    final p = parts.first;
-    return p.substring(0, p.length >= 2 ? 2 : 1).toUpperCase();
-  }
-  return ('${parts[0][0]}${parts[1][0]}').toUpperCase();
-}
-

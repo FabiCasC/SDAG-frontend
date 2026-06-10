@@ -11,7 +11,7 @@ class ConductorOnlineItem {
   });
 
   final String name;
-  final String plate;
+  final String plate; 
   final String status;
 }
 
@@ -21,6 +21,7 @@ class ConductorGroupMessage {
     required this.senderId,
     required this.senderName,
     required this.senderRole,
+    required this.senderPlate,
     required this.text,
     required this.timestamp,
   });
@@ -29,6 +30,7 @@ class ConductorGroupMessage {
   final String senderId;
   final String senderName;
   final String senderRole;
+  final String senderPlate;
   final String text;
   final DateTime timestamp;
 }
@@ -95,10 +97,14 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
   }
 
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
+  bool _alive = true;
 
   Future<void> _initialize() async {
+    print('[Chat] _initialize start');
     final user = Supabase.instance.client.auth.currentUser;
+    print('[Chat] user: ${user?.email}');
     if (user == null) {
+      print('[Chat] no user');
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'No hay una sesión activa.',
@@ -107,17 +113,21 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
     }
 
     try {
+      print('[Chat] loading profile...');
       final profile = await Supabase.instance.client
           .from('profiles')
           .select('id, name, role, first_name, last_name')
           .eq('id', user.id)
           .maybeSingle();
+      print('[Chat] profile: $profile');
 
       final driver = await Supabase.instance.client
           .from('drivers')
           .select('plate')
           .eq('profile_id', user.id)
           .maybeSingle();
+
+      if (!_alive) return;
 
       state = state.copyWith(
         currentUserId: user.id,
@@ -131,6 +141,8 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
       await _loadMessages();
       _subscribe();
     } catch (error) {
+      print('[Chat] ERROR: $error');
+      if (!_alive) return;
       state = state.copyWith(
         isLoading: false,
         errorMessage: error.toString(),
@@ -139,19 +151,18 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
   }
 
   Future<void> _loadMessages() async {
-    final messages = await Supabase.instance.client
-        .from('driver_group_messages')
-        .select('*, profiles(name, role)')
-        .order('created_at', ascending: true)
-        .limit(50);
+    final messages = await Supabase.instance.client.from('driver_group_messages').select(
+          'id, body, message, sender_id, sender_driver_id, sender_name, sender_role, sender_plate, created_at',
+        ).order('created_at', ascending: true).limit(50);
+
+    if (!_alive) return;
 
     final parsed = (messages as List)
         .cast<Map<String, dynamic>>()
-        .map(_messageFromJoinedRow)
+        .map(_messageFromRow)
         .whereType<ConductorGroupMessage>()
         .toList(growable: false);
 
-    if (!mounted) return;
     state = state.copyWith(
       messages: parsed,
       isLoading: false,
@@ -165,56 +176,27 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
         .from('driver_group_messages')
         .stream(primaryKey: ['id'])
         .order('created_at')
-        .listen((data) async {
+        .listen((data) {
+          if (!_alive) return;
           try {
-            final mapped = await _mapStreamRows(data);
-            if (!mounted) return;
+            final mapped = data
+                .map(_messageFromRow)
+                .whereType<ConductorGroupMessage>()
+                .toList()
+              ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+            final trimmed = mapped.length <= 50 ? mapped : mapped.sublist(mapped.length - 50);
             state = state.copyWith(
-              messages: mapped,
+              messages: trimmed,
               isLoading: false,
               clearError: true,
             );
           } catch (error) {
-            if (!mounted) return;
             state = state.copyWith(
               isLoading: false,
               errorMessage: error.toString(),
             );
           }
         });
-  }
-
-  Future<List<ConductorGroupMessage>> _mapStreamRows(List<Map<String, dynamic>> data) async {
-    final senderIds = data
-        .map((row) => row['sender_id']?.toString())
-        .whereType<String>()
-        .where((id) => id.isNotEmpty)
-        .toSet()
-        .toList(growable: false);
-
-    final profileById = <String, Map<String, dynamic>>{};
-    if (senderIds.isNotEmpty) {
-      final profiles = await Supabase.instance.client
-          .from('profiles')
-          .select('id, name, role')
-          .inFilter('id', senderIds);
-
-      for (final item in (profiles as List).cast<Map<String, dynamic>>()) {
-        final id = item['id']?.toString();
-        if (id != null && id.isNotEmpty) {
-          profileById[id] = item;
-        }
-      }
-    }
-
-    final messages = data
-        .map((row) => _messageFromStreamRow(row, profileById))
-        .whereType<ConductorGroupMessage>()
-        .toList(growable: false);
-
-    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-    if (messages.length <= 50) return messages;
-    return messages.sublist(messages.length - 50);
   }
 
   Future<void> send({required String text}) async {
@@ -225,49 +207,50 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
       throw StateError('No hay una sesión activa.');
     }
 
-    final userRole = state.currentUserRole.isEmpty ? 'driver' : state.currentUserRole;
+    final profile = await Supabase.instance.client.from('profiles').select('name, role').eq('id', user.id).single();
+
+    var plate = '';
+    String? driverId;
+    if (profile['role']?.toString() == 'driver') {
+      final driver = await Supabase.instance.client
+          .from('drivers')
+          .select('id, plate')
+          .eq('profile_id', user.id)
+          .maybeSingle();
+      driverId = driver?['id']?.toString();
+      plate = driver?['plate']?.toString() ?? '';
+    }
+
+    final name = profile['name']?.toString().trim().isNotEmpty == true
+        ? profile['name'].toString()
+        : state.currentUserName.isNotEmpty
+            ? state.currentUserName
+            : 'Usuario';
 
     await Supabase.instance.client.from('driver_group_messages').insert({
       'sender_id': user.id,
-      'message': value,
-      'sender_role': userRole,
-      'sender_name': state.currentUserName.isEmpty ? 'Usuario' : state.currentUserName,
-      'sender_plate': state.currentUserPlate.isEmpty ? userRole.toUpperCase() : state.currentUserPlate,
+      'sender_driver_id': driverId,
       'body': value,
+      'message': value,
+      'sender_name': name,
+      'sender_role': profile['role']?.toString() ?? 'driver',
+      'sender_plate': plate,
     });
   }
 
-  ConductorGroupMessage? _messageFromJoinedRow(Map<String, dynamic> row) {
-    final profile = row['profiles'] as Map<String, dynamic>?;
-    final text = row['message']?.toString() ?? row['body']?.toString();
+  static ConductorGroupMessage? _messageFromRow(Map<String, dynamic> row) {
+    final text = row['body']?.toString() ?? row['message']?.toString();
     final createdAt = DateTime.tryParse(row['created_at']?.toString() ?? '')?.toLocal();
     if (text == null || text.trim().isEmpty || createdAt == null) return null;
 
     return ConductorGroupMessage(
       id: row['id']?.toString() ?? '',
-      senderId: row['sender_id']?.toString() ?? '',
-      senderName: _profileName(profile, fallback: row['sender_name']?.toString()),
-      senderRole: row['sender_role']?.toString() ?? profile?['role']?.toString() ?? 'driver',
-      text: text.trim(),
-      timestamp: createdAt,
-    );
-  }
-
-  ConductorGroupMessage? _messageFromStreamRow(
-    Map<String, dynamic> row,
-    Map<String, Map<String, dynamic>> profileById,
-  ) {
-    final senderId = row['sender_id']?.toString() ?? '';
-    final profile = profileById[senderId];
-    final text = row['message']?.toString() ?? row['body']?.toString();
-    final createdAt = DateTime.tryParse(row['created_at']?.toString() ?? '')?.toLocal();
-    if (text == null || text.trim().isEmpty || createdAt == null) return null;
-
-    return ConductorGroupMessage(
-      id: row['id']?.toString() ?? '',
-      senderId: senderId,
-      senderName: _profileName(profile, fallback: row['sender_name']?.toString()),
-      senderRole: row['sender_role']?.toString() ?? profile?['role']?.toString() ?? 'driver',
+      senderId: row['sender_id']?.toString() ?? row['sender_driver_id']?.toString() ?? '',
+      senderName: row['sender_name']?.toString().trim().isNotEmpty == true
+          ? row['sender_name'].toString()
+          : 'Usuario',
+      senderRole: row['sender_role']?.toString() ?? 'driver',
+      senderPlate: row['sender_plate']?.toString() ?? '',
       text: text.trim(),
       timestamp: createdAt,
     );
@@ -275,6 +258,7 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
 
   @override
   void dispose() {
+    _alive = false;
     _subscription?.cancel();
     super.dispose();
   }
@@ -295,6 +279,40 @@ String _profileName(
   final fallbackName = fallback?.trim() ?? '';
   return fallbackName.isEmpty ? 'Usuario' : fallbackName;
 }
+
+/// Acceso al chat grupal: admin siempre; conductor con `cuenta_activa`; otros no.
+final conductorChatGrupalAccesoProvider = FutureProvider<bool>((ref) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  print('[Acceso] user: ${user?.email}');
+  if (user == null) return false;
+
+  try {
+    final profile = await Supabase.instance.client
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+    print('[Acceso] role: ${profile['role']}');
+
+    if (profile['role'] == 'admin') return true;
+
+    if (profile['role'] == 'driver') {
+      final driver = await Supabase.instance.client
+          .from('drivers')
+          .select('id, cuenta_activa')
+          .eq('profile_id', user.id)
+          .maybeSingle();
+      print('[Acceso] driver: $driver');
+      return (driver?['cuenta_activa'] as bool? ?? false);
+    }
+
+    return false;
+  } catch (e) {
+    print('[Acceso] ERROR: $e');
+    return false;
+  }
+});
 
 final conductorChatGrupalProvider =
     StateNotifierProvider<ConductorChatGrupalController, ConductorChatGrupalState>(
