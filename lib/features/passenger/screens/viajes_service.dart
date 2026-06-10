@@ -1,43 +1,37 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Servicio que maneja todas las consultas de viajes a Supabase.
-/// Separa la lógica de base de datos de la interfaz visual.
 class ViajesService {
-  /// Cliente de Supabase (singleton global)
+  // 1. Asegúrate de que esta línea exista aquí arriba
   final _supabase = Supabase.instance.client;
 
-  /// Busca viajes disponibles según la dirección seleccionada por el pasajero.
-  /// 
-  /// [direccion] puede ser:
-  /// - 'san_isidro_chosica' → viajes de San Isidro hacia Chosica
-  /// - 'chosica_san_isidro' → viajes de Chosica hacia San Isidro
-  /// 
-  /// Solo devuelve viajes en estado 'esperando' o 'en_ruta'.
-  /// Ordenados por hora de salida más próxima.
+  /// Busca viajes disponibles usando las relaciones correctas en Supabase
+  /// y extrae la polyline de la ruta para renderizar el mapa.
   Future<List<Map<String, dynamic>>> buscarViajesDisponibles({
-    required String direccion,
+    required String routeId,
   }) async {
+    // 2. Aquí usamos _supabase con las comillas simples triples para el select
     final response = await _supabase
-        .from('viajes')
+        .from('trips')
         .select('''
           id,
-          direccion,
-          ruta,
-          estado,
-          asientos_ocupados,
-          hora_salida,
-          vehiculos (
-            capacidad,
-            tipo,
-            placa
+          scheduled_departure_at,
+          amount,
+          drivers (
+            id,
+            plate,
+            vehicle_type,
+            capacity,
+            profile_id
           ),
-          conductores (
-            nombre
+          routes (
+            id,
+            name,
+            from_label,
+            to_label,
+            polyline
           )
         ''')
-        .inFilter('estado', ['esperando', 'en_ruta'])
-        .eq('direccion', direccion)
-        .order('hora_salida', ascending: true);
+        .eq('route_id', routeId);
 
     return List<Map<String, dynamic>>.from(response);
   }

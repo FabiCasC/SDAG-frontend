@@ -10,6 +10,10 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart' hide SeatMapWidget;
 import '../providers/reserva_provider.dart';
 
+// IMPORTS DEL MAPA
+import '../../../shared/widgets/mapa_ruta_widget.dart';
+import '../../../data/models/route_polyline_model.dart';
+
 class SeatMapScreen extends ConsumerStatefulWidget {
   const SeatMapScreen({
     required this.driverId,
@@ -47,6 +51,7 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
         controller: controller,
         driver: stateDriver,
         state: state,
+        fallbackAsync: fallbackAsync,
       );
     }
 
@@ -75,6 +80,7 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
           controller: controller,
           driver: driver,
           state: state,
+          fallbackAsync: fallbackAsync,
         );
       },
     );
@@ -86,6 +92,7 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
     required ReservaController controller,
     required ReservaDriverInfo driver,
     required ReservaState state,
+    required AsyncValue<ReservaDriverInfo> fallbackAsync,
   }) {
     final occupiedAsync = ref.watch(occupiedSeatsByTripProvider(driver.tripId));
     final selectedSeats = state.asientosSeleccionados.toSet();
@@ -108,6 +115,7 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
                 140,
               ),
               children: [
+                // 1. Tarjeta superior del Conductor
                 AppCard(
                   child: Padding(
                     padding: const EdgeInsets.all(AppSpacing.md),
@@ -117,27 +125,62 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
                         Text(
                           driver.name,
                           style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                color: AppColors.textPrimary,
-                                fontWeight: FontWeight.w700,
-                              ),
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                         const SizedBox(height: AppSpacing.xs),
                         Text(
                           '${driver.vehicleType} · ${driver.totalSeats} asientos · ${driver.plate}',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ),
+
                 const SizedBox(height: AppSpacing.lg),
+
+                // 2. MAPA REAL EN VIVO (Ahora está arriba del todo)
+                Text(
+                  'Ruta del viaje',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                SizedBox(
+                  height: 200, // Altura para que se vea claro y cómodo
+                  width: double.infinity,
+                  child: fallbackAsync.maybeWhen(
+                    data: (driverInfo) {
+                      final mockJson = {
+                        "points": [
+                          {"lat": -12.0961, "lng": -77.0315},
+                          {"lat": -12.0553, "lng": -76.9631},
+                          {"lat": -12.0239, "lng": -76.9012},
+                          {"lat": -11.9392, "lng": -76.7024}
+                        ]
+                      };
+                      return MapaRutaWidget(
+                        routePolyline: RoutePolyline.fromJson(mockJson),
+                      );
+                    },
+                    orElse: () => const Center(child: CircularProgressIndicator()),
+                  ),
+                ),
+
+                const SizedBox(height: AppSpacing.xl),
+
+                // 3. Distribución de asientos original
                 Text(
                   'Elige tus asientos',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.textPrimary,
-                      ),
+                    color: AppColors.textPrimary,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 _VehicleLayout(
@@ -171,12 +214,12 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
               enabled: canContinue,
               onContinue: canContinue
                   ? () {
-                      if (state.asientosSeleccionados.length == 1) {
-                        context.push(AppRoutes.passengerReservaPickup);
-                      } else {
-                        context.push(AppRoutes.passengerReservaAcompanantes);
-                      }
-                    }
+                if (state.asientosSeleccionados.length == 1) {
+                  context.push(AppRoutes.passengerReservaPickup);
+                } else {
+                  context.push(AppRoutes.passengerReservaAcompanantes);
+                }
+              }
                   : null,
             ),
           ],
@@ -208,8 +251,8 @@ class _VehicleLayout extends StatelessWidget {
       final visualState = occupied.contains(seatNumber)
           ? _SeatVisualState.occupied
           : selected.contains(seatNumber)
-              ? _SeatVisualState.selected
-              : _SeatVisualState.available;
+          ? _SeatVisualState.selected
+          : _SeatVisualState.available;
 
       final enabled = visualState != _SeatVisualState.occupied;
 
@@ -256,9 +299,9 @@ class _VehicleLayout extends StatelessWidget {
     }
 
     Widget emptySeat() => const SizedBox(
-          width: AppSpacing.seatSize,
-          height: AppSpacing.seatSize,
-        );
+      width: AppSpacing.seatSize,
+      height: AppSpacing.seatSize,
+    );
 
     List<Widget> rows = [];
 
@@ -331,9 +374,9 @@ class _VehicleLayout extends StatelessWidget {
                 child: Text(
                   'Distribución del vehículo',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
@@ -496,7 +539,7 @@ class _SeatLegend extends StatelessWidget {
 }
 
 final _seatMapDriverProvider =
-    FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, lookup) async {
+FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, lookup) async {
   final client = Supabase.instance.client;
   dynamic response;
 
@@ -523,7 +566,8 @@ final _seatMapDriverProvider =
           routes (
             name,
             from_label,
-            to_label
+            to_label,
+            polyline
           )
         ''')
         .eq('id', lookup.tripId!)
@@ -551,7 +595,8 @@ final _seatMapDriverProvider =
           routes (
             name,
             from_label,
-            to_label
+            to_label,
+            polyline
           )
         ''')
         .eq('driver_id', lookup.driverId!)
