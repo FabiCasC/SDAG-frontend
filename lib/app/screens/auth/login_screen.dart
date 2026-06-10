@@ -94,8 +94,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ref.read(passengerSessionProvider.notifier).logout();
           await ref.read(adminAuthProvider.notifier).logout();
           if (!mounted) return;
-          final auth = ref.read(conductorAuthProvider);
-          context.go(auth.pagoConfirmado ? AppRoutes.driverHome : AppRoutes.driverBlocked);
+          context.go(AppRoutes.driverHome);
           return;
         case ConductorLoginResult.inactiveAccount:
           AppSnackbars.warning(context, 'Tu cuenta está desactivada. Contacta al administrador');

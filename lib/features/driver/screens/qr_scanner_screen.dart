@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../shared/design/app_colors.dart';
+import '../../passenger/screens/viajes_service.dart';
 
 /// Pantalla de escaneo de QR para el conductor.
 /// Permite verificar el abordaje de pasajeros leyendo su código QR.
@@ -12,6 +13,9 @@ class QrScannerScreen extends StatefulWidget {
 }
 
 class _QrScannerScreenState extends State<QrScannerScreen> {
+  /// Servicio de datos
+  final _viajesService = ViajesService();
+
   /// Controlador de la cámara y el escáner
   final MobileScannerController _controller = MobileScannerController();
 
@@ -45,14 +49,15 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   /// Valida el token del QR escaneado.
-  /// 
-  /// Por ahora es una simulación local: cualquier QR que empiece
-  /// con 'SDAG-' se considera válido.
-  /// Cuando se integre Supabase, aquí va la llamada RPC real que
-  /// consultará la tabla Manifiesto_Electronico y cambiará el
-  /// estado del pasajero a "Subió".
-  void _validarQr(String token) {
-    final esValido = token.startsWith('SDAG-');
+  /// Valida el token contra la tabla de reservas en Supabase y actualiza el estado a 'boarded'.
+  Future<void> _validarQr(String token) async {
+    bool esValido = false;
+    try {
+      esValido = await _viajesService.registrarAbordaje(token);
+    } catch (e) {
+      esValido = false;
+    }
+
     setState(() {
       _esValido = esValido;
     });

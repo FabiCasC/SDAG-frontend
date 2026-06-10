@@ -35,7 +35,6 @@ class AppRoutes {
   static const driverHome = '/conductor/home';
   static const driverLogin = '/conductor/login';
   static const driverForgotPassword = '/conductor/forgot-password';
-  static const driverBlocked = '/conductor/bloqueado';
   static const driverGestionViaje = '/conductor/gestion-viaje';
   static const driverMapa = '/conductor/mapa';
   static const driverPasajeros = '/conductor/pasajeros';

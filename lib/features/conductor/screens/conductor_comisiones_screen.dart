@@ -188,11 +188,10 @@ class ConductorComisionesScreen extends ConsumerWidget {
               );
               if (ok != true) return;
               await ref.read(conductorComisionesProvider.notifier).confirmarRecepcion();
-              await ref.read(conductorAuthProvider.notifier).confirmarPago();
               if (!context.mounted) return;
               AppSnackbars.success(
                 context,
-                'Recepción confirmada. Mañana podrás operar con normalidad.',
+                'Recepción confirmada.',
               );
             },
           ),
@@ -232,14 +231,6 @@ class ConductorComisionesScreen extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
-          if (!auth.pagoConfirmado)
-            Text(
-              'Tu acceso operativo está bloqueado hasta confirmar recepción.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.error,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
         ],
       ),
     );
@@ -543,4 +534,3 @@ class _PagoRow extends StatelessWidget {
     );
   }
 }
-

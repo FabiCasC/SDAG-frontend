@@ -26,7 +26,6 @@ import '../../features/viaje/screens/viaje_detalle_screen.dart';
 import '../../features/viaje/screens/qr_screen.dart';
 import '../../features/noticias/screens/noticia_detalle_screen.dart';
 import '../../features/reservations/screens/reserva_detalle_screen.dart';
-import '../../features/conductor/screens/conductor_bloqueado_screen.dart';
 import '../../features/conductor/screens/conductor_forgot_password_screen.dart';
 import '../../features/conductor/screens/conductor_home_screen.dart';
 import '../../features/conductor/screens/conductor_chat_grupal_screen.dart';
@@ -223,10 +222,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.driverForgotPassword,
         builder: (context, state) => const ConductorForgotPasswordScreen(),
-      ),
-      GoRoute(
-        path: AppRoutes.driverBlocked,
-        builder: (context, state) => const ConductorBloqueadoScreen(),
       ),
       GoRoute(
         path: AppRoutes.driverGestionViaje,

@@ -94,14 +94,12 @@ class _ConductorHomeScreenState extends ConsumerState<ConductorHomeScreen>
         if (!context.mounted) return;
         context.go(AppRoutes.driverLogin);
       });
-    } else if (!auth.pagoConfirmado) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) return;
-        context.go(AppRoutes.driverBlocked);
-      });
     }
 
+
+
     const navBg = Color(0xFF1E40AF);
+
     const active = Color(0xFFF97316);
     const inactive = Color(0xFF93C5FD);
 

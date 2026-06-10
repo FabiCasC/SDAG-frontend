@@ -203,11 +203,6 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
       ConductorEstadoActual.finalizado => 'finalizado',
     };
 
-    final lastPago = auth.lastPagoConfirmadoAt;
-    final lastPagoLabel = lastPago == null
-        ? '-'
-        : '${lastPago.day.toString().padLeft(2, '0')}/${lastPago.month.toString().padLeft(2, '0')}/${lastPago.year}';
-
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.all(AppSpacing.p20),
@@ -462,7 +457,6 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                _kv(context, 'Pago confirmado', lastPagoLabel),
                 _kv(context, 'Estado actual', estadoLabel),
               ],
             ),

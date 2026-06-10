@@ -4,10 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../passenger/screens/viajes_service.dart';
 
 final adminConfiguracionProvider =
     StateNotifierProvider<AdminConfiguracionController, AdminConfiguracionState>(
@@ -350,7 +350,7 @@ class _AdminConfiguracionScreenState extends ConsumerState<AdminConfiguracionScr
   Future<void> _saveFlow(AdminConfiguracionState s) async {
     final controller = ref.read(adminConfiguracionProvider.notifier);
     final messenger = ScaffoldMessenger.of(context);
-    final reservasActivas = MockData.pasajerosViajeActivo.length;
+    final reservasActivas = await ViajesService().obtenerConteoReservasActivas();
     final priceChanged = s.draft.basePrice != s.saved.basePrice;
 
     if (!s.isValid) {

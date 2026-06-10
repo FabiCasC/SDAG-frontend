@@ -14,31 +14,21 @@ enum ConductorEstadoActual {
 class ConductorAuthState {
   const ConductorAuthState({
     required this.conductorLogueado,
-    required this.pagoConfirmado,
-    required this.lastPagoConfirmadoAt,
     required this.accesoOperativo,
     required this.estadoActual,
   });
 
   final bool conductorLogueado;
-  final bool pagoConfirmado;
-  final DateTime? lastPagoConfirmadoAt;
   final bool accesoOperativo;
   final ConductorEstadoActual estadoActual;
 
   ConductorAuthState copyWith({
     bool? conductorLogueado,
-    bool? pagoConfirmado,
-    DateTime? lastPagoConfirmadoAt,
-    bool clearLastPagoConfirmadoAt = false,
     bool? accesoOperativo,
     ConductorEstadoActual? estadoActual,
   }) {
     return ConductorAuthState(
       conductorLogueado: conductorLogueado ?? this.conductorLogueado,
-      pagoConfirmado: pagoConfirmado ?? this.pagoConfirmado,
-      lastPagoConfirmadoAt:
-          clearLastPagoConfirmadoAt ? null : (lastPagoConfirmadoAt ?? this.lastPagoConfirmadoAt),
       accesoOperativo: accesoOperativo ?? this.accesoOperativo,
       estadoActual: estadoActual ?? this.estadoActual,
     );
@@ -46,8 +36,6 @@ class ConductorAuthState {
 
   static const initial = ConductorAuthState(
     conductorLogueado: false,
-    pagoConfirmado: false,
-    lastPagoConfirmadoAt: null,
     accesoOperativo: false,
     estadoActual: ConductorEstadoActual.disponible,
   );
@@ -89,30 +77,22 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
     if (driver == null) {
       state = state.copyWith(
         conductorLogueado: true,
-        pagoConfirmado: false,
-        lastPagoConfirmadoAt: null,
         accesoOperativo: false,
         estadoActual: ConductorEstadoActual.disponible,
       );
       return;
     }
 
-    final driverId = driver['id']?.toString();
     final cuentaActiva = (driver['cuenta_activa'] as bool?) ?? true;
-    final bloqueoPorSolicitud = await _hasPendingPayoutRequest(
-      driverId: driverId,
-      profileId: user.id,
-    );
+
     final estado = _estadoFromString(driver['estado']?.toString()) ?? ConductorEstadoActual.disponible;
-    final pagoAt = DateTime.tryParse(driver['last_pago_confirmado_at']?.toString() ?? '');
 
     state = state.copyWith(
       conductorLogueado: cuentaActiva,
-      pagoConfirmado: !bloqueoPorSolicitud,
-      lastPagoConfirmadoAt: pagoAt,
-      accesoOperativo: cuentaActiva && !bloqueoPorSolicitud,
+      accesoOperativo: cuentaActiva,
       estadoActual: estado,
     );
+
   }
 
   ConductorEstadoActual? _estadoFromString(String? value) {
@@ -143,20 +123,12 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
       final cuentaActiva = (driver?['cuenta_activa'] as bool?) ?? true;
       if (!cuentaActiva) return ConductorLoginResult.inactiveAccount;
 
-      final driverId = driver?['id']?.toString();
-      final bloqueoPorSolicitud = await _hasPendingPayoutRequest(
-        driverId: driverId,
-        profileId: user.id,
-      );
       final estado = _estadoFromString(driver?['estado']?.toString()) ?? ConductorEstadoActual.disponible;
-      final pagoAt = DateTime.tryParse(driver?['last_pago_confirmado_at']?.toString() ?? '');
 
       if (!mounted) return ConductorLoginResult.ok;
       state = state.copyWith(
         conductorLogueado: true,
-        pagoConfirmado: !bloqueoPorSolicitud,
-        lastPagoConfirmadoAt: pagoAt,
-        accesoOperativo: !bloqueoPorSolicitud,
+         accesoOperativo: cuentaActiva,
         estadoActual: estado,
       );
       return ConductorLoginResult.ok;
@@ -166,79 +138,16 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
   }
 
   Future<void> logout() async {
+    await Supabase.instance.client.auth.signOut();
     state = ConductorAuthState.initial;
   }
 
-  Future<void> confirmarPago() async {
-    final now = DateTime.now();
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
-    final driver = await _getDriverByProfileId(user.id);
-    final driverId = driver?['id']?.toString();
-
-    if (driverId != null && driverId.isNotEmpty) {
-      try {
-        await Supabase.instance.client
-            .from('driver_payout_requests')
-            .update({'status': 'recibido_conductor'})
-            .eq('driver_id', driverId)
-            .eq('status', 'pendiente');
-      } on PostgrestException {
-        await Supabase.instance.client
-            .from('driver_payout_requests')
-            .update({'status': 'recibido_conductor'})
-            .eq('profile_id', user.id)
-            .eq('status', 'pendiente');
-      }
-    } else {
-      await Supabase.instance.client
-          .from('driver_payout_requests')
-          .update({'status': 'recibido_conductor'})
-          .eq('profile_id', user.id)
-          .eq('status', 'pendiente');
-    }
-
-    await Supabase.instance.client.from('drivers').update({
-      'pago_confirmado': true,
-      'last_pago_confirmado_at': now.toIso8601String(),
-    }).eq('profile_id', user.id);
-    if (!mounted) return;
-    state = state.copyWith(
-      pagoConfirmado: true,
-      lastPagoConfirmadoAt: now,
-      accesoOperativo: state.conductorLogueado,
-    );
-  }
-
-  Future<bool> _hasPendingPayoutRequest({
-    required String? driverId,
-    required String profileId,
-  }) async {
-    if (driverId != null && driverId.isNotEmpty) {
-      try {
-        final pendingRequest = await Supabase.instance.client
-            .from('driver_payout_requests')
-            .select('id')
-            .eq('driver_id', driverId)
-            .eq('status', 'pendiente')
-            .maybeSingle();
-        if (pendingRequest != null) return true;
-      } on PostgrestException {
-        // Fallback for schemas that still store payout requests by profile_id.
-      }
-    }
-
-    final pendingRequest = await Supabase.instance.client
-        .from('driver_payout_requests')
-        .select('id')
-        .eq('profile_id', profileId)
-        .eq('status', 'pendiente')
-        .maybeSingle();
-    return pendingRequest != null;
-  }
-
   Future<ConductorDisponibilidadResult> activarDisponibilidad() async {
-    if (!state.accesoOperativo) return ConductorDisponibilidadResult.accesoBloqueado;
+    // Verificar primero si el chofer tiene permiso operativo
+    if (!state.accesoOperativo) {
+      return ConductorDisponibilidadResult.accesoBloqueado;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     final okHorario = _isWithinOperationalHours(DateTime.now(), prefs);
     if (!okHorario) return ConductorDisponibilidadResult.fueraDeHorario;
@@ -249,7 +158,6 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
   }
 
   Future<void> desactivarDisponibilidad() async {
-    if (!state.accesoOperativo) return;
     await _updateDriverEstado(ConductorEstadoActual.finalizado);
     if (!mounted) return;
     state = state.copyWith(estadoActual: ConductorEstadoActual.finalizado);
@@ -257,7 +165,6 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
 
   Future<void> syncWithViaje(ConductorViajeState viaje) async {
     if (!state.conductorLogueado) return;
-    if (!state.accesoOperativo) return;
 
     ConductorEstadoActual? target;
     if (viaje.estadoViaje == ConductorEstadoViaje.enRuta) {

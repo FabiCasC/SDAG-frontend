@@ -171,12 +171,6 @@ class _ConductorGestionViajeScreenState extends ConsumerState<ConductorGestionVi
         context.go(AppRoutes.driverLogin);
       });
     }
-    if (!auth.pagoConfirmado) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) return;
-        context.go(AppRoutes.driverBlocked);
-      });
-    }
 
     final banner = state.bannerText;
     final pasajeros = [...state.pasajerosViaje]..sort((a, b) => a.asiento.compareTo(b.asiento));
