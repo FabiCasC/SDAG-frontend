@@ -9,31 +9,75 @@ import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 
 final adminAnaliticaResumenProvider = FutureProvider<AdminAnaliticaResumen>((ref) async {
-  final trips = await Supabase.instance.client
-      .from('trips')
-      .select('amount_total')
-      .eq('status', 'completado');
+  final pagos = await Supabase.instance.client
+      .from('payments')
+      .select('amount')
+      .eq('status', 'confirmado');
+  final totalIngresos = (pagos as List).cast<Map<String, dynamic>>().fold<double>(
+        0.0,
+        (sum, p) => sum + ((p['amount'] as num?)?.toDouble() ?? 0.0),
+      );
 
   final totalViajes = await Supabase.instance.client
       .from('trips')
       .select('id')
+      .eq('status', 'completado')
       .count(CountOption.exact);
+  final countViajes = totalViajes.count;
+
+  final viajesEnRuta = await Supabase.instance.client
+      .from('trips')
+      .select('id')
+      .eq('status', 'en_ruta')
+      .count(CountOption.exact);
+  final countEnRuta = viajesEnRuta.count;
 
   final totalPasajeros = await Supabase.instance.client
       .from('reservations')
       .select('id')
-      .eq('status', 'activa')
+      .inFilter('status', ['activa', 'completada'])
       .count(CountOption.exact);
+  final countPasajeros = totalPasajeros.count;
 
-  final ingresos = (trips as List).cast<Map<String, dynamic>>().fold<double>(
-        0,
-        (sum, row) => sum + ((row['amount_total'] as num?)?.toDouble() ?? 0),
+  final comisiones = await Supabase.instance.client
+      .from('driver_commissions')
+      .select('comision');
+  final totalComisiones = (comisiones as List).cast<Map<String, dynamic>>().fold<double>(
+        0.0,
+        (sum, c) => sum + ((c['comision'] as num?)?.toDouble() ?? 0.0),
       );
 
+  final conductores = await Supabase.instance.client
+      .from('trips')
+      .select('driver_id, drivers(profiles(name))')
+      .eq('status', 'completado');
+
+  String? conductorTop;
+  final conteoConductores = <String, ({String name, int count})>{};
+  for (final row in (conductores as List).cast<Map<String, dynamic>>()) {
+    final driverId = row['driver_id']?.toString();
+    final driver = row['drivers'] as Map<String, dynamic>?;
+    final profile = driver?['profiles'] as Map<String, dynamic>?;
+    final name = profile?['name']?.toString().trim();
+    if (driverId == null || driverId.isEmpty) continue;
+    final actual = conteoConductores[driverId];
+    conteoConductores[driverId] = (
+      name: (name == null || name.isEmpty) ? 'Conductor' : name,
+      count: (actual?.count ?? 0) + 1,
+    );
+  }
+  if (conteoConductores.isNotEmpty) {
+    final top = conteoConductores.values.reduce((a, b) => a.count >= b.count ? a : b);
+    conductorTop = '${top.name} (${top.count})';
+  }
+
   return AdminAnaliticaResumen(
-    ingresosTotales: ingresos,
-    totalViajes: totalViajes.count,
-    totalPasajeros: totalPasajeros.count,
+    ingresosTotales: totalIngresos,
+    totalViajes: countViajes,
+    viajesEnRuta: countEnRuta,
+    totalPasajeros: countPasajeros,
+    totalComisiones: totalComisiones,
+    conductorTop: conductorTop,
   );
 });
 
@@ -41,12 +85,18 @@ class AdminAnaliticaResumen {
   const AdminAnaliticaResumen({
     required this.ingresosTotales,
     required this.totalViajes,
+    required this.viajesEnRuta,
     required this.totalPasajeros,
+    required this.totalComisiones,
+    required this.conductorTop,
   });
 
   final double ingresosTotales;
   final int totalViajes;
+  final int viajesEnRuta;
   final int totalPasajeros;
+  final double totalComisiones;
+  final String? conductorTop;
 }
 
 class AdminAnaliticaScreen extends ConsumerWidget {
@@ -95,10 +145,16 @@ class AdminAnaliticaScreen extends ConsumerWidget {
                   color: const Color(0xFF16A34A),
                 ),
                 _StatCard(
-                  title: 'Total viajes',
+                  title: 'Viajes completados',
                   value: '${resumen.totalViajes}',
                   icon: Icons.route_rounded,
                   color: const Color(0xFF2563EB),
+                ),
+                _StatCard(
+                  title: 'Viajes en curso',
+                  value: '${resumen.viajesEnRuta}',
+                  icon: Icons.alt_route_rounded,
+                  color: const Color(0xFFEA580C),
                 ),
                 _StatCard(
                   title: 'Total pasajeros',
@@ -106,12 +162,19 @@ class AdminAnaliticaScreen extends ConsumerWidget {
                   icon: Icons.people_alt_rounded,
                   color: const Color(0xFFF97316),
                 ),
+                _StatCard(
+                  title: 'Total comisiones',
+                  value: 'S/ ${_formatMoney(resumen.totalComisiones)}',
+                  icon: Icons.payments_rounded,
+                  color: const Color(0xFF7C3AED),
+                ),
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            _InfoBox(
-              text: 'Los ingresos consideran viajes con estado completado y los pasajeros activos se cuentan desde reservations.',
-            ),
+            if (resumen.conductorTop != null)
+              _InfoBox(
+                text: 'Conductor con más viajes: ${resumen.conductorTop}',
+              ),
           ],
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
@@ -137,6 +200,11 @@ class AdminAnaliticaScreen extends ConsumerWidget {
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textSecondary,
                       ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                FilledButton(
+                  onPressed: () => ref.refresh(adminAnaliticaResumenProvider),
+                  child: const Text('Reintentar'),
                 ),
               ],
             ),

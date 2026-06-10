@@ -7,23 +7,37 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/admin_conductores_provider.dart';
 import 'admin_vehiculo_crear_screen.dart';
 import 'admin_vehiculos_screen.dart';
 
+extension _PostgrestIsFilter on PostgrestFilterBuilder {
+  PostgrestFilterBuilder is_(String column, Object? value) => filter(column, 'is', value);
+}
+
 final adminAvailableVehiclesProvider = FutureProvider<List<AdminAvailableVehicle>>((ref) async {
-  final availableVehicles = await Supabase.instance.client
+  final List response = await Supabase.instance.client
       .from('vehicles')
-      .select('id, plate, label, vehicle_type, total_seats')
-      .filter('driver_id', 'is', null)
+      .select('id, plate, vehicle_type, total_seats')
+      .is_('driver_id', null)
       .eq('active', true)
       .order('plate');
 
-  return (availableVehicles as List)
+  debugPrint('[Vehiculos] disponibles: ${response.length} - $response');
+
+  return response
       .cast<Map<String, dynamic>>()
       .map(AdminAvailableVehicle.fromMap)
       .toList(growable: false);
 });
+
+String? _previewToken(Session? session) {
+  if (session == null) return null;
+  final token = session.accessToken;
+  final end = token.length < 20 ? token.length : 20;
+  return token.substring(0, end);
+}
 
 class AdminAvailableVehicle {
   const AdminAvailableVehicle({
@@ -108,23 +122,13 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
     if (_guardando) return;
     if (!_formKey.currentState!.validate()) return;
     if (_selectedVehicleId == null || _selectedVehicleId!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.error,
-          content: Text('Selecciona un vehículo disponible'),
-        ),
-      );
+      AppSnackbars.error(context, 'Selecciona un vehículo disponible');
       return;
     }
 
     final selectedVehicle = vehicles.where((v) => v.id == _selectedVehicleId).firstOrNull;
     if (selectedVehicle == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: AppColors.error,
-          content: Text('El vehículo seleccionado ya no está disponible'),
-        ),
-      );
+      AppSnackbars.error(context, 'El vehículo seleccionado ya no está disponible');
       return;
     }
 
@@ -134,9 +138,34 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
     final lastName = _apellidoController.text.trim();
     final dni = _dniController.text.trim();
     final phone = _telefonoController.text.trim();
+    final session = Supabase.instance.client.auth.currentSession;
+
+    if (!RegExp(r'^\d{9}$').hasMatch(phone)) {
+      AppSnackbars.error(context, 'El teléfono debe tener 9 dígitos');
+      return;
+    }
+    if (!RegExp(r'^\d{8}$').hasMatch(dni)) {
+      AppSnackbars.error(context, 'El DNI debe tener 8 dígitos');
+      return;
+    }
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      AppSnackbars.error(context, 'Ingresa un email válido');
+      return;
+    }
+    if (password.length < 8) {
+      AppSnackbars.error(context, 'La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+    if (selectedVehicle.plate.trim().isEmpty) {
+      AppSnackbars.error(context, 'La placa no puede estar vacía');
+      return;
+    }
 
     setState(() => _guardando = true);
     try {
+      debugPrint('[AdminCrearConductor] session: ${_previewToken(session)}');
+      debugPrint('[AdminCrearConductor] user: ${Supabase.instance.client.auth.currentUser?.email}');
+
       final response = await Supabase.instance.client.functions.invoke(
         'create-driver',
         body: {
@@ -152,6 +181,9 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
           'commission_pct': 15,
         },
       );
+
+      debugPrint('[AdminCrearConductor] response status: ${response.status}');
+      debugPrint('[AdminCrearConductor] response data: ${response.data}');
 
       if (!mounted) return;
 
@@ -198,14 +230,27 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
       } else {
         context.go(AppRoutes.adminConductores);
       }
+    } on FunctionException catch (e) {
+      final details = e.details?.toString() ?? '';
+      String mensaje = 'No se pudo crear el conductor.';
+
+      if (details.contains('profiles_phone_key')) {
+        mensaje = 'El número de teléfono ya está registrado.';
+      } else if (details.contains('profiles_dni_key')) {
+        mensaje = 'El DNI ya está registrado.';
+      } else if (details.contains('profiles_email_key')) {
+        mensaje = 'El correo electrónico ya está registrado.';
+      } else if (details.contains('drivers_plate_key') || details.contains('vehicles_plate_key')) {
+        mensaje = 'La placa ya está registrada.';
+      } else if (details.contains('duplicate key')) {
+        mensaje = 'Ya existe un registro con esos datos. Verifica teléfono, DNI o correo.';
+      }
+
+      if (!mounted) return;
+      AppSnackbars.error(context, mensaje);
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppColors.error,
-          content: Text(_functionErrorMessage(error)),
-        ),
-      );
+      AppSnackbars.error(context, _functionErrorMessage(error));
     } finally {
       if (mounted) {
         setState(() => _guardando = false);
@@ -333,6 +378,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
                     ] else ...[
                       DropdownButtonFormField<String>(
                         initialValue: _selectedVehicleId,
+                        isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Vehículo disponible'),
                         items: vehicles
                             .map(
@@ -340,6 +386,8 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
                                 value: vehicle.id,
                                 child: Text(
                                   '${vehicle.plate} · ${vehicle.vehicleType} · ${vehicle.capacity} asientos',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             )

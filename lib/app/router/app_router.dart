@@ -50,6 +50,7 @@ import '../../features/admin/screens/admin_home_screen.dart';
 import '../../features/admin/screens/admin_bloqueado_screen.dart';
 import '../../features/admin/screens/admin_forgot_password_screen.dart';
 import '../../features/admin/screens/admin_manifiestos_screen.dart';
+import '../../features/admin/screens/admin_manifiestos_detalle_screen.dart';
 import '../../features/admin/screens/admin_monitoreo_screen.dart';
 import '../../features/admin/screens/admin_pagos_screen.dart';
 import '../../features/admin/screens/admin_perfil_screen.dart';
@@ -348,8 +349,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.adminManifiestosDetalle,
-        builder: (context, state) => AdminManifiestoDetalleScreen(
-          viajeId: state.pathParameters['viajeId'] ?? '',
+        builder: (context, state) => AdminManifiestosDetalleScreen(
+          manifestId: state.pathParameters['manifestId'] ?? '',
         ),
       ),
       GoRoute(

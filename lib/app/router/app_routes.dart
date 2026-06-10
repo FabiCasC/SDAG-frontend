@@ -67,7 +67,7 @@ class AppRoutes {
   static const adminPagosHistorial = '/admin/pagos/historial';
   static const adminMonitoreo = '/admin/monitoreo';
   static const adminManifiestos = '/admin/manifiestos';
-  static const adminManifiestosDetalle = '/admin/manifiestos/:viajeId';
+  static const adminManifiestosDetalle = '/admin/manifiestos/:manifestId';
   static const adminAnalitica = '/admin/analitica';
   static const adminCalificaciones = '/admin/calificaciones';
   static const adminHistorialViajes = '/admin/historial-viajes';

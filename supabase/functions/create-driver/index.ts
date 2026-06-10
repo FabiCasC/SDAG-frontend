@@ -51,31 +51,49 @@ Deno.serve(async (req) => {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return Response.json({ error: "Correo inválido" }, { status: 400, headers: corsHeaders });
     if (password.trim().length < 8) return Response.json({ error: "Contraseña mínimo 8 caracteres" }, { status: 400, headers: corsHeaders });
 
-    // Crea usuario en Auth
     const { data: createdAuth, error: createAuthErr } = await admin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
+      user_metadata: { role: 'driver' }
     });
+
+    console.log('[create-driver] createUser result:', JSON.stringify({
+      user: createdAuth?.user?.id,
+      error: createAuthErr?.message,
+      code: createAuthErr?.code
+    }));
+
     if (createAuthErr || !createdAuth.user) {
-      return Response.json({ error: createAuthErr?.message ?? "No se pudo crear el usuario" }, { status: 400, headers: corsHeaders });
+      return Response.json({
+        error: createAuthErr?.message ?? "No se pudo crear el usuario",
+        code: createAuthErr?.code
+      }, { status: 400, headers: corsHeaders });
     }
 
     const userId = createdAuth.user.id;
 
     try {
-      // Crea profile
-      const { error: profileErr } = await admin.from("profiles").upsert({
-        id: userId,
-        role: "driver",
-        first_name: firstName,
-        last_name: lastName,
-        dni: dni || null,
-        phone: phone && phone.length > 0 ? phone : null,
-        email,
-        name: `${firstName} ${lastName}`.trim(),
-      });
+      const { error: profileErr } = await admin
+        .from("profiles")
+        .upsert({
+          id: userId,
+          role: "driver",
+          first_name: firstName,
+          last_name: lastName,
+          dni: dni || null,
+          phone: phone && phone.length > 0 ? phone : null,
+          email,
+          name: `${firstName} ${lastName}`.trim(),
+        }, { onConflict: "id" });
+
       if (profileErr) throw profileErr;
+
+      // Fuerza el rol driver por si el trigger lo sobrescribió
+      await admin
+        .from("profiles")
+        .update({ role: "driver" })
+        .eq("id", userId);
 
       // Obtiene datos del vehículo seleccionado
       let plate = body.plate ? String(body.plate).trim().toUpperCase() : "SIN-PLACA";

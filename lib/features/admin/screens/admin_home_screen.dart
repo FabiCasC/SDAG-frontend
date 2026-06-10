@@ -190,8 +190,6 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
       final status = switch (v.estado) {
         AdminVehiculoEstado.enRuta => _FleetStatus.enRuta,
         AdminVehiculoEstado.disponible => _FleetStatus.disponible,
-        AdminVehiculoEstado.activo => _FleetStatus.activo,
-        AdminVehiculoEstado.inactivo => _FleetStatus.inactivo,
       };
       items.add(_FleetItem(
         conductor: v.conductorNombre,
