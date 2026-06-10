@@ -320,13 +320,23 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
 
   void _subscribeReservas(dynamic tripId) {
     _cancelReservasSubscription();
+    final tid = tripId.toString();
     _reservasSubscription = Supabase.instance.client
         .from('reservations')
         .stream(primaryKey: ['id'])
-        .eq('trip_id', tripId)
-        .listen((data) async {
+        .eq('trip_id', tid)
+        .listen((_) async {
       try {
-        await _applyReservations(data);
+        final reservasIniciales = await Supabase.instance.client
+            .from('reservations')
+            .select('''
+              id, passenger_profile_id, seats, pickup_point, status, amount,
+              profiles:passenger_profile_id(id, name, first_name, last_name, phone, dni)
+            ''')
+            .eq('trip_id', tid)
+            .eq('status', 'activa');
+
+        await _applyReservations((reservasIniciales as List).cast<Map<String, dynamic>>());
       } catch (e) {
         if (!mounted) return;
         setState(() {

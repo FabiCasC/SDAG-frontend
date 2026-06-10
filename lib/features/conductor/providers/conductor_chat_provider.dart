@@ -115,12 +115,25 @@ class ConductorTripChatController extends StateNotifier<ConductorTripChatState> 
   }
 
   Future<void> _loadInitial() async {
-    final rows = await Supabase.instance.client
-        .from('trip_messages')
-        .select('id, message, body, sender_id, sender_profile_id, passenger_id, created_at')
-        .eq('trip_id', tripId)
-        .eq('passenger_id', passengerProfileId)
-        .order('created_at', ascending: true);
+    final pid = passengerProfileId;
+    dynamic rows;
+    try {
+      rows = await Supabase.instance.client
+          .from('trip_messages')
+          .select(
+            'id, message, body, sender_id, passenger_id, created_at, profiles:sender_id(name)',
+          )
+          .eq('trip_id', tripId)
+          .or('passenger_id.eq.$pid,sender_id.eq.$pid')
+          .order('created_at', ascending: true);
+    } catch (_) {
+      rows = await Supabase.instance.client
+          .from('trip_messages')
+          .select('id, message, body, sender_id, passenger_id, created_at')
+          .eq('trip_id', tripId)
+          .or('passenger_id.eq.$pid,sender_id.eq.$pid')
+          .order('created_at', ascending: true);
+    }
 
     if (!_alive) return;
 
@@ -140,9 +153,9 @@ class ConductorTripChatController extends StateNotifier<ConductorTripChatState> 
           if (!_alive) return;
           try {
             final filtered = data.where((m) {
-              final pid = m['passenger_id']?.toString();
-              final sid = m['sender_id']?.toString() ?? m['sender_profile_id']?.toString();
-              return pid == passengerProfileId || sid == passengerProfileId;
+              final msgPassenger = m['passenger_id']?.toString();
+              final sender = m['sender_id']?.toString();
+              return msgPassenger == passengerProfileId || sender == passengerProfileId;
             }).toList();
 
             final messages = _mapRows(filtered.cast<Map<String, dynamic>>());

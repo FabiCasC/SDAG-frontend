@@ -111,6 +111,9 @@ class ReservaController extends StateNotifier<ReservaState> {
   ReservaController() : super(ReservaState.empty);
 
   void startWithDriver(ReservaDriverInfo driver) {
+    if (driver.tripId.trim().isEmpty) {
+      return;
+    }
     state = ReservaState(
       reservaId: null,
       conductorSeleccionado: driver,
@@ -171,6 +174,7 @@ final reservaProvider = StateNotifierProvider<ReservaController, ReservaState>(
   (ref) => ReservaController(),
 );
 
+/// Asientos ocupados en Supabase (`reservations` activas para el `trip_id`). Sin datos mock.
 final occupiedSeatsByTripProvider = FutureProvider.autoDispose.family<List<int>, String>(
   (ref, tripId) async {
     try {
@@ -187,7 +191,8 @@ final occupiedSeatsByTripProvider = FutureProvider.autoDispose.family<List<int>,
         final raw = rm['seats'];
         if (raw is! List) continue;
         for (final s in raw) {
-          if (s is int) seats.add(s);
+          final n = s is int ? s : (s is num ? s.toInt() : int.tryParse('$s'));
+          if (n != null) seats.add(n);
         }
       }
       final out = seats.toList()..sort();

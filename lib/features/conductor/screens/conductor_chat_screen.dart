@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
@@ -24,16 +25,47 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
   late final TextEditingController _controller;
   late final ScrollController _scrollController;
   int _lastMessageCount = -1;
+  String? _resolvedPassengerName;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController();
     _scrollController = ScrollController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadPassengerNameFromSupabase());
+  }
+
+  Future<void> _loadPassengerNameFromSupabase() async {
+    if (widget.pasajeroId.isEmpty || !mounted) return;
+    try {
+      final row = await Supabase.instance.client
+          .from('profiles')
+          .select('name, first_name, last_name')
+          .eq('id', widget.pasajeroId)
+          .maybeSingle();
+      if (!mounted || row == null) return;
+      final map = Map<String, dynamic>.from(row);
+      final n = map['name']?.toString().trim();
+      if (n != null && n.isNotEmpty) {
+        setState(() => _resolvedPassengerName = n);
+        return;
+      }
+      final fn = map['first_name']?.toString().trim() ?? '';
+      final ln = map['last_name']?.toString().trim() ?? '';
+      final full = '$fn $ln'.trim();
+      if (full.isNotEmpty) setState(() => _resolvedPassengerName = full);
+    } catch (_) {
+      // Nombre seguirá saliendo de manifiesto / viaje si existen
+    }
   }
 
   @override
   void dispose() {
+    final tripId = ref.read(conductorViajeProvider).tripId;
+    final pid = widget.pasajeroId;
+    if (tripId != null && tripId.isNotEmpty && pid.isNotEmpty) {
+      ref.invalidate(conductorTripChatProvider('$tripId|$pid'));
+    }
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -187,7 +219,10 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
       }
     }
 
-    final name = passenger?.nombreCompleto ?? viajePasajero?.nombre ?? 'Pasajero';
+    final name = passenger?.nombreCompleto ??
+        viajePasajero?.nombre ??
+        (_resolvedPassengerName?.trim().isNotEmpty == true ? _resolvedPassengerName!.trim() : null) ??
+        'Pasajero';
 
     final messages = chatState.messages;
 
@@ -267,16 +302,20 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFF97316),
-                      foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.r12),
+                  SizedBox(
+                    width: 52,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        backgroundColor: const Color(0xFFF97316),
+                        foregroundColor: AppColors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.r12),
+                        ),
                       ),
+                      onPressed: _send,
+                      child: const Icon(Icons.send_rounded),
                     ),
-                    onPressed: _send,
-                    child: const Icon(Icons.send_rounded),
                   ),
                 ],
               ),

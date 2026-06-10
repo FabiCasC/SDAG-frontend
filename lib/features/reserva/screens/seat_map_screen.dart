@@ -33,6 +33,18 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tid = widget.tripId?.trim() ?? '';
+    final did = widget.driverId?.trim() ?? '';
+    if (tid.isEmpty && did.isEmpty) {
+      return const AppScaffold(
+        title: 'Seleccionar asientos',
+        body: PlaceholderPage(
+          title: 'Viaje no disponible',
+          subtitle: 'Falta el identificador del viaje o del conductor. Vuelve atrás y elige un conductor desde la búsqueda.',
+        ),
+      );
+    }
+
     final state = ref.watch(reservaProvider);
     final controller = ref.read(reservaProvider.notifier);
     final stateDriver = state.conductorSeleccionado;
@@ -94,6 +106,17 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
     required ReservaState state,
     required AsyncValue<ReservaDriverInfo> fallbackAsync,
   }) {
+    if (driver.tripId.trim().isEmpty) {
+      return const AppScaffold(
+        title: 'Seleccionar asientos',
+        body: PlaceholderPage(
+          title: 'Viaje no disponible',
+          subtitle:
+              'No se encontró un viaje válido (tripId). Vuelve a la búsqueda y elige un conductor con viaje activo.',
+        ),
+      );
+    }
+
     final occupiedAsync = ref.watch(occupiedSeatsByTripProvider(driver.tripId));
     final selectedSeats = state.asientosSeleccionados.toSet();
     final occupiedSeats = occupiedAsync.valueOrNull?.toSet() ?? <int>{};
@@ -153,24 +176,22 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 SizedBox(
-                  height: 200, // Altura para que se vea claro y cómodo
+                  height: 200,
                   width: double.infinity,
-                  child: fallbackAsync.maybeWhen(
-                    data: (driverInfo) {
-                      final mockJson = {
-                        "points": [
-                          {"lat": -12.0961, "lng": -77.0315},
-                          {"lat": -12.0553, "lng": -76.9631},
-                          {"lat": -12.0239, "lng": -76.9012},
-                          {"lat": -11.9392, "lng": -76.7024}
-                        ]
-                      };
-                      return MapaRutaWidget(
-                        routePolyline: RoutePolyline.fromJson(mockJson),
-                      );
-                    },
-                    orElse: () => const Center(child: CircularProgressIndicator()),
-                  ),
+                  child: driver.routePolyline != null
+                      ? MapaRutaWidget(routePolyline: driver.routePolyline!)
+                      : Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                            child: Text(
+                              'Esta ruta aún no tiene trazado en el mapa en la base de datos.',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: AppColors.textSecondary,
+                                  ),
+                            ),
+                          ),
+                        ),
                 ),
 
                 const SizedBox(height: AppSpacing.xl),
@@ -212,14 +233,14 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
               selectedCount: state.asientosSeleccionados.length,
               total: state.montoTotal,
               enabled: canContinue,
-              onContinue: canContinue
+              onContinue: canContinue && driver.tripId.trim().isNotEmpty
                   ? () {
-                if (state.asientosSeleccionados.length == 1) {
-                  context.push(AppRoutes.passengerReservaPickup);
-                } else {
-                  context.push(AppRoutes.passengerReservaAcompanantes);
-                }
-              }
+                      if (state.asientosSeleccionados.length == 1) {
+                        context.push(AppRoutes.passengerReservaPickup);
+                      } else {
+                        context.push(AppRoutes.passengerReservaAcompanantes);
+                      }
+                    }
                   : null,
             ),
           ],
@@ -563,6 +584,7 @@ FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, looku
               last_name
             )
           ),
+          vehicles(id, plate, vehicle_type, total_seats),
           routes (
             name,
             from_label,
@@ -571,7 +593,8 @@ FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, looku
           )
         ''')
         .eq('id', lookup.tripId!)
-        .single();
+        .eq('status', 'esperando')
+        .maybeSingle();
   } else if (lookup.driverId != null && lookup.driverId!.trim().isNotEmpty) {
     response = await client
         .from('trips')
@@ -592,6 +615,7 @@ FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, looku
               last_name
             )
           ),
+          vehicles(id, plate, vehicle_type, total_seats),
           routes (
             name,
             from_label,
@@ -600,13 +624,18 @@ FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, looku
           )
         ''')
         .eq('driver_id', lookup.driverId!)
-        .neq('status', 'completado')
-        .neq('status', 'cancelado')
+        .eq('status', 'esperando')
         .order('scheduled_departure_at', ascending: true)
         .limit(1)
-        .single();
+        .maybeSingle();
   } else {
     throw Exception('No se encontro el viaje seleccionado');
+  }
+
+  if (response == null) {
+    throw Exception(
+      'No hay viaje en estado esperando para este conductor. Vuelve a la búsqueda.',
+    );
   }
 
   final row = Map<String, dynamic>.from(response as Map);
@@ -627,6 +656,24 @@ FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, looku
   final routeFrom = routeMap['from_label']?.toString().trim() ?? '';
   final routeTo = routeMap['to_label']?.toString().trim() ?? '';
 
+  var totalSeats = (driverMap['capacity'] as num?)?.toInt() ?? 0;
+  final vehicles = row['vehicles'];
+  if (vehicles is Map) {
+    final v = Map<String, dynamic>.from(vehicles);
+    final ts = (v['total_seats'] as num?)?.toInt();
+    if (ts != null && ts > 0) totalSeats = ts;
+  }
+
+  RoutePolyline? routePolyline;
+  final poly = routeMap['polyline'];
+  if (poly != null) {
+    try {
+      routePolyline = RoutePolyline.fromJson(Map<String, dynamic>.from(poly as Map));
+    } catch (_) {
+      routePolyline = null;
+    }
+  }
+
   return ReservaDriverInfo(
     tripId: row['id'].toString(),
     driverId: driverMap['id'].toString(),
@@ -635,11 +682,12 @@ FutureProvider.autoDispose.family<ReservaDriverInfo, _SeatMapLookup>((ref, looku
         : (fullName.isNotEmpty ? fullName : 'Conductor sin nombre'),
     plate: driverMap['plate']?.toString() ?? 'Sin placa',
     vehicleType: driverMap['vehicle_type']?.toString() ?? 'Vehiculo',
-    totalSeats: (driverMap['capacity'] as int?) ?? 0,
+    totalSeats: totalSeats,
     routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$routeFrom → $routeTo',
     rating: (driverMap['rating_avg'] as num?)?.toDouble() ?? 0,
-    ratingCount: (driverMap['rating_count'] as int?) ?? 0,
+    ratingCount: (driverMap['rating_count'] as num?)?.toInt() ?? 0,
     status: driverMap['estado']?.toString() ?? (row['status']?.toString() ?? ''),
+    routePolyline: routePolyline,
   );
 });
 

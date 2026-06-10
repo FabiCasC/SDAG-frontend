@@ -2,8 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../reserva/providers/reserva_provider.dart';
 
-/// Modelo que representa un conductor/viaje disponible
-/// adaptado desde las tablas reales de Supabase.
+/// Viaje disponible para el pasajero (solo datos de Supabase).
 class ViajeDisponible {
   const ViajeDisponible({
     required this.tripId,
@@ -49,81 +48,69 @@ class ViajeDisponible {
   }
 }
 
-/// Servicio que consulta viajes disponibles desde Supabase.
-/// Reemplaza los datos mock de MockData.drivers.
+/// Búsqueda de conductores: solo viajes (`trips`) con `status = esperando` y ruta acorde a la dirección.
 class BusquedaService {
   final _supabase = Supabase.instance.client;
 
-  /// Busca viajes disponibles según la dirección.
-  /// [direction] puede ser 'si_cho' o 'cho_si'
+  /// [direction] `si_cho` (San Isidro → Chosica) o `cho_si` (Chosica → San Isidro), según `routes.from_label`.
   Future<List<ViajeDisponible>> buscarViajes(String direction) async {
     try {
-      final fromLabel = direction == 'si_cho' ? 'San Isidro' : 'Chosica';
-      final driversRes = await _supabase
-          .from('drivers')
-          .select('''
+      final expectedFrom = direction == 'si_cho' ? 'San Isidro' : 'Chosica';
+
+      final tripsRes = await _supabase.from('trips').select('''
             id,
-            plate,
-            vehicle_type,
-            capacity,
-            estado,
-            rating_avg,
-            rating_count,
-            profiles (
+            status,
+            driver_id,
+            vehicle_id,
+            drivers(
               id,
-              name,
-              first_name,
-              last_name
-            )
-          ''')
-          .eq('cuenta_activa', true)
-          .neq('estado', 'inactivo');
+              plate,
+              vehicle_type,
+              capacity,
+              estado,
+              cuenta_activa,
+              rating_avg,
+              rating_count,
+              profiles(name, first_name, last_name)
+            ),
+            vehicles(id, plate, vehicle_type, total_seats),
+            routes(name, from_label, to_label)
+          ''').eq('status', 'esperando');
 
-      final List<ViajeDisponible> result = [];
+      final rawList = (tripsRes as List).cast<Map<String, dynamic>>();
+      final result = <ViajeDisponible>[];
+      final seenDriverIds = <String>{};
 
-      for (final rawDriver in driversRes) {
-        final driver = Map<String, dynamic>.from(rawDriver as Map);
-        final driverId = driver['id']?.toString();
+      for (final row in rawList) {
+        final route = row['routes'];
+        if (route is! Map) continue;
+        final routeMap = Map<String, dynamic>.from(route);
+        final fromLabel = routeMap['from_label']?.toString().trim();
+        if (fromLabel != expectedFrom) continue;
+
+        final drivers = row['drivers'];
+        if (drivers is! Map) continue;
+        final driverMap = Map<String, dynamic>.from(drivers);
+
+        if ((driverMap['cuenta_activa'] as bool?) == false) continue;
+        if ((driverMap['estado']?.toString() ?? '').toLowerCase() == 'inactivo') continue;
+
+        final driverId = driverMap['id']?.toString();
         if (driverId == null || driverId.isEmpty) continue;
+        if (seenDriverIds.contains(driverId)) continue;
 
-        final tripsRes = await _supabase
-            .from('trips')
-            .select('''
-              id,
-              status,
-              scheduled_departure_at,
-              routes (
-                id,
-                name,
-                from_label,
-                to_label
-              )
-            ''')
-            .eq('driver_id', driverId)
-            .neq('status', 'completado')
-            .neq('status', 'cancelado')
-            .order('scheduled_departure_at', ascending: true);
-
-        Map<String, dynamic>? selectedTrip;
-        for (final rawTrip in tripsRes) {
-          final trip = Map<String, dynamic>.from(rawTrip as Map);
-          final route = trip['routes'];
-          if (route is! Map) continue;
-          final routeMap = Map<String, dynamic>.from(route);
-          final tripFromLabel = routeMap['from_label']?.toString();
-          if (tripFromLabel == fromLabel) {
-            selectedTrip = trip;
-            break;
-          }
-        }
-
-        if (selectedTrip == null) continue;
-
-        final tripId = selectedTrip['id']?.toString();
+        final tripId = row['id']?.toString();
         if (tripId == null || tripId.isEmpty) continue;
 
-        final route = Map<String, dynamic>.from(selectedTrip['routes'] as Map);
-        final totalSeats = (driver['capacity'] as int?) ?? 14;
+        var totalSeats = (driverMap['capacity'] as num?)?.toInt() ?? 0;
+        final vehicles = row['vehicles'];
+        if (vehicles is Map) {
+          final v = Map<String, dynamic>.from(vehicles);
+          final ts = (v['total_seats'] as num?)?.toInt();
+          if (ts != null && ts > 0) totalSeats = ts;
+        }
+        if (totalSeats <= 0) continue;
+
         final reservationsRes = await _supabase
             .from('reservations')
             .select('seats')
@@ -131,7 +118,7 @@ class BusquedaService {
             .eq('status', 'activa');
 
         var occupiedSeats = 0;
-        for (final rawReservation in reservationsRes) {
+        for (final rawReservation in reservationsRes as List) {
           final reservation = Map<String, dynamic>.from(rawReservation as Map);
           final seats = reservation['seats'];
           if (seats is List) {
@@ -139,33 +126,36 @@ class BusquedaService {
           }
         }
         final availableSeats = totalSeats - occupiedSeats;
-
         if (availableSeats <= 0) continue;
 
-        final profile = driver['profiles'] is Map ? Map<String, dynamic>.from(driver['profiles'] as Map) : null;
+        seenDriverIds.add(driverId);
+
+        final profile = driverMap['profiles'] is Map ? Map<String, dynamic>.from(driverMap['profiles'] as Map) : null;
         final firstName = profile?['first_name']?.toString().trim() ?? '';
         final lastName = profile?['last_name']?.toString().trim() ?? '';
         final fullName = '$firstName $lastName'.trim();
-        final routeName = route['name']?.toString().trim();
-        final routeFrom = route['from_label']?.toString().trim() ?? '';
-        final routeTo = route['to_label']?.toString().trim() ?? '';
+        final routeName = routeMap['name']?.toString().trim();
+        final routeFrom = routeMap['from_label']?.toString().trim() ?? '';
+        final routeTo = routeMap['to_label']?.toString().trim() ?? '';
 
-        result.add(ViajeDisponible(
-          tripId: tripId,
-          driverId: driverId,
-          driverName: (profile?['name']?.toString().trim().isNotEmpty ?? false)
-              ? profile!['name'].toString().trim()
-              : (fullName.isNotEmpty ? fullName : 'Conductor sin nombre'),
-          plate: driver['plate']?.toString() ?? 'Sin placa',
-          vehicleType: driver['vehicle_type']?.toString() ?? 'Vehiculo',
-          totalSeats: totalSeats,
-          availableSeats: availableSeats,
-          routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$routeFrom → $routeTo',
-          rating: (driver['rating_avg'] as num?)?.toDouble() ?? 0.0,
-          ratingCount: (driver['rating_count'] as int?) ?? 0,
-          direction: direction,
-          status: driver['estado']?.toString() ?? '',
-        ));
+        result.add(
+          ViajeDisponible(
+            tripId: tripId,
+            driverId: driverId,
+            driverName: (profile?['name']?.toString().trim().isNotEmpty ?? false)
+                ? profile!['name'].toString().trim()
+                : (fullName.isNotEmpty ? fullName : 'Conductor'),
+            plate: driverMap['plate']?.toString() ?? '',
+            vehicleType: driverMap['vehicle_type']?.toString() ?? 'Vehículo',
+            totalSeats: totalSeats,
+            availableSeats: availableSeats,
+            routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$routeFrom → $routeTo',
+            rating: (driverMap['rating_avg'] as num?)?.toDouble() ?? 0.0,
+            ratingCount: (driverMap['rating_count'] as num?)?.toInt() ?? 0,
+            direction: direction,
+            status: driverMap['estado']?.toString() ?? (row['status']?.toString() ?? ''),
+          ),
+        );
       }
 
       return result;

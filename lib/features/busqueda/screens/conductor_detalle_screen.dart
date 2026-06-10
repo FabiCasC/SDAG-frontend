@@ -239,6 +239,7 @@ final driverTripDetailProvider =
               last_name
             )
           ),
+          vehicles(id, total_seats),
           routes (
             name,
             from_label,
@@ -247,7 +248,8 @@ final driverTripDetailProvider =
           )
         ''')
         .eq('id', lookup.tripId!)
-        .single();
+        .eq('status', 'esperando')
+        .maybeSingle();
   } else if (lookup.driverId != null && lookup.driverId!.trim().isNotEmpty) {
     response = await client
         .from('trips')
@@ -268,6 +270,7 @@ final driverTripDetailProvider =
               last_name
             )
           ),
+          vehicles(id, total_seats),
           routes (
             name,
             from_label,
@@ -276,13 +279,16 @@ final driverTripDetailProvider =
           )
         ''')
         .eq('driver_id', lookup.driverId!)
-        .neq('status', 'completado')
-        .neq('status', 'cancelado')
+        .eq('status', 'esperando')
         .order('scheduled_departure_at', ascending: true)
         .limit(1)
-        .single();
+        .maybeSingle();
   } else {
     throw Exception('Conductor no encontrado');
+  }
+
+  if (response == null) {
+    throw Exception('No hay viaje en espera para este conductor o el viaje ya no está disponible.');
   }
 
   final row = Map<String, dynamic>.from(response as Map);
@@ -303,6 +309,14 @@ final driverTripDetailProvider =
   final routeFrom = routeMap['from_label']?.toString().trim() ?? '';
   final routeTo = routeMap['to_label']?.toString().trim() ?? '';
 
+  var totalSeats = (driverMap['capacity'] as num?)?.toInt() ?? 0;
+  final vehicles = row['vehicles'];
+  if (vehicles is Map) {
+    final v = Map<String, dynamic>.from(vehicles);
+    final ts = (v['total_seats'] as num?)?.toInt();
+    if (ts != null && ts > 0) totalSeats = ts;
+  }
+
   final polylineJson = routeMap['polyline'];
   RoutePolyline? routePolyline;
   if (polylineJson != null) {
@@ -318,10 +332,10 @@ final driverTripDetailProvider =
         : (fullName.isNotEmpty ? fullName : 'Conductor sin nombre'),
     plate: driverMap['plate']?.toString() ?? 'Sin placa',
     vehicleType: driverMap['vehicle_type']?.toString() ?? 'Vehiculo',
-    totalSeats: (driverMap['capacity'] as int?) ?? 0,
+    totalSeats: totalSeats,
     routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$routeFrom → $routeTo',
     rating: (driverMap['rating_avg'] as num?)?.toDouble() ?? 0,
-    ratingCount: (driverMap['rating_count'] as int?) ?? 0,
+    ratingCount: (driverMap['rating_count'] as num?)?.toInt() ?? 0,
     status: driverMap['estado']?.toString() ?? (row['status']?.toString() ?? ''),
     routePolyline: routePolyline,
   );

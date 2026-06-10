@@ -424,7 +424,7 @@ class _EmptyDriversState extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
-              'No hay conductores disponibles',
+              'No hay conductores disponibles en este momento.',
               style: theme.textTheme.titleLarge?.copyWith(
                 color: AppColors.textPrimary,
               ),
@@ -432,7 +432,7 @@ class _EmptyDriversState extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Intenta cambiar la dirección o vuelve a intentarlo más tarde.',
+              'Prueba otra dirección o vuelve más tarde cuando haya un viaje en estado esperando.',
               style: theme.textTheme.bodyLarge?.copyWith(
                 color: AppColors.textSecondary,
               ),
