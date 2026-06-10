@@ -1,20 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+const _googleMapsApiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
+const _validRouteA = 'San Isidro → Chosica';
+const _validRouteB = 'Chosica → San Isidro';
+const _chosicaTerminal = LatLng(-11.9375, -76.6934);
+const _sanIsidroTerminal = LatLng(-12.0977, -77.0365);
 
 enum AdminVehiculoEstado {
   disponible,
   enRuta,
-  activo,
-  inactivo,
-}
-
-enum AdminManifiestoEstadoFiltro {
-  todos,
-  completado,
-  enCurso,
 }
 
 enum AdminViajeRutaFiltro {
@@ -26,128 +26,70 @@ enum AdminViajeRutaFiltro {
 class AdminVehiculoActivo {
   const AdminVehiculoActivo({
     required this.conductorId,
+    required this.driverId,
     required this.conductorNombre,
+    required this.telefono,
     required this.placa,
+    required this.vehicleType,
     required this.estado,
     required this.posicion,
     required this.rutaLabel,
     required this.ocupados,
     required this.capacidad,
     required this.etaMinutos,
-    required this.routeIndex,
-    required this.routePoints,
   });
 
   final String conductorId;
+  final String driverId;
   final String conductorNombre;
+  final String? telefono;
   final String placa;
+  final String? vehicleType;
   final AdminVehiculoEstado estado;
-  final LatLng posicion;
+  final LatLng? posicion;
   final String? rutaLabel;
   final int ocupados;
   final int capacidad;
   final int? etaMinutos;
-  final int routeIndex;
-  final List<LatLng> routePoints;
 
-  AdminVehiculoActivo copyWith({
-    AdminVehiculoEstado? estado,
-    LatLng? posicion,
-    String? rutaLabel,
-    int? ocupados,
-    int? capacidad,
-    int? etaMinutos,
-    int? routeIndex,
-    List<LatLng>? routePoints,
-  }) {
-    return AdminVehiculoActivo(
-      conductorId: conductorId,
-      conductorNombre: conductorNombre,
-      placa: placa,
-      estado: estado ?? this.estado,
-      posicion: posicion ?? this.posicion,
-      rutaLabel: rutaLabel ?? this.rutaLabel,
-      ocupados: ocupados ?? this.ocupados,
-      capacidad: capacidad ?? this.capacidad,
-      etaMinutos: etaMinutos ?? this.etaMinutos,
-      routeIndex: routeIndex ?? this.routeIndex,
-      routePoints: routePoints ?? this.routePoints,
-    );
-  }
+  bool get tieneViajeActivo => rutaLabel != null && rutaLabel!.isNotEmpty;
 }
 
 class AdminMonitoreoState {
   const AdminMonitoreoState({
     required this.vehiculosActivos,
-    required this.manifiestoQuery,
-    required this.manifiestoDesde,
-    required this.manifiestoHasta,
-    required this.manifiestoEstado,
-    required this.viajesQuery,
-    required this.viajesDesde,
-    required this.viajesHasta,
-    required this.viajesRuta,
-    required this.viajeSeleccionado,
+    required this.isLoading,
+    required this.errorMessage,
   });
 
   final List<AdminVehiculoActivo> vehiculosActivos;
-
-  final String manifiestoQuery;
-  final DateTime? manifiestoDesde;
-  final DateTime? manifiestoHasta;
-  final AdminManifiestoEstadoFiltro manifiestoEstado;
-
-  final String viajesQuery;
-  final DateTime? viajesDesde;
-  final DateTime? viajesHasta;
-  final AdminViajeRutaFiltro viajesRuta;
-
-  final String? viajeSeleccionado;
+  final bool isLoading;
+  final String? errorMessage;
 
   AdminMonitoreoState copyWith({
     List<AdminVehiculoActivo>? vehiculosActivos,
-    String? manifiestoQuery,
-    DateTime? manifiestoDesde,
-    DateTime? manifiestoHasta,
-    AdminManifiestoEstadoFiltro? manifiestoEstado,
-    String? viajesQuery,
-    DateTime? viajesDesde,
-    DateTime? viajesHasta,
-    AdminViajeRutaFiltro? viajesRuta,
-    String? viajeSeleccionado,
+    bool? isLoading,
+    String? errorMessage,
+    bool clearError = false,
   }) {
     return AdminMonitoreoState(
       vehiculosActivos: vehiculosActivos ?? this.vehiculosActivos,
-      manifiestoQuery: manifiestoQuery ?? this.manifiestoQuery,
-      manifiestoDesde: manifiestoDesde ?? this.manifiestoDesde,
-      manifiestoHasta: manifiestoHasta ?? this.manifiestoHasta,
-      manifiestoEstado: manifiestoEstado ?? this.manifiestoEstado,
-      viajesQuery: viajesQuery ?? this.viajesQuery,
-      viajesDesde: viajesDesde ?? this.viajesDesde,
-      viajesHasta: viajesHasta ?? this.viajesHasta,
-      viajesRuta: viajesRuta ?? this.viajesRuta,
-      viajeSeleccionado: viajeSeleccionado ?? this.viajeSeleccionado,
+      isLoading: isLoading ?? this.isLoading,
+      errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
     );
   }
 
   static AdminMonitoreoState initial() => const AdminMonitoreoState(
         vehiculosActivos: [],
-        manifiestoQuery: '',
-        manifiestoDesde: null,
-        manifiestoHasta: null,
-        manifiestoEstado: AdminManifiestoEstadoFiltro.todos,
-        viajesQuery: '',
-        viajesDesde: null,
-        viajesHasta: null,
-        viajesRuta: AdminViajeRutaFiltro.todos,
-        viajeSeleccionado: null,
+        isLoading: true,
+        errorMessage: null,
       );
 }
 
 class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
   AdminMonitoreoController({required this.ref}) : super(AdminMonitoreoState.initial()) {
-    _loadLocations();
-    _startMovement();
+    refresh();
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => refresh(silent: true));
     ref.onDispose(() {
       _timer?.cancel();
     });
@@ -156,106 +98,182 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
   final Ref ref;
   Timer? _timer;
 
-  void cargarFlota() {
-    // Ya no se usa para datos estáticos, ahora todo se carga desde Supabase.
-  }
+  Future<void> refresh({bool silent = false}) async {
+    if (!silent) {
+      state = state.copyWith(isLoading: true, clearError: true);
+    }
 
-  Future<void> _loadLocations() async {
     try {
-      final data = await Supabase.instance.client
-          .from('driver_locations')
-          .select('*, drivers(id, profile_id, plate, profiles(first_name, last_name))')
+      final drivers = await Supabase.instance.client
+          .from('drivers')
+          .select('''
+            id, profile_id, plate, vehicle_type, capacity, estado, rating_avg,
+            profiles(name, phone),
+            driver_locations(lat, lng, eta_minutes, occupied_seats, trip_id),
+            trips(id, status, route_id, started_at,
+              routes(name, from_label, to_label))
+          ''')
+          .eq('cuenta_activa', true)
           .neq('estado', 'inactivo');
 
-      final next = <AdminVehiculoActivo>[];
-      for (final row in (data as List).cast<Map<String, dynamic>>()) {
-          final lat = (row['lat'] as num?)?.toDouble();
-          final lng = (row['lng'] as num?)?.toDouble();
-          if (lat == null || lng == null) continue;
+      final items = await Future.wait(
+        (drivers as List)
+            .cast<Map<String, dynamic>>()
+            .map(_mapDriverRow),
+      );
 
-          final d = row['drivers'] as Map<String, dynamic>?;
-          if (d == null) continue;
+      items.sort((a, b) => a.conductorNombre.toLowerCase().compareTo(b.conductorNombre.toLowerCase()));
 
-          final p = d['profiles'] as Map<String, dynamic>?;
-          if (p == null) continue;
+      state = state.copyWith(
+        vehiculosActivos: items,
+        isLoading: false,
+        clearError: true,
+      );
+    } catch (error) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: '$error',
+      );
+    }
+  }
 
-          final estadoStr = row['estado']?.toString();
-          AdminVehiculoEstado estado = AdminVehiculoEstado.disponible;
-          if (estadoStr == 'en_ruta') {
-            estado = AdminVehiculoEstado.enRuta;
-          } else if (estadoStr == 'lleno') {
-            estado = AdminVehiculoEstado.activo;
-          } else if (estadoStr == 'esperando') {
-            estado = AdminVehiculoEstado.disponible;
-          }
+  Future<AdminVehiculoActivo> _mapDriverRow(Map<String, dynamic> row) async {
+    final driverId = row['id']?.toString() ?? '';
+    final conductorId = row['profile_id']?.toString() ?? driverId;
+    final profile = _asMap(row['profiles']);
+    final conductorNombre = profile?['name']?.toString().trim().isNotEmpty == true
+        ? profile!['name'].toString().trim()
+        : 'Conductor';
 
-          next.add(AdminVehiculoActivo(
-            conductorId: d['profile_id'].toString(), // Usamos profile_id para mantener consistencia con los demás providers
-            conductorNombre: '${p['first_name']} ${p['last_name']}',
-            placa: d['plate']?.toString() ?? '—',
-            estado: estado,
-            posicion: LatLng(lat, lng),
-            rutaLabel: estado == AdminVehiculoEstado.enRuta ? 'En Ruta' : null,
-            ocupados: row['occupied_seats'] as int? ?? 0,
-            capacidad: row['capacity'] as int? ?? 0,
-            etaMinutos: row['eta_minutes'] as int?,
-            routeIndex: 0,
-            routePoints: const [],
-          ));
+    final location = _firstMap(row['driver_locations']);
+    final lat = (location?['lat'] as num?)?.toDouble();
+    final lng = (location?['lng'] as num?)?.toDouble();
+    final posicion = (lat != null && lng != null) ? LatLng(lat, lng) : null;
+
+    final trip = _pickActiveTrip(row['trips'], preferredTripId: location?['trip_id']?.toString());
+    final rutaLabel = _tripRouteLabel(trip);
+    final etaMinutos = posicion != null && rutaLabel != null
+        ? await _fetchEtaMinutes(posicion, rutaLabel)
+        : null;
+
+    return AdminVehiculoActivo(
+      conductorId: conductorId,
+      driverId: driverId,
+      conductorNombre: conductorNombre,
+      telefono: profile?['phone']?.toString(),
+      placa: row['plate']?.toString() ?? 'Sin placa',
+      vehicleType: row['vehicle_type']?.toString(),
+      estado: _mapEstado(row['estado']?.toString()),
+      posicion: posicion,
+      rutaLabel: rutaLabel,
+      ocupados: (location?['occupied_seats'] as num?)?.toInt() ?? 0,
+      capacidad: (row['capacity'] as num?)?.toInt() ?? 0,
+      etaMinutos: etaMinutos,
+    );
+  }
+
+  AdminVehiculoEstado _mapEstado(String? estado) {
+    return estado == 'en_ruta' ? AdminVehiculoEstado.enRuta : AdminVehiculoEstado.disponible;
+  }
+
+  Map<String, dynamic>? _pickActiveTrip(dynamic rawTrips, {String? preferredTripId}) {
+    final trips = _asList(rawTrips)
+        .whereType<Map<String, dynamic>>()
+        .toList(growable: false);
+    if (trips.isEmpty) return null;
+
+    bool isActive(Map<String, dynamic> trip) {
+      final status = trip['status']?.toString();
+      return status == 'en_ruta';
+    }
+
+    if (preferredTripId != null && preferredTripId.isNotEmpty) {
+      for (final trip in trips) {
+        if (trip['id']?.toString() == preferredTripId && isActive(trip)) {
+          return trip;
+        }
       }
-      state = state.copyWith(vehiculosActivos: next);
-    } catch (_) {}
-  }
+    }
 
-  void filtrarManifiestos({
-    String? query,
-    DateTime? desde,
-    DateTime? hasta,
-    AdminManifiestoEstadoFiltro? estadoFiltro,
-  }) {
-    state = state.copyWith(
-      manifiestoQuery: query ?? state.manifiestoQuery,
-      manifiestoDesde: desde ?? state.manifiestoDesde,
-      manifiestoHasta: hasta ?? state.manifiestoHasta,
-      manifiestoEstado: estadoFiltro ?? state.manifiestoEstado,
-    );
-  }
-
-  void filtrarViajes({
-    String? query,
-    DateTime? desde,
-    DateTime? hasta,
-    AdminViajeRutaFiltro? ruta,
-  }) {
-    state = state.copyWith(
-      viajesQuery: query ?? state.viajesQuery,
-      viajesDesde: desde ?? state.viajesDesde,
-      viajesHasta: hasta ?? state.viajesHasta,
-      viajesRuta: ruta ?? state.viajesRuta,
-    );
-  }
-
-  void seleccionarViaje(String? viajeId) {
-    state = state.copyWith(viajeSeleccionado: viajeId);
-  }
-
-  void centrarEnVehiculo(String conductorId, LatLng position) {
-    final updated = [
-      for (final v in state.vehiculosActivos)
-        if (v.conductorId == conductorId) v.copyWith(posicion: position) else v,
-    ];
-    state = state.copyWith(vehiculosActivos: updated);
-  }
-
-  void _startMovement() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) {
-      _loadLocations();
+    final activeTrips = trips.where(isActive).toList(growable: false);
+    if (activeTrips.isEmpty) return null;
+    activeTrips.sort((a, b) {
+      final aDate = DateTime.tryParse(a['started_at']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bDate = DateTime.tryParse(b['started_at']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bDate.compareTo(aDate);
     });
+    return activeTrips.first;
+  }
+
+  String? _tripRouteLabel(Map<String, dynamic>? trip) {
+    if (trip == null) return null;
+    final route = _asMap(trip['routes']);
+    final from = route?['from_label']?.toString().trim() ?? '';
+    final to = route?['to_label']?.toString().trim() ?? '';
+    final name = route?['name']?.toString().trim() ?? '';
+
+    final combined = (from.isNotEmpty && to.isNotEmpty) ? '$from → $to' : name;
+    if (combined == _validRouteA || combined == _validRouteB) {
+      return combined;
+    }
+    return null;
+  }
+
+  Future<int?> _fetchEtaMinutes(LatLng origin, String routeLabel) async {
+    final destination = switch (routeLabel) {
+      _validRouteA => _chosicaTerminal,
+      _validRouteB => _sanIsidroTerminal,
+      _ => null,
+    };
+    if (destination == null) return null;
+
+    final url = Uri.parse(
+      'https://maps.googleapis.com/maps/api/directions/json'
+      '?origin=${origin.latitude},${origin.longitude}'
+      '&destination=${destination.latitude},${destination.longitude}'
+      '&key=$_googleMapsApiKey',
+    );
+
+    try {
+      final response = await http.get(url);
+      if (response.statusCode != 200) return null;
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final routes = data['routes'] as List?;
+      if (routes == null || routes.isEmpty) return null;
+      final legs = (routes.first as Map<String, dynamic>)['legs'] as List?;
+      if (legs == null || legs.isEmpty) return null;
+      final duration = (legs.first as Map<String, dynamic>)['duration'] as Map<String, dynamic>?;
+      final durationSeconds = (duration?['value'] as num?)?.toInt();
+      if (durationSeconds == null) return null;
+      return (durationSeconds / 60).round();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic>? _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is List && value.isNotEmpty && value.first is Map<String, dynamic>) {
+      return value.first as Map<String, dynamic>;
+    }
+    return null;
+  }
+
+  List<dynamic> _asList(dynamic value) {
+    if (value is List) return value;
+    if (value == null) return const [];
+    return [value];
+  }
+
+  Map<String, dynamic>? _firstMap(dynamic value) {
+    final list = _asList(value);
+    if (list.isEmpty) return null;
+    final first = list.first;
+    return first is Map<String, dynamic> ? first : null;
   }
 }
 
-final adminMonitoreoProvider =
-    StateNotifierProvider<AdminMonitoreoController, AdminMonitoreoState>(
+final adminMonitoreoProvider = StateNotifierProvider<AdminMonitoreoController, AdminMonitoreoState>(
   (ref) => AdminMonitoreoController(ref: ref),
 );

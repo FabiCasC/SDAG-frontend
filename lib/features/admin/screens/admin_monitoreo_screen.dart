@@ -25,8 +25,6 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
   GoogleMapController? _mapController;
   BitmapDescriptor? _iconDisponible;
   BitmapDescriptor? _iconEnRuta;
-  BitmapDescriptor? _iconActivo;
-  BitmapDescriptor? _iconInactivo;
   bool _iconsLoaded = false;
   Timer? _sheetDebounce;
 
@@ -47,15 +45,11 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
 
   Future<void> _loadIcons() async {
     final disponible = await _combiMarker(const Color(0xFF16A34A));
-    final enRuta = await _combiMarker(const Color(0xFF2563EB));
-    final activo = await _combiMarker(const Color(0xFFF97316));
-    final inactivo = await _combiMarker(const Color(0xFF94A3B8));
+    final enRuta = await _combiMarker(const Color(0xFFEA580C));
     if (!mounted) return;
     setState(() {
       _iconDisponible = disponible;
       _iconEnRuta = enRuta;
-      _iconActivo = activo;
-      _iconInactivo = inactivo;
       _iconsLoaded = true;
     });
   }
@@ -63,16 +57,12 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
     if (!_iconsLoaded) {
       return switch (estado) {
         AdminVehiculoEstado.disponible => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        AdminVehiculoEstado.enRuta => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-        AdminVehiculoEstado.activo => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
-        AdminVehiculoEstado.inactivo => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+        AdminVehiculoEstado.enRuta => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
       };
     }
     return switch (estado) {
       AdminVehiculoEstado.disponible => _iconDisponible!,
       AdminVehiculoEstado.enRuta => _iconEnRuta!,
-      AdminVehiculoEstado.activo => _iconActivo!,
-      AdminVehiculoEstado.inactivo => _iconInactivo!,
     };
   }
 
@@ -85,20 +75,21 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
   void _centerAll(List<AdminVehiculoActivo> vehiculos) {
     final c = _mapController;
     if (c == null) return;
-    if (vehiculos.isEmpty) return;
-    if (vehiculos.length == 1) {
-      _centerOn(vehiculos.first.posicion);
+    final ubicados = vehiculos.where((v) => v.posicion != null).toList(growable: false);
+    if (ubicados.isEmpty) return;
+    if (ubicados.length == 1) {
+      _centerOn(ubicados.first.posicion!);
       return;
     }
-    var minLat = vehiculos.first.posicion.latitude;
-    var maxLat = vehiculos.first.posicion.latitude;
-    var minLng = vehiculos.first.posicion.longitude;
-    var maxLng = vehiculos.first.posicion.longitude;
-    for (final v in vehiculos) {
-      minLat = v.posicion.latitude < minLat ? v.posicion.latitude : minLat;
-      maxLat = v.posicion.latitude > maxLat ? v.posicion.latitude : maxLat;
-      minLng = v.posicion.longitude < minLng ? v.posicion.longitude : minLng;
-      maxLng = v.posicion.longitude > maxLng ? v.posicion.longitude : maxLng;
+    var minLat = ubicados.first.posicion!.latitude;
+    var maxLat = ubicados.first.posicion!.latitude;
+    var minLng = ubicados.first.posicion!.longitude;
+    var maxLng = ubicados.first.posicion!.longitude;
+    for (final v in ubicados) {
+      minLat = v.posicion!.latitude < minLat ? v.posicion!.latitude : minLat;
+      maxLat = v.posicion!.latitude > maxLat ? v.posicion!.latitude : maxLat;
+      minLng = v.posicion!.longitude < minLng ? v.posicion!.longitude : minLng;
+      maxLng = v.posicion!.longitude > maxLng ? v.posicion!.longitude : maxLng;
     }
     final bounds = LatLngBounds(
       southwest: LatLng(minLat, minLng),
@@ -129,8 +120,9 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
   Widget build(BuildContext context) {
     const pageBg = Color(0xFFF8FAFC);
     final state = ref.watch(adminMonitoreoProvider);
+    final controller = ref.read(adminMonitoreoProvider.notifier);
     final vehiculos = state.vehiculosActivos;
-    final activosCount = vehiculos.where((v) => v.estado != AdminVehiculoEstado.inactivo).length;
+    final activosCount = vehiculos.length;
 
     if (kIsWeb) {
       return AdminShellScreen(
@@ -149,32 +141,36 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Text(
-                      'Mapa no disponible en web (modo mock).',
+                      'Mapa no disponible en web. La lista usa datos reales de Supabase.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: const Color(0xFF94A3B8),
                             fontWeight: FontWeight.w700,
                           ),
                     ),
                   ),
+                  IconButton(
+                    onPressed: () => controller.refresh(),
+                    icon: const Icon(Icons.refresh_rounded, color: AppColors.white),
+                    tooltip: 'Recargar',
+                  ),
                   _CountBadge(count: activosCount),
                 ],
               ),
             ),
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(AppSpacing.p20),
-                itemCount: vehiculos.length,
-                itemBuilder: (context, index) {
-                  final v = vehiculos[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: _VehiculoListTile(
-                      vehiculo: v,
-                      onCenter: () {},
-                      onOpen: () => context.push('/admin/conductores/${v.conductorId}'),
-                    ),
-                  );
-                },
+              child: _DriversListBody(
+                vehiculos: vehiculos,
+                isLoading: state.isLoading,
+                errorMessage: state.errorMessage,
+                onRetry: () => controller.refresh(),
+                itemBuilder: (v) => Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: _VehiculoListTile(
+                    vehiculo: v,
+                    onCenter: null,
+                    onOpen: () => context.push('/admin/conductores/${v.conductorId}'),
+                  ),
+                ),
               ),
             ),
           ],
@@ -184,10 +180,11 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
 
     final markers = <Marker>{};
     for (final v in vehiculos) {
+      if (v.posicion == null) continue;
       markers.add(
         Marker(
           markerId: MarkerId(v.conductorId),
-          position: v.posicion,
+          position: v.posicion!,
           icon: _iconFor(v.estado),
           infoWindow: InfoWindow(title: v.placa),
           onTap: () => _onMarkerTap(v),
@@ -199,6 +196,13 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
       currentRoute: AppRoutes.adminMonitoreo,
       title: 'Monitoreo de flota',
       backgroundColor: pageBg,
+      actions: [
+        IconButton(
+          onPressed: () => controller.refresh(),
+          icon: const Icon(Icons.refresh_rounded),
+          tooltip: 'Recargar',
+        ),
+      ],
       body: Stack(
         children: [
           GoogleMap(
@@ -212,6 +216,47 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
             markers: markers,
             onMapCreated: (c) => _mapController = c,
           ),
+          if (state.isLoading && vehiculos.isEmpty)
+            const Center(child: CircularProgressIndicator()),
+          if (state.errorMessage != null && vehiculos.isEmpty)
+            Center(
+              child: Container(
+                margin: const EdgeInsets.all(AppSpacing.p20),
+                padding: const EdgeInsets.all(AppSpacing.p20),
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(AppRadius.r16),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 48, color: Color(0xFFDC2626)),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'No se pudo cargar el monitoreo.',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      state.errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    FilledButton(
+                      onPressed: () => controller.refresh(),
+                      child: const Text('Reintentar'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           DraggableScrollableSheet(
             minChildSize: 0.14,
             initialChildSize: 0.18,
@@ -248,21 +293,20 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
                       ),
                     ),
                     Expanded(
-                      child: ListView.builder(
-                        controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(AppSpacing.p20, 0, AppSpacing.p20, AppSpacing.p20),
-                        itemCount: vehiculos.length,
-                        itemBuilder: (context, index) {
-                          final v = vehiculos[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                            child: _VehiculoListTile(
-                              vehiculo: v,
-                              onCenter: () => _centerOn(v.posicion),
-                              onOpen: () => context.push('/admin/conductores/${v.conductorId}'),
-                            ),
-                          );
-                        },
+                      child: _DriversListBody(
+                        scrollController: scrollController,
+                        vehiculos: vehiculos,
+                        isLoading: state.isLoading,
+                        errorMessage: state.errorMessage,
+                        onRetry: () => controller.refresh(),
+                        itemBuilder: (v) => Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                          child: _VehiculoListTile(
+                            vehiculo: v,
+                            onCenter: v.posicion == null ? null : () => _centerOn(v.posicion!),
+                            onOpen: () => context.push('/admin/conductores/${v.conductorId}'),
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -355,6 +399,14 @@ class _VehiculoInfoSheet extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
             ),
+            const SizedBox(height: 6),
+            Text(
+              vehiculo.tieneViajeActivo ? vehiculo.rutaLabel! : 'Sin viaje activo',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
             if (vehiculo.etaMinutos != null) ...[
               const SizedBox(height: 6),
               Text(
@@ -391,7 +443,7 @@ class _VehiculoListTile extends StatelessWidget {
   });
 
   final AdminVehiculoActivo vehiculo;
-  final VoidCallback onCenter;
+  final VoidCallback? onCenter;
   final VoidCallback onOpen;
 
   @override
@@ -457,16 +509,38 @@ class _VehiculoListTile extends StatelessWidget {
                               ),
                         ),
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      if (vehiculo.etaMinutos != null)
-                        Text(
-                          'ETA ~${vehiculo.etaMinutos} min',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: AppColors.textSecondary,
-                                fontWeight: FontWeight.w700,
-                              ),
+                      if (vehiculo.etaMinutos != null) ...[
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            'ETA ~${vehiculo.etaMinutos} min',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
                         ),
+                      ],
                     ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    vehiculo.tieneViajeActivo ? vehiculo.rutaLabel! : 'Sin viaje activo',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Asientos: ${vehiculo.ocupados}/${vehiculo.capacidad}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF64748B),
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
                 ],
               ),
@@ -475,11 +549,84 @@ class _VehiculoListTile extends StatelessWidget {
             IconButton(
               onPressed: onCenter,
               icon: const Icon(Icons.my_location_rounded, color: Color(0xFF2563EB)),
-              tooltip: 'Centrar en mapa',
+              tooltip: onCenter == null ? 'Sin ubicación GPS' : 'Centrar en mapa',
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _DriversListBody extends StatelessWidget {
+  const _DriversListBody({
+    required this.vehiculos,
+    required this.isLoading,
+    required this.errorMessage,
+    required this.onRetry,
+    required this.itemBuilder,
+    this.scrollController,
+  });
+
+  final List<AdminVehiculoActivo> vehiculos;
+  final bool isLoading;
+  final String? errorMessage;
+  final VoidCallback onRetry;
+  final Widget Function(AdminVehiculoActivo vehiculo) itemBuilder;
+  final ScrollController? scrollController;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading && vehiculos.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (errorMessage != null && vehiculos.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.p20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline_rounded, size: 48, color: Color(0xFFDC2626)),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                'No se pudo cargar el monitoreo.',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                errorMessage!,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              FilledButton(
+                onPressed: onRetry,
+                child: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (vehiculos.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(AppSpacing.p20),
+          child: Text('No hay conductores activos para mostrar.'),
+        ),
+      );
+    }
+    return ListView.builder(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(AppSpacing.p20, 0, AppSpacing.p20, AppSpacing.p20),
+      itemCount: vehiculos.length,
+      itemBuilder: (context, index) => itemBuilder(vehiculos[index]),
     );
   }
 }
@@ -569,11 +716,7 @@ class _CountBadge extends StatelessWidget {
     case AdminVehiculoEstado.disponible:
       return (const Color(0xFF16A34A), AppColors.white, 'Disponible');
     case AdminVehiculoEstado.enRuta:
-      return (const Color(0xFF2563EB), AppColors.white, 'En ruta');
-    case AdminVehiculoEstado.activo:
-      return (const Color(0xFFF97316), const Color(0xFF0F172A), 'Activo');
-    case AdminVehiculoEstado.inactivo:
-      return (const Color(0xFF94A3B8), const Color(0xFF0F172A), 'Inactivo');
+      return (const Color(0xFFEA580C), AppColors.white, 'En ruta');
   }
 }
 

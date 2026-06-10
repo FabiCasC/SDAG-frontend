@@ -1,13 +1,160 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../providers/admin_monitoreo_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
-import '../../../core/mock/mock_data.dart';
-import '../providers/admin_monitoreo_provider.dart';
-import '../providers/admin_conductores_provider.dart';
+
+const _historialRouteA = 'San Isidro → Chosica';
+const _historialRouteB = 'Chosica → San Isidro';
+
+final adminHistorialViajesProvider = FutureProvider.family
+    .autoDispose<List<AdminTripHistoryItem>, AdminTripHistoryRequest>((ref, request) async {
+  String? driverId = request.driverId;
+
+  if (driverId == null && request.conductorProfileId != null && request.conductorProfileId!.isNotEmpty) {
+    final driverRow = await Supabase.instance.client
+        .from('drivers')
+        .select('id')
+        .eq('profile_id', request.conductorProfileId!)
+        .maybeSingle();
+    driverId = driverRow?['id']?.toString();
+  }
+
+  final baseQuery = Supabase.instance.client
+      .from('trips')
+      .select('''
+        id, driver_id, status, started_at, finished_at, amount_total,
+        routes(name, from_label, to_label),
+        reservations(id, passenger_profile_id, seats, amount),
+        drivers(id, profile_id, plate, capacity, commission_pct, profiles(name))
+      ''')
+      .eq('status', 'completado')
+      .gte('finished_at', request.fechaInicio.toIso8601String())
+      .lte('finished_at', request.fechaFin.toIso8601String());
+
+  final trips = await ((driverId != null && driverId.isNotEmpty)
+      ? baseQuery.eq('driver_id', driverId).order('finished_at', ascending: false)
+      : baseQuery.order('finished_at', ascending: false));
+  final items = <AdminTripHistoryItem>[];
+
+  for (final raw in (trips as List).cast<Map<String, dynamic>>()) {
+    final driver = _asMap(raw['drivers']);
+    final profile = _asMap(driver?['profiles']);
+    final route = _asMap(raw['routes']);
+    final routeLabel = _normalizeRouteLabel(route);
+
+    if (request.ruta == AdminViajeRutaFiltro.sanIsidroChosica && routeLabel != _historialRouteA) {
+      continue;
+    }
+    if (request.ruta == AdminViajeRutaFiltro.chosicaSanIsidro && routeLabel != _historialRouteB) {
+      continue;
+    }
+
+    final driverName = profile?['name']?.toString().trim() ?? 'Conductor';
+    final plate = driver?['plate']?.toString() ?? 'Sin placa';
+    final haystack = '$driverName $plate $routeLabel'.toLowerCase();
+    if (request.query.isNotEmpty && !haystack.contains(request.query.toLowerCase())) {
+      continue;
+    }
+
+    final reservations = _asList(raw['reservations']).whereType<Map<String, dynamic>>().toList(growable: false);
+    var pasajeros = 0;
+    var montoReservas = 0.0;
+    for (final reservation in reservations) {
+      final seats = _asList(reservation['seats']);
+      pasajeros += seats.isEmpty ? 1 : seats.length;
+      montoReservas += (reservation['amount'] as num?)?.toDouble() ?? 0;
+    }
+
+    final total = (raw['amount_total'] as num?)?.toDouble() ?? montoReservas;
+    final pct = (driver?['commission_pct'] as num?)?.toDouble() ?? 0;
+
+    items.add(
+      AdminTripHistoryItem(
+        tripId: raw['id']?.toString() ?? '',
+        driverId: driver?['id']?.toString() ?? '',
+        driverProfileId: driver?['profile_id']?.toString() ?? '',
+        driverName: driverName,
+        plate: plate,
+        capacity: (driver?['capacity'] as num?)?.toInt() ?? 0,
+        routeLabel: routeLabel,
+        startedAt: DateTime.tryParse(raw['started_at']?.toString() ?? ''),
+        finishedAt: DateTime.tryParse(raw['finished_at']?.toString() ?? '') ?? request.fechaFin,
+        passengerCount: pasajeros,
+        amountTotal: total,
+        commissionAmount: total * pct / 100,
+      ),
+    );
+  }
+
+  return items;
+});
+
+class AdminTripHistoryRequest {
+  const AdminTripHistoryRequest({
+    required this.conductorProfileId,
+    required this.driverId,
+    required this.fechaInicio,
+    required this.fechaFin,
+    required this.query,
+    required this.ruta,
+  });
+
+  final String? conductorProfileId;
+  final String? driverId;
+  final DateTime fechaInicio;
+  final DateTime fechaFin;
+  final String query;
+  final AdminViajeRutaFiltro ruta;
+
+  @override
+  bool operator ==(Object other) {
+    return other is AdminTripHistoryRequest &&
+        other.conductorProfileId == conductorProfileId &&
+        other.driverId == driverId &&
+        other.fechaInicio == fechaInicio &&
+        other.fechaFin == fechaFin &&
+        other.query == query &&
+        other.ruta == ruta;
+  }
+
+  @override
+  int get hashCode => Object.hash(conductorProfileId, driverId, fechaInicio, fechaFin, query, ruta);
+}
+
+class AdminTripHistoryItem {
+  const AdminTripHistoryItem({
+    required this.tripId,
+    required this.driverId,
+    required this.driverProfileId,
+    required this.driverName,
+    required this.plate,
+    required this.capacity,
+    required this.routeLabel,
+    required this.startedAt,
+    required this.finishedAt,
+    required this.passengerCount,
+    required this.amountTotal,
+    required this.commissionAmount,
+  });
+
+  final String tripId;
+  final String driverId;
+  final String driverProfileId;
+  final String driverName;
+  final String plate;
+  final int capacity;
+  final String routeLabel;
+  final DateTime? startedAt;
+  final DateTime finishedAt;
+  final int passengerCount;
+  final double amountTotal;
+  final double commissionAmount;
+}
 
 class AdminHistorialViajesScreen extends ConsumerStatefulWidget {
   const AdminHistorialViajesScreen({this.conductorId, super.key});
@@ -20,8 +167,18 @@ class AdminHistorialViajesScreen extends ConsumerStatefulWidget {
 
 class _AdminHistorialViajesScreenState extends ConsumerState<AdminHistorialViajesScreen> {
   final _queryController = TextEditingController();
-  DateTimeRange? _range;
+  late DateTimeRange _range;
   AdminViajeRutaFiltro _ruta = AdminViajeRutaFiltro.todos;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _range = DateTimeRange(
+      start: DateTime(now.year, now.month, 1),
+      end: DateTime(now.year, now.month, now.day, 23, 59, 59),
+    );
+  }
 
   @override
   void dispose() {
@@ -35,7 +192,7 @@ class _AdminHistorialViajesScreenState extends ConsumerState<AdminHistorialViaje
       context: context,
       firstDate: DateTime(2024, 1, 1),
       lastDate: DateTime(now.year + 1, 12, 31),
-      initialDateRange: _range ?? DateTimeRange(start: now.subtract(const Duration(days: 14)), end: now),
+      initialDateRange: _range,
     );
     if (r == null) return;
     setState(() => _range = r);
@@ -46,50 +203,22 @@ class _AdminHistorialViajesScreenState extends ConsumerState<AdminHistorialViaje
     const pageBg = Color(0xFFF8FAFC);
     const appBarBg = Color(0xFF0F172A);
 
-    final controller = ref.read(adminConductoresProvider.notifier);
-    final state = ref.watch(adminConductoresProvider);
-
-    final conductorId = widget.conductorId;
-    final conductor = conductorId == null ? null : controller.getById(conductorId);
-
-    final all = conductorId == null
-        ? List<MockAdminViaje>.of(state.viajes)
-        : controller.viajesDeConductor(conductorId);
-    all.sort((a, b) => b.fecha.compareTo(a.fecha));
-
-    final q = _queryController.text.trim().toLowerCase();
-    final filtered = all.where((v) {
-      if (_range != null) {
-        if (v.fecha.isBefore(_range!.start)) return false;
-        final end = DateTime(_range!.end.year, _range!.end.month, _range!.end.day, 23, 59, 59);
-        if (v.fecha.isAfter(end)) return false;
-      }
-      if (_ruta != AdminViajeRutaFiltro.todos) {
-        final isSI = v.rutaLabel.toLowerCase().contains('san isidro');
-        final isCh = v.rutaLabel.toLowerCase().contains('chosica');
-        if (_ruta == AdminViajeRutaFiltro.sanIsidroChosica && !(isSI && v.rutaLabel.contains('→') && v.rutaLabel.contains('Chosica'))) {
-          return false;
-        }
-        if (_ruta == AdminViajeRutaFiltro.chosicaSanIsidro && !(isCh && v.rutaLabel.contains('→') && v.rutaLabel.contains('San Isidro'))) {
-          return false;
-        }
-      }
-      if (q.isNotEmpty) {
-        final c = controller.getById(v.conductorId);
-        final name = c?.nombreCompleto ?? '';
-        final placa = c?.placa ?? '';
-        final hay = '$name $placa'.toLowerCase();
-        if (!hay.contains(q)) return false;
-      }
-      return true;
-    }).toList(growable: false);
+    final request = AdminTripHistoryRequest(
+      conductorProfileId: widget.conductorId,
+      driverId: null,
+      fechaInicio: DateTime(_range.start.year, _range.start.month, _range.start.day),
+      fechaFin: DateTime(_range.end.year, _range.end.month, _range.end.day, 23, 59, 59),
+      query: _queryController.text.trim(),
+      ruta: _ruta,
+    );
+    final tripsAsync = ref.watch(adminHistorialViajesProvider(request));
 
     return Scaffold(
       backgroundColor: pageBg,
       appBar: AppBar(
         backgroundColor: appBarBg,
         foregroundColor: AppColors.white,
-        title: Text(conductor == null ? 'Historial de viajes' : 'Historial · ${conductor.nombreCompleto}'),
+        title: const Text('Historial de viajes'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.p20),
@@ -115,9 +244,9 @@ class _AdminHistorialViajesScreenState extends ConsumerState<AdminHistorialViaje
                 TextField(
                   controller: _queryController,
                   onChanged: (_) => setState(() {}),
-                  enabled: conductorId == null,
+                  enabled: widget.conductorId == null,
                   decoration: InputDecoration(
-                    hintText: conductorId == null ? 'Buscar por conductor o placa' : 'Búsqueda deshabilitada',
+                    hintText: widget.conductorId == null ? 'Buscar por conductor, placa o ruta' : 'Búsqueda deshabilitada',
                     prefixIcon: const Icon(Icons.search_rounded),
                     filled: true,
                     fillColor: const Color(0xFFF8FAFC),
@@ -127,59 +256,61 @@ class _AdminHistorialViajesScreenState extends ConsumerState<AdminHistorialViaje
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(AppRadius.r16),
-                      borderSide: BorderSide(color: AppColors.border),
+                      borderSide: const BorderSide(color: AppColors.border),
                     ),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                Row(
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
                   children: [
-                    Expanded(
+                    SizedBox(
+                      width: 280,
                       child: OutlinedButton(
                         onPressed: _pickRange,
                         style: OutlinedButton.styleFrom(
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.r12)),
                         ),
                         child: Text(
-                          _range == null
-                              ? 'Rango de fechas'
-                              : '${_formatDateOnly(_range!.start)} - ${_formatDateOnly(_range!.end)}',
+                          '${_formatDateOnly(_range.start)} - ${_formatDateOnly(_range.end)}',
                         ),
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: InputDecorator(
-                        decoration: const InputDecoration(labelText: 'Ruta'),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<AdminViajeRutaFiltro>(
-                            value: _ruta,
-                            isExpanded: true,
-                            items: const [
-                              DropdownMenuItem(value: AdminViajeRutaFiltro.todos, child: Text('Todos')),
-                              DropdownMenuItem(
-                                value: AdminViajeRutaFiltro.sanIsidroChosica,
-                                child: Text('San Isidro→Chosica'),
-                              ),
-                              DropdownMenuItem(
-                                value: AdminViajeRutaFiltro.chosicaSanIsidro,
-                                child: Text('Chosica→San Isidro'),
-                              ),
-                            ],
-                            onChanged: (v) => setState(() => _ruta = v ?? AdminViajeRutaFiltro.todos),
+                    SizedBox(
+                      width: 220,
+                      child: DropdownButtonFormField<AdminViajeRutaFiltro>(
+                        initialValue: _ruta,
+                        decoration: const InputDecoration(
+                          labelText: 'Ruta',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: AdminViajeRutaFiltro.todos, child: Text('Todas')),
+                          DropdownMenuItem(
+                            value: AdminViajeRutaFiltro.sanIsidroChosica,
+                            child: Text('San Isidro → Chosica'),
                           ),
-                        ),
+                          DropdownMenuItem(
+                            value: AdminViajeRutaFiltro.chosicaSanIsidro,
+                            child: Text('Chosica → San Isidro'),
+                          ),
+                        ],
+                        onChanged: (v) => setState(() => _ruta = v ?? AdminViajeRutaFiltro.todos),
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    IconButton(
+                    OutlinedButton.icon(
                       onPressed: () => setState(() {
                         _queryController.clear();
-                        _range = null;
+                        final now = DateTime.now();
+                        _range = DateTimeRange(
+                          start: DateTime(now.year, now.month, 1),
+                          end: DateTime(now.year, now.month, now.day, 23, 59, 59),
+                        );
                         _ruta = AdminViajeRutaFiltro.todos;
                       }),
                       icon: const Icon(Icons.clear_rounded),
-                      tooltip: 'Limpiar',
+                      label: const Text('Limpiar'),
                     ),
                   ],
                 ),
@@ -187,170 +318,157 @@ class _AdminHistorialViajesScreenState extends ConsumerState<AdminHistorialViaje
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          if (filtered.isEmpty)
-            const Center(child: Padding(padding: EdgeInsets.all(24), child: Text('No hay viajes con esos filtros')))
-          else
-            ...filtered.map((v) {
-              final c = controller.getById(v.conductorId);
-              final name = c?.nombreCompleto ?? '—';
-              final placa = c?.placa ?? '—';
-              final capacity = c?.capacidad ?? 8;
-              final ocupados = (capacity - (v.id.hashCode.abs() % (capacity + 1))).clamp(0, capacity);
-              final routeTaken = v.id.hashCode.isEven ? 'La Priale' : 'Javier Prado';
-              final duration = Duration(minutes: 30 + (v.id.hashCode.abs() % 20));
-              final salida = v.fecha;
-              final llegada = salida.add(duration);
-              final recaudo = (ocupados * 15.0) + (v.id.hashCode.abs() % 10);
-              final pct = c?.comisionPorcentaje ?? 15.0;
-              final comision = recaudo * pct / 100;
-              final status = _tripStatusFor(v, c);
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(AppRadius.r16),
-                  onTap: () => context.push('/admin/historial-viajes/${v.id}'),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(AppRadius.r16),
-                      border: Border.all(color: AppColors.border),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: AppColors.shadow,
-                          blurRadius: AppSpacing.shadowBlur,
-                          offset: Offset(0, AppSpacing.shadowOffsetY),
-                        ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF1E40AF),
-                                shape: BoxShape.circle,
+          tripsAsync.when(
+            data: (items) {
+              if (items.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: Text('Sin viajes en este período')),
+                );
+              }
+              return Column(
+                children: [
+                  for (final v in items)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(AppRadius.r16),
+                        onTap: () => context.push('/admin/historial-viajes/${v.tripId}'),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.white,
+                            borderRadius: BorderRadius.circular(AppRadius.r16),
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: AppColors.shadow,
+                                blurRadius: AppSpacing.shadowBlur,
+                                offset: Offset(0, AppSpacing.shadowOffsetY),
                               ),
-                              child: Center(
-                                child: Text(
-                                  _initials(name),
-                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                        color: AppColors.white,
-                                        fontWeight: FontWeight.w900,
+                            ],
+                          ),
+                          padding: const EdgeInsets.all(AppSpacing.md),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 40,
+                                    height: 40,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF1E40AF),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        _initials(v.driverName),
+                                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                              color: AppColors.white,
+                                              fontWeight: FontWeight.w900,
+                                            ),
                                       ),
-                                ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${v.driverName} · ${v.plate}',
+                                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                                color: AppColors.textPrimary,
+                                                fontWeight: FontWeight.w900,
+                                              ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _formatDateTime(v.finishedAt),
+                                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                color: const Color(0xFF62748E),
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const _TripStatusChip(),
+                                ],
                               ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              const SizedBox(height: AppSpacing.sm),
+                              Text(
+                                v.routeLabel,
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: AppColors.textSecondary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
                                 children: [
                                   Text(
-                                    '$name · $placa',
+                                    'Pasajeros: ${v.passengerCount}/${v.capacity}',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: AppColors.textSecondary,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    'S/ ${v.amountTotal.toStringAsFixed(2)}',
                                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                                           color: AppColors.textPrimary,
                                           fontWeight: FontWeight.w900,
                                         ),
-                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(height: 4),
+                                  const SizedBox(width: AppSpacing.sm),
                                   Text(
-                                    '${_formatDateTime(salida)} → ${_formatTimeOnly(llegada)}',
+                                    'Comisión: S/ ${v.commissionAmount.toStringAsFixed(2)}',
                                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: const Color(0xFF62748E),
-                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFFF97316),
+                                          fontWeight: FontWeight.w900,
                                         ),
                                   ),
                                 ],
                               ),
-                            ),
-                            _TripStatusChip(status: status),
-                          ],
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          '${v.rutaLabel} · $routeTaken',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: AppColors.textSecondary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            Text(
-                              'Asientos: $ocupados/$capacity',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              'S/ ${recaudo.toStringAsFixed(0)}',
-                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    color: AppColors.textPrimary,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            Text(
-                              'Comisión: S/ ${comision.toStringAsFixed(0)}',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: const Color(0xFFF97316),
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
+                ],
               );
-            }),
+            },
+            loading: () => const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (error, _) => Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(child: Text('Error al cargar historial: $error')),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-enum _TripUiStatus { completado, enCurso, incompleto }
-
-_TripUiStatus _tripStatusFor(MockAdminViaje v, MockAdminConductor? c) {
-  if (v.estado == MockAdminViajeEstado.cancelado) return _TripUiStatus.incompleto;
-  if (c == null) return _TripUiStatus.completado;
-  final enCurso = c.estado == MockAdminConductorEstado.enRuta &&
-      v.fecha.isAfter(DateTime.now().subtract(const Duration(hours: 6)));
-  return enCurso ? _TripUiStatus.enCurso : _TripUiStatus.completado;
-}
-
 class _TripStatusChip extends StatelessWidget {
-  const _TripStatusChip({required this.status});
-
-  final _TripUiStatus status;
+  const _TripStatusChip();
 
   @override
   Widget build(BuildContext context) {
-    final (bg, label) = switch (status) {
-      _TripUiStatus.completado => (const Color(0xFF16A34A), 'Completado'),
-      _TripUiStatus.enCurso => (const Color(0xFF2563EB), 'En curso'),
-      _TripUiStatus.incompleto => (const Color(0xFFDC2626), 'Incompleto'),
-    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
       decoration: BoxDecoration(
-        color: bg,
+        color: const Color(0xFF16A34A),
         borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
       child: Text(
-        label,
+        'Completado',
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: AppColors.white,
               fontWeight: FontWeight.w900,
@@ -363,13 +481,6 @@ class _TripStatusChip extends StatelessWidget {
 String _formatDateOnly(DateTime dt) {
   String two(int v) => v.toString().padLeft(2, '0');
   return '${two(dt.day)}/${two(dt.month)}/${dt.year}';
-}
-
-String _formatTimeOnly(DateTime dt) {
-  String two(int v) => v.toString().padLeft(2, '0');
-  final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-  final ampm = dt.hour >= 12 ? 'PM' : 'AM';
-  return '${two(h)}:${two(dt.minute)} $ampm';
 }
 
 String _formatDateTime(DateTime dt) {
@@ -386,4 +497,30 @@ String _initials(String fullName) {
   if (parts.isEmpty) return '—';
   if (parts.length == 1) return first(parts[0]);
   return '${first(parts[0])}${first(parts[1])}';
+}
+
+Map<String, dynamic>? _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is List && value.isNotEmpty && value.first is Map<String, dynamic>) {
+    return value.first as Map<String, dynamic>;
+  }
+  return null;
+}
+
+List<dynamic> _asList(dynamic value) {
+  if (value is List) return value;
+  if (value == null) return const [];
+  return [value];
+}
+
+String _normalizeRouteLabel(Map<String, dynamic>? route) {
+  if (route == null) return 'Ruta no disponible';
+  final from = route['from_label']?.toString().trim() ?? '';
+  final to = route['to_label']?.toString().trim() ?? '';
+  final name = route['name']?.toString().trim() ?? '';
+  final label = (from.isNotEmpty && to.isNotEmpty) ? '$from → $to' : name;
+  if (label == _historialRouteA || label == _historialRouteB) {
+    return label;
+  }
+  return name.isNotEmpty ? name : 'Ruta no disponible';
 }

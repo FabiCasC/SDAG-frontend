@@ -3,66 +3,141 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
-import '../providers/admin_conductores_provider.dart';
 
 final adminManifiestosProvider = FutureProvider<List<AdminManifestItem>>((ref) async {
   final manifests = await Supabase.instance.client
       .from('manifests')
-      .select('*, trips(*, drivers(*, profiles(*)), routes(*))')
+      .select('''
+        id, estado, created_at,
+        trips(
+          id, status, scheduled_departure_at, started_at, finished_at,
+          routes(name, from_label, to_label),
+          drivers(id, plate, vehicle_type, capacity, profiles(name, phone))
+        )
+      ''')
       .order('created_at', ascending: false);
 
   final items = <AdminManifestItem>[];
   for (final raw in (manifests as List).cast<Map<String, dynamic>>()) {
-    final trip = raw['trips'] as Map<String, dynamic>?;
-    final driver = trip?['drivers'] as Map<String, dynamic>?;
-    final profile = driver?['profiles'] as Map<String, dynamic>?;
-    final route = trip?['routes'] as Map<String, dynamic>?;
+    final manifestId = raw['id']?.toString() ?? '';
+    final createdAt = DateTime.tryParse(raw['created_at']?.toString() ?? '');
+    final estado = raw['estado']?.toString() ?? 'en_curso';
 
-    final createdAt = DateTime.tryParse(raw['created_at']?.toString() ?? '') ?? DateTime.now();
+    final trip = raw['trips'] as Map<String, dynamic>?;
     final tripId = trip?['id']?.toString() ?? '';
-    final driverName = _joinNames(
-      profile?['first_name']?.toString(),
-      profile?['last_name']?.toString(),
-    );
+    final tripStatus = trip?['status']?.toString() ?? 'desconocido';
+
+    final route = trip?['routes'] as Map<String, dynamic>?;
+    final routeName = route?['name']?.toString() ?? 'Ruta no disponible';
+    final fromLabel = route?['from_label']?.toString() ?? '';
+    final toLabel = route?['to_label']?.toString() ?? '';
+
+    final driver = trip?['drivers'] as Map<String, dynamic>?;
+    final driverId = driver?['id']?.toString() ?? '';
+    final plate = driver?['plate']?.toString() ?? 'Sin placa';
+
+    final profile = driver?['profiles'] as Map<String, dynamic>?;
+    final driverName = profile?['name']?.toString().trim() ?? '';
+
+    final scheduledAt = DateTime.tryParse(trip?['scheduled_departure_at']?.toString() ?? '');
+    final startedAt = DateTime.tryParse(trip?['started_at']?.toString() ?? '');
+    final finishedAt = DateTime.tryParse(trip?['finished_at']?.toString() ?? '');
+
+    final displayAt = scheduledAt ?? startedAt ?? finishedAt ?? createdAt ?? DateTime.now();
 
     items.add(
       AdminManifestItem(
-        manifestId: raw['id']?.toString() ?? '',
+        manifestId: manifestId,
+        manifestEstado: estado,
+        createdAt: createdAt ?? DateTime.now(),
+        displayAt: displayAt,
         tripId: tripId,
-        createdAt: createdAt,
-        driverName: driverName.isEmpty ? 'Conductor sin nombre' : driverName,
-        plate: driver?['plate']?.toString() ?? 'Sin placa',
-        routeName: route?['name']?.toString() ?? 'Ruta no disponible',
-        status: trip?['status']?.toString() ?? 'desconocido',
+        tripStatus: tripStatus,
+        driverId: driverId,
+        driverName: driverName.isEmpty ? 'Conductor' : driverName,
+        plate: plate,
+        routeName: routeName,
+        fromLabel: fromLabel,
+        toLabel: toLabel,
+        passengerCount: 0,
       ),
     );
   }
-  return items;
+
+  final ids = items.map((e) => e.manifestId).where((id) => id.isNotEmpty).toList(growable: false);
+  if (ids.isEmpty) return items;
+
+  final entryRows = await Supabase.instance.client
+      .from('manifest_entries')
+      .select('manifest_id, reservation_id')
+      .inFilter('manifest_id', ids);
+
+  final counts = <String, int>{};
+  for (final raw in (entryRows as List).cast<Map<String, dynamic>>()) {
+    final manifestId = raw['manifest_id']?.toString();
+    final reservationId = raw['reservation_id']?.toString();
+    if (manifestId == null || manifestId.isEmpty) continue;
+    if (reservationId == null || reservationId.isEmpty) continue;
+    counts[manifestId] = (counts[manifestId] ?? 0) + 1;
+  }
+
+  return [
+    for (final item in items)
+      item.copyWith(passengerCount: counts[item.manifestId] ?? 0),
+  ];
 });
 
 class AdminManifestItem {
   const AdminManifestItem({
     required this.manifestId,
-    required this.tripId,
+    required this.manifestEstado,
     required this.createdAt,
+    required this.displayAt,
+    required this.tripId,
+    required this.tripStatus,
+    required this.driverId,
     required this.driverName,
     required this.plate,
     required this.routeName,
-    required this.status,
+    required this.fromLabel,
+    required this.toLabel,
+    required this.passengerCount,
   });
 
   final String manifestId;
-  final String tripId;
+  final String manifestEstado;
   final DateTime createdAt;
+  final DateTime displayAt;
+  final String tripId;
+  final String tripStatus;
+  final String driverId;
   final String driverName;
   final String plate;
   final String routeName;
-  final String status;
+  final String fromLabel;
+  final String toLabel;
+  final int passengerCount;
+
+  AdminManifestItem copyWith({int? passengerCount}) {
+    return AdminManifestItem(
+      manifestId: manifestId,
+      manifestEstado: manifestEstado,
+      createdAt: createdAt,
+      displayAt: displayAt,
+      tripId: tripId,
+      tripStatus: tripStatus,
+      driverId: driverId,
+      driverName: driverName,
+      plate: plate,
+      routeName: routeName,
+      fromLabel: fromLabel,
+      toLabel: toLabel,
+      passengerCount: passengerCount ?? this.passengerCount,
+    );
+  }
 }
 
 class AdminManifiestosScreen extends ConsumerStatefulWidget {
@@ -73,18 +148,9 @@ class AdminManifiestosScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen> {
-  final _searchController = TextEditingController();
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  bool _isToday(DateTime value) {
-    final now = DateTime.now();
-    return value.year == now.year && value.month == now.month && value.day == now.day;
-  }
+  String? _selectedDriverId;
+  DateTime? _selectedDate;
+  String? _selectedEstado;
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +162,7 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
-        title: const Text('Manifiestos del día'),
+        title: const Text('Manifiestos'),
         actions: [
           IconButton(
             onPressed: () => ref.refresh(adminManifiestosProvider),
@@ -107,34 +173,34 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
       ),
       body: manifestsAsync.when(
         data: (items) {
-          final query = _searchController.text.trim().toLowerCase();
+          final drivers = <String, String>{};
+          for (final item in items) {
+            if (item.driverId.isEmpty) continue;
+            drivers[item.driverId] = '${item.driverName} · ${item.plate}';
+          }
+
           final filtered = items.where((item) {
-            if (!_isToday(item.createdAt)) return false;
-            if (query.isEmpty) return true;
-            final haystack = '${item.driverName} ${item.plate} ${item.routeName}'.toLowerCase();
-            return haystack.contains(query);
+            if (_selectedDriverId != null && _selectedDriverId!.isNotEmpty) {
+              if (item.driverId != _selectedDriverId) return false;
+            }
+            if (_selectedEstado != null && _selectedEstado!.isNotEmpty) {
+              if (item.manifestEstado != _selectedEstado) return false;
+            }
+            if (_selectedDate != null && !_sameDay(item.displayAt, _selectedDate!)) return false;
+            return true;
           }).toList(growable: false);
 
           return ListView(
             padding: const EdgeInsets.all(AppSpacing.p20),
             children: [
-              TextField(
-                controller: _searchController,
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  hintText: 'Buscar por conductor, placa o ruta',
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  filled: true,
-                  fillColor: AppColors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.r16),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.r16),
-                    borderSide: const BorderSide(color: AppColors.border),
-                  ),
-                ),
+              _FiltersCard(
+                drivers: drivers,
+                selectedDriverId: _selectedDriverId,
+                selectedDate: _selectedDate,
+                selectedEstado: _selectedEstado,
+                onDriverChanged: (value) => setState(() => _selectedDriverId = value),
+                onEstadoChanged: (value) => setState(() => _selectedEstado = value),
+                onDateChanged: (value) => setState(() => _selectedDate = value),
               ),
               const SizedBox(height: AppSpacing.md),
               _SummaryBanner(total: filtered.length),
@@ -142,7 +208,7 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
               if (filtered.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(AppSpacing.p20),
-                  child: Center(child: Text('No hay manifiestos registrados hoy.')),
+                  child: Center(child: Text('No hay manifiestos con esos filtros.')),
                 ),
               ...filtered.map(
                 (item) => Padding(
@@ -245,10 +311,10 @@ class _ManifestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (chipBg, chipText) = switch (item.status.toLowerCase()) {
+    final (chipBg, chipText) = switch (item.tripStatus.toLowerCase()) {
       'completado' => (const Color(0xFF16A34A), 'Completado'),
       'cancelado' => (const Color(0xFFDC2626), 'Cancelado'),
-      _ => (const Color(0xFF2563EB), item.status),
+      _ => (const Color(0xFF2563EB), item.tripStatus),
     };
 
     return Container(
@@ -297,7 +363,7 @@ class _ManifestCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            item.routeName,
+            item.fromLabel.isEmpty || item.toLabel.isEmpty ? item.routeName : '${item.fromLabel} → ${item.toLabel}',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: AppColors.textSecondary,
                   fontWeight: FontWeight.w700,
@@ -305,17 +371,45 @@ class _ManifestCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            _formatDateTime(item.createdAt),
+            _formatDateTime(item.displayAt),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: const Color(0xFF64748B),
                   fontWeight: FontWeight.w700,
                 ),
           ),
           const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Pasajeros: ${item.passengerCount}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+                child: Text(
+                  item.manifestEstado,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF334155),
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
           OutlinedButton(
-            onPressed: item.tripId.isEmpty
+            onPressed: item.manifestId.isEmpty
                 ? null
-                : () => context.push('/admin/manifiestos/${item.tripId}'),
+                : () => context.push('/admin/manifiestos/${item.manifestId}'),
             child: const Text('Ver manifiesto'),
           ),
         ],
@@ -324,219 +418,112 @@ class _ManifestCard extends StatelessWidget {
   }
 }
 
-class TripPassenger {
-  const TripPassenger({
-    required this.id,
-    required this.nombres,
-    required this.apellidos,
-    required this.dni,
-    required this.telefono,
-    required this.asiento,
-    required this.abordo,
+class _FiltersCard extends StatelessWidget {
+  const _FiltersCard({
+    required this.drivers,
+    required this.selectedDriverId,
+    required this.selectedDate,
+    required this.selectedEstado,
+    required this.onDriverChanged,
+    required this.onDateChanged,
+    required this.onEstadoChanged,
   });
 
-  final String id;
-  final String nombres;
-  final String apellidos;
-  final String dni;
-  final String telefono;
-  final int asiento;
-  final bool abordo;
-}
-
-final manifestProvider = FutureProvider.family<List<TripPassenger>, String>((ref, tripId) async {
-  final resp = await Supabase.instance.client
-      .from('reservations')
-      .select('id, seats, status, profiles(id, first_name, last_name, dni, phone)')
-      .eq('trip_id', tripId)
-      .neq('status', 'cancelada');
-
-  final list = <TripPassenger>[];
-  for (final raw in (resp as List).cast<Map<String, dynamic>>()) {
-    final seats = raw['seats'] as List? ?? [];
-    final profile = raw['profiles'] as Map<String, dynamic>?;
-    if (profile == null) continue;
-
-    for (final seat in seats) {
-      list.add(
-        TripPassenger(
-          id: profile['id']?.toString() ?? '',
-          nombres: profile['first_name']?.toString() ?? '',
-          apellidos: profile['last_name']?.toString() ?? '',
-          dni: profile['dni']?.toString() ?? '—',
-          telefono: profile['phone']?.toString() ?? '—',
-          asiento: seat as int,
-          abordo: raw['status'] == 'abordado' ||
-              raw['status'] == 'completado' ||
-              raw['status'] == 'confirmada',
-        ),
-      );
-    }
-  }
-  list.sort((a, b) => a.asiento.compareTo(b.asiento));
-  return list;
-});
-
-class AdminManifiestoDetalleScreen extends ConsumerWidget {
-  const AdminManifiestoDetalleScreen({required this.viajeId, super.key});
-
-  final String viajeId;
+  final Map<String, String> drivers;
+  final String? selectedDriverId;
+  final DateTime? selectedDate;
+  final String? selectedEstado;
+  final ValueChanged<String?> onDriverChanged;
+  final ValueChanged<DateTime?> onDateChanged;
+  final ValueChanged<String?> onEstadoChanged;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    const pageBg = Color(0xFFF8FAFC);
-
-    final conductoresController = ref.read(adminConductoresProvider.notifier);
-    final viajes = ref.watch(adminConductoresProvider).viajes;
-    final viaje = viajes.where((item) => item.id == viajeId).cast<MockAdminViaje?>().firstWhere(
-          (item) => item != null,
-          orElse: () => null,
-        );
-
-    final conductor = viaje == null ? null : conductoresController.getById(viaje.conductorId);
-    final nombre = conductor?.nombreCompleto ?? '—';
-    final placa = conductor?.placa ?? '—';
-    final capacidad = conductor?.capacidad ?? 8;
-
-    final manifestAsync = ref.watch(manifestProvider(viajeId));
-
-    return Scaffold(
-      backgroundColor: pageBg,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0F172A),
-        foregroundColor: AppColors.white,
-        title: const Text('Manifiesto'),
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.r16),
+        border: Border.all(color: AppColors.border),
       ),
-      body: manifestAsync.when(
-        data: (pasajeros) {
-          final abordaron = pasajeros.where((p) => p.abordo).length;
-          return ListView(
-            padding: const EdgeInsets.all(AppSpacing.p20),
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: AppColors.white,
-                  borderRadius: BorderRadius.circular(AppRadius.r16),
-                  border: Border.all(color: AppColors.border),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Wrap(
+        spacing: AppSpacing.sm,
+        runSpacing: AppSpacing.sm,
+        children: [
+          SizedBox(
+            width: 280,
+            child: DropdownButtonFormField<String?>(
+              key: ValueKey<String?>(selectedDriverId),
+              isExpanded: true,
+              initialValue: selectedDriverId,
+              items: [
+                const DropdownMenuItem(value: null, child: Text('Todos los conductores')),
+                ...drivers.entries.map(
+                  (e) => DropdownMenuItem(
+                    value: e.key,
+                    child: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
                 ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      '$nombre · $placa',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      viaje == null
-                          ? 'Viaje: $viajeId'
-                          : '${_formatDateTime(viaje.fecha)} · ${viaje.rutaLabel}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF62748E),
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Pasajeros: $abordaron/$capacidad abordaron',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: AppColors.textSecondary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                  ],
-                ),
+              ],
+              onChanged: onDriverChanged,
+              decoration: const InputDecoration(
+                labelText: 'Conductor',
+                border: OutlineInputBorder(),
               ),
-              const SizedBox(height: AppSpacing.md),
-              if (pasajeros.isEmpty)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text('No hay pasajeros registrados'),
-                  ),
-                ),
-              ...pasajeros.map((pasajero) {
-                final (chipBg, chipLabel) = pasajero.abordo
-                    ? (const Color(0xFF16A34A), 'Abordó')
-                    : (const Color(0xFFDC2626), 'No abordó');
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(AppRadius.r16),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${pasajero.nombres} ${pasajero.apellidos}',
-                                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      color: AppColors.textPrimary,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'DNI: ${pasajero.dni} · Asiento ${pasajero.asiento}',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppColors.textSecondary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: chipBg,
-                            borderRadius: BorderRadius.circular(AppRadius.pill),
-                          ),
-                          child: Text(
-                            chipLabel,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: AppColors.white,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+            ),
+          ),
+          SizedBox(
+            width: 220,
+            child: DropdownButtonFormField<String?>(
+              key: ValueKey<String?>(selectedEstado),
+              isExpanded: true,
+              initialValue: selectedEstado,
+              items: const [
+                DropdownMenuItem(value: null, child: Text('Todos los estados')),
+                DropdownMenuItem(value: 'en_curso', child: Text('en_curso')),
+                DropdownMenuItem(value: 'completado', child: Text('completado')),
+                DropdownMenuItem(value: 'cancelado', child: Text('cancelado')),
+              ],
+              onChanged: onEstadoChanged,
+              decoration: const InputDecoration(
+                labelText: 'Estado',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 220,
+            child: OutlinedButton(
+              onPressed: () async {
+                final now = DateTime.now();
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: selectedDate ?? now,
+                  firstDate: DateTime(now.year - 1),
+                  lastDate: DateTime(now.year + 1),
                 );
-              }),
-              const SizedBox(height: AppSpacing.lg),
-              OutlinedButton(
-                onPressed: () => context.go(AppRoutes.adminManifiestos),
-                child: const Text('Volver'),
+                if (picked == null) return;
+                onDateChanged(picked);
+              },
+              child: Text(
+                selectedDate == null ? 'Filtrar por fecha' : _formatDate(selectedDate!),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stackTrace) => const Center(child: Text('Error al cargar manifiesto')),
+            ),
+          ),
+          if (selectedDate != null)
+            SizedBox(
+              width: 120,
+              child: OutlinedButton(
+                onPressed: () => onDateChanged(null),
+                child: const Text('Limpiar'),
+              ),
+            ),
+        ],
       ),
     );
   }
-}
-
-String _joinNames(String? firstName, String? lastName) {
-  final parts = [firstName?.trim(), lastName?.trim()]
-      .whereType<String>()
-      .where((part) => part.isNotEmpty)
-      .toList();
-  return parts.join(' ');
 }
 
 String _formatDateTime(DateTime dt) {
@@ -545,4 +532,13 @@ String _formatDateTime(DateTime dt) {
   final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
   final ampm = dt.hour >= 12 ? 'PM' : 'AM';
   return '$date · ${two(hour)}:${two(dt.minute)} $ampm';
+}
+
+String _formatDate(DateTime dt) {
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(dt.day)}/${two(dt.month)}/${dt.year}';
+}
+
+bool _sameDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
 }

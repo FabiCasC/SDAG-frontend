@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../core/mock/mock_data.dart';
@@ -8,6 +9,79 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_conductores_provider.dart';
+
+final adminConductorActividadProvider =
+    FutureProvider.family<AdminConductorActividadResumen, String>((ref, driverId) async {
+  if (driverId.isEmpty) {
+    return const AdminConductorActividadResumen(estaEnRuta: false, viajes: []);
+  }
+
+  final tripActivo = await Supabase.instance.client
+      .from('trips')
+      .select('id, status, routes(name)')
+      .eq('driver_id', driverId)
+      .eq('status', 'en_ruta')
+      .maybeSingle();
+
+  final viajes = await Supabase.instance.client
+      .from('trips')
+      .select('id, status, started_at, finished_at, amount_total, routes(name)')
+      .eq('driver_id', driverId)
+      .inFilter('status', ['en_ruta', 'completado'])
+      .order('created_at', ascending: false)
+      .limit(5);
+
+  return AdminConductorActividadResumen(
+    estaEnRuta: tripActivo != null,
+    viajes: (viajes as List)
+        .cast<Map<String, dynamic>>()
+        .map(AdminConductorViajeReciente.fromMap)
+        .toList(growable: false),
+  );
+});
+
+class AdminConductorActividadResumen {
+  const AdminConductorActividadResumen({
+    required this.estaEnRuta,
+    required this.viajes,
+  });
+
+  final bool estaEnRuta;
+  final List<AdminConductorViajeReciente> viajes;
+}
+
+class AdminConductorViajeReciente {
+  const AdminConductorViajeReciente({
+    required this.id,
+    required this.status,
+    required this.startedAt,
+    required this.finishedAt,
+    required this.amountTotal,
+    required this.routeName,
+  });
+
+  factory AdminConductorViajeReciente.fromMap(Map<String, dynamic> map) {
+    final route = map['routes'];
+    final routeMap = route is Map<String, dynamic> ? route : null;
+    return AdminConductorViajeReciente(
+      id: map['id']?.toString() ?? '',
+      status: map['status']?.toString() ?? 'completado',
+      startedAt: DateTime.tryParse(map['started_at']?.toString() ?? ''),
+      finishedAt: DateTime.tryParse(map['finished_at']?.toString() ?? ''),
+      amountTotal: (map['amount_total'] as num?)?.toDouble() ?? 0,
+      routeName: routeMap?['name']?.toString() ?? 'Ruta',
+    );
+  }
+
+  final String id;
+  final String status;
+  final DateTime? startedAt;
+  final DateTime? finishedAt;
+  final double amountTotal;
+  final String routeName;
+
+  DateTime? get displayDate => finishedAt ?? startedAt;
+}
 
 class AdminConductorDetalleScreen extends ConsumerStatefulWidget {
   const AdminConductorDetalleScreen({required this.id, super.key});
@@ -165,10 +239,13 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
       );
     }
 
-    final viajes = controller.viajesDeConductor(conductor.id);
-    final recientes = viajes.take(3).toList(growable: false);
+    final actividadAsync = ref.watch(adminConductorActividadProvider(conductor.driverRecordId ?? ''));
     final initials = _initials(conductor.nombres, conductor.apellidos);
-    final (chipBg, chipFg, chipLabel) = _statusChip(conductor.estado);
+    final estaEnRuta = actividadAsync.maybeWhen(
+      data: (actividad) => actividad.estaEnRuta,
+      orElse: () => conductor.estado == MockAdminConductorEstado.enRuta,
+    );
+    final (chipBg, chipFg, chipLabel) = _statusChip(estaEnRuta);
     final showUnlock = conductor.bloqueadoPorPago || conductor.estado == MockAdminConductorEstado.bloqueado;
     final showDeactivate = conductor.estado != MockAdminConductorEstado.inactivo;
     final showReactivate = conductor.estado == MockAdminConductorEstado.inactivo;
@@ -449,111 +526,146 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.white,
-              borderRadius: BorderRadius.circular(AppRadius.r16),
-              border: Border.all(color: AppColors.border),
-            ),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      'Últimos viajes',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => context.push('/admin/conductores/${conductor.id}/historial'),
-                      child: const Text('Ver todos'),
-                    ),
-                  ],
+          actividadAsync.when(
+            data: (actividad) {
+              if (actividad.viajes.isEmpty) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(AppRadius.r16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Sin actividad registrada.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                );
+              }
+
+              return Container(
+                decoration: BoxDecoration(
+                  color: AppColors.white,
+                  borderRadius: BorderRadius.circular(AppRadius.r16),
+                  border: Border.all(color: AppColors.border),
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                if (recientes.isEmpty)
-                  Text(
-                    'Sin viajes registrados.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-                  )
-                else
-                  Column(
-                    children: [
-                      for (final v in recientes)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(AppRadius.r16),
-                            onTap: () => context.push('/admin/historial-viajes/${v.id}'),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8FAFC),
-                                borderRadius: BorderRadius.circular(AppRadius.r16),
-                                border: Border.all(color: AppColors.border),
-                              ),
-                              padding: const EdgeInsets.all(AppSpacing.md),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          _formatFecha(v.fecha),
-                                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                                color: AppColors.textSecondary,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          v.rutaLabel,
-                                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                                color: AppColors.textPrimary,
-                                                fontWeight: FontWeight.w800,
-                                              ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: AppSpacing.sm),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Últimos viajes',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => context.push('/admin/conductores/${conductor.id}/historial'),
+                          child: const Text('Ver todos'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    for (final v in actividad.viajes)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(AppRadius.r16),
+                          onTap: () => context.push('/admin/historial-viajes/${v.id}'),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(AppRadius.r16),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            padding: const EdgeInsets.all(AppSpacing.md),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        'S/ ${v.monto.toStringAsFixed(0)}',
-                                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                              color: AppColors.textPrimary,
-                                              fontWeight: FontWeight.w900,
+                                        v.displayDate == null ? 'Fecha no disponible' : _formatFecha(v.displayDate!),
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                              color: AppColors.textSecondary,
+                                              fontWeight: FontWeight.w700,
                                             ),
                                       ),
                                       const SizedBox(height: 4),
-                                      _ViajeEstadoChip(estado: v.estado),
+                                      Text(
+                                        v.routeName,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                              color: AppColors.textPrimary,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                      ),
                                     ],
                                   ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                      'S/ ${v.amountTotal.toStringAsFixed(2)}',
+                                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                            color: AppColors.textPrimary,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _ViajeEstadoChip(status: v.status),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      OutlinedButton(
-                        onPressed: () => context.push('/admin/conductores/${conductor.id}/historial'),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppRadius.r12),
-                          ),
-                        ),
-                        child: const Text('Ver historial completo'),
                       ),
-                    ],
-                  ),
-              ],
+                    OutlinedButton(
+                      onPressed: () => context.push('/admin/conductores/${conductor.id}/historial'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.r12),
+                        ),
+                      ),
+                      child: const Text('Ver historial completo'),
+                    ),
+                  ],
+                ),
+              );
+            },
+            loading: () => Container(
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(AppRadius.r16),
+                border: Border.all(color: AppColors.border),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: const Center(child: CircularProgressIndicator()),
+            ),
+            error: (error, _) => Container(
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(AppRadius.r16),
+                border: Border.all(color: AppColors.border),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'No se pudo cargar la actividad del conductor.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+              ),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -674,15 +786,16 @@ class _ComisionBottomSheetState extends State<_ComisionBottomSheet> {
 }
 
 class _ViajeEstadoChip extends StatelessWidget {
-  const _ViajeEstadoChip({required this.estado});
+  const _ViajeEstadoChip({required this.status});
 
-  final MockAdminViajeEstado estado;
+  final String status;
 
   @override
   Widget build(BuildContext context) {
-    final (bg, fg, label) = switch (estado) {
-      MockAdminViajeEstado.completado => (const Color(0xFF16A34A), AppColors.white, 'Completado'),
-      MockAdminViajeEstado.cancelado => (const Color(0xFFDC2626), AppColors.white, 'Cancelado'),
+    final normalized = status.toLowerCase();
+    final (bg, fg, label) = switch (normalized) {
+      'en_ruta' => (const Color(0xFFEA580C), AppColors.white, 'En ruta'),
+      _ => (const Color(0xFF16A34A), AppColors.white, 'Completado'),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
@@ -755,17 +868,10 @@ String _initials(String nombres, String apellidos) {
   return out.isEmpty ? '—' : out;
 }
 
-(Color, Color, String) _statusChip(MockAdminConductorEstado estado) {
-  switch (estado) {
-    case MockAdminConductorEstado.enRuta:
-      return (const Color(0xFF2563EB), AppColors.white, 'En ruta');
-    case MockAdminConductorEstado.disponible:
-      return (const Color(0xFF16A34A), AppColors.white, 'Disponible');
-    case MockAdminConductorEstado.inactivo:
-      return (const Color(0xFF94A3B8), const Color(0xFF0F172A), 'Inactivo');
-    case MockAdminConductorEstado.bloqueado:
-      return (const Color(0xFFDC2626), AppColors.white, 'Bloqueado');
-  }
+(Color, Color, String) _statusChip(bool estaEnRuta) {
+  return estaEnRuta
+      ? (const Color(0xFFEA580C), AppColors.white, 'En ruta')
+      : (const Color(0xFF16A34A), AppColors.white, 'Disponible');
 }
 
 String _formatFecha(DateTime dt) {
