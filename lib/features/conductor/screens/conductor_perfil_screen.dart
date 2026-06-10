@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -20,16 +19,19 @@ class ConductorPerfilScreen extends ConsumerStatefulWidget {
 }
 
 class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
+  late final TextEditingController _nameController;
   late final TextEditingController _phoneController;
 
   @override
   void initState() {
     super.initState();
+    _nameController = TextEditingController();
     _phoneController = TextEditingController();
   }
 
   @override
   void dispose() {
+    _nameController.dispose();
     _phoneController.dispose();
     super.dispose();
   }
@@ -182,26 +184,29 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
     final voice = ref.watch(conductorVoiceProvider);
     final perfil = ref.watch(perfilConductorProvider);
 
-    if (_phoneController.text.isEmpty && perfil.telefono.isNotEmpty) {
-      _phoneController.text = perfil.telefono;
+    if (_nameController.text.isEmpty && perfil.name.isNotEmpty) {
+      _nameController.text = perfil.name;
+    }
+    if (_phoneController.text.isEmpty && perfil.phone.isNotEmpty) {
+      _phoneController.text = perfil.phone;
     }
 
-    final initials = _initials(MockData.conductorNombre);
-    final rating = MockData.conductorRatingPromedio;
-    final ratingCount = MockData.conductorRatingCount;
-    final ratingText =
-        ratingCount <= 0 ? 'Sin calificaciones aún' : '${rating.toStringAsFixed(1)} ★ ($ratingCount valoraciones)';
+    final displayName = perfil.name.isNotEmpty ? perfil.name : (perfil.email.isNotEmpty ? perfil.email : '—');
+    final initials = _initials(displayName);
 
     final accesoChip = auth.accesoOperativo
         ? (const Color(0xFFDCFCE7), const Color(0xFF16A34A), 'Activo')
         : (const Color(0xFFFEE2E2), const Color(0xFFDC2626), 'Bloqueado');
 
-    final estadoLabel = switch (auth.estadoActual) {
-      ConductorEstadoActual.disponible => 'disponible',
-      ConductorEstadoActual.activo => 'activo',
-      ConductorEstadoActual.enRuta => 'en_ruta',
-      ConductorEstadoActual.finalizado => 'finalizado',
-    };
+    final estadoLabel = perfil.driverEstado == 'en_ruta' ? 'en_ruta' : 'disponible';
+
+    if (perfil.isLoading) {
+      return const SafeArea(
+        child: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
 
     return SafeArea(
       child: ListView(
@@ -222,7 +227,7 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
           ),
           const SizedBox(height: AppSpacing.md),
           Text(
-            MockData.conductorNombre,
+            displayName,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: AppColors.textPrimary,
@@ -249,15 +254,6 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
-          Text(
-            ratingText,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: AppColors.textSecondary,
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
           Container(
             decoration: BoxDecoration(
               color: const Color(0xFFF8FAFC),
@@ -284,13 +280,16 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
-                _kv(context, 'Placa', MockData.conductorPlaca, muted: true),
-                _kv(context, 'Tipo de vehículo', MockData.conductorVehiculo),
-                _kv(context, 'Capacidad', '${MockData.conductorCapacidad} asientos'),
+                _kv(context, 'Nombre', perfil.name.isNotEmpty ? perfil.name : '—', muted: true),
+                _kv(context, 'Email', perfil.email.isNotEmpty ? perfil.email : '—', muted: true),
+                _kv(context, 'Teléfono', perfil.phone.isNotEmpty ? perfil.phone : '—', muted: true),
+                _kv(context, 'DNI', perfil.dni.isNotEmpty ? perfil.dni : '—', muted: true),
+                _kv(context, 'Placa', perfil.plate.isNotEmpty ? perfil.plate : '—', muted: true),
                 _kv(
                   context,
-                  'Porcentaje de comisión',
-                  '${(MockData.conductorPorcentajeComision * 100).round()}%',
+                  'Tipo de vehículo',
+                  perfil.vehicleType.isNotEmpty ? perfil.vehicleType : '—',
+                  muted: true,
                 ),
               ],
             ),
@@ -315,6 +314,13 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 TextField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre',
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                TextField(
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
                   decoration: const InputDecoration(
@@ -333,15 +339,17 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
                     ),
                   ),
                   onPressed: () async {
-                    final ok = await ref
-                        .read(perfilConductorProvider.notifier)
-                        .updateTelefono(_phoneController.text);
+                    final ok = await ref.read(perfilConductorProvider.notifier).updatePerfil(
+                          name: _nameController.text,
+                          phone: _phoneController.text,
+                        );
                     if (!context.mounted) return;
                     if (!ok) {
+                      final err = ref.read(perfilConductorProvider).errorMessage;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
+                        SnackBar(
                           backgroundColor: AppColors.error,
-                          content: Text('Teléfono inválido (debe tener 9 dígitos)'),
+                          content: Text(err ?? 'No se pudo guardar el perfil'),
                         ),
                       );
                       return;
@@ -349,11 +357,11 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         backgroundColor: AppColors.success,
-                        content: Text('Teléfono actualizado'),
+                        content: Text('Perfil actualizado'),
                       ),
                     );
                   },
-                  child: const Text('Guardar teléfono'),
+                  child: const Text('Guardar'),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 OutlinedButton(

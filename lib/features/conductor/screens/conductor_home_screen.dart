@@ -3,9 +3,9 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -14,6 +14,7 @@ import '../providers/conductor_auth_provider.dart';
 import '../providers/conductor_comisiones_provider.dart';
 import '../providers/conductor_viaje_provider.dart';
 import '../providers/conductor_voice_provider.dart';
+import '../providers/perfil_conductor_provider.dart';
 import 'conductor_comisiones_screen.dart';
 import 'conductor_gestion_viaje_screen.dart';
 import 'conductor_perfil_screen.dart';
@@ -177,19 +178,18 @@ class _ConductorInicioTab extends ConsumerWidget {
     const badgeBg = Color(0xFFF97316);
 
     final voice = ref.watch(conductorVoiceProvider);
-    final (chipBg, chipFg, chipLabel) = switch (auth.estadoActual) {
-      ConductorEstadoActual.disponible => (const Color(0xFFDCFCE7), const Color(0xFF16A34A), 'Disponible'),
-      ConductorEstadoActual.activo => (const Color(0xFFDBEAFE), const Color(0xFF2563EB), 'Activo'),
-      ConductorEstadoActual.enRuta => (const Color(0xFFFFEDD5), const Color(0xFFF97316), 'En ruta'),
-      ConductorEstadoActual.finalizado => (const Color(0xFFE5E7EB), const Color(0xFF6B7280), 'Finalizado'),
-    };
+    final perfil = ref.watch(perfilConductorProvider);
+    final isEnRuta = perfil.driverEstado == 'en_ruta';
+    final todayStatsAsync = ref.watch(_conductorHoyStatsProvider);
+    final (chipBg, chipFg, chipLabel) = isEnRuta
+        ? (const Color(0xFFFFEDD5), const Color(0xFFF97316), 'En ruta')
+        : (const Color(0xFFDCFCE7), const Color(0xFF16A34A), 'Disponible');
 
     final isDisponible = auth.estadoActual == ConductorEstadoActual.disponible;
     final canGroupChat = auth.estadoActual == ConductorEstadoActual.enRuta;
     final activePassengers = viaje.isActive ? viaje.occupiedSeats : 0;
-    final viajesHoy = viaje.isActive ? 1 : 0;
-    final asientos = viaje.occupiedSeats;
-    final comisionHoy = viaje.recaudacionTotal * MockData.conductorPorcentajeComision;
+    final totalViajesHoy = todayStatsAsync.maybeWhen(data: (d) => d.totalViajes, orElse: () => 0);
+    final gananciaHoy = todayStatsAsync.maybeWhen(data: (d) => d.ganancia, orElse: () => 0.0);
 
     return Column(
       children: [
@@ -204,7 +204,7 @@ class _ConductorInicioTab extends ConsumerWidget {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Text(
-                  'Buenos días, Carlos 👋',
+                  _saludoLine(perfil.name),
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: AppColors.white,
                         fontWeight: FontWeight.w800,
@@ -221,7 +221,7 @@ class _ConductorInicioTab extends ConsumerWidget {
                         borderRadius: BorderRadius.circular(AppRadius.pill),
                       ),
                       child: Text(
-                        MockData.conductorPlaca,
+                        perfil.plate.isNotEmpty ? perfil.plate : '—',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.white,
                               fontWeight: FontWeight.w800,
@@ -312,25 +312,37 @@ class _ConductorInicioTab extends ConsumerWidget {
                 children: [
                   Expanded(
                     child: _ResumenCard(
-                      title: 'Viajes',
-                      value: '$viajesHoy',
+                      title: 'Estado',
+                      value: isEnRuta ? 'En ruta' : 'Disponible',
+                      icon: isEnRuta ? Icons.route_rounded : Icons.check_circle_rounded,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: _ResumenCard(
+                      title: 'Placa',
+                      value: perfil.plate.isNotEmpty ? perfil.plate : '—',
+                      icon: Icons.confirmation_number_rounded,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Row(
+                children: [
+                  Expanded(
+                    child: _ResumenCard(
+                      title: 'Viajes del día',
+                      value: 'Viajes hoy: $totalViajesHoy',
                       icon: Icons.directions_bus_rounded,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: _ResumenCard(
-                      title: 'Asientos',
-                      value: '$asientos',
-                      icon: Icons.people_rounded,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: _ResumenCard(
-                      title: 'Comisión',
-                      value: 'S/ ${comisionHoy.toStringAsFixed(0)}',
-                      icon: Icons.attach_money_rounded,
+                      title: 'Ganancia del día',
+                      value: 'Ganancia hoy: S/ ${gananciaHoy.toStringAsFixed(2)}',
+                      icon: Icons.payments_rounded,
                     ),
                   ),
                 ],
@@ -444,6 +456,82 @@ class _ConductorInicioTab extends ConsumerWidget {
     );
   }
 }
+
+String getSaludo() {
+  final hora = DateTime.now().hour;
+  if (hora < 12) return 'Buenos días';
+  if (hora < 18) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+String _saludoLine(String name) {
+  final saludo = getSaludo();
+  final n = name.trim();
+  if (n.isEmpty) return saludo;
+  return '$saludo, $n';
+}
+
+class _ConductorHoyStats {
+  const _ConductorHoyStats({
+    required this.totalViajes,
+    required this.ganancia,
+  });
+
+  final int totalViajes;
+  final double ganancia;
+}
+
+final _conductorHoyStatsProvider = FutureProvider.autoDispose<_ConductorHoyStats>((ref) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) {
+    return const _ConductorHoyStats(totalViajes: 0, ganancia: 0.0);
+  }
+
+  final driver = await Supabase.instance.client.from('drivers').select('id').eq('profile_id', user.id).single();
+
+  final hoy = DateTime.now();
+  final inicioDia = DateTime(hoy.year, hoy.month, hoy.day).toIso8601String();
+  final finDia = DateTime(hoy.year, hoy.month, hoy.day, 23, 59, 59).toIso8601String();
+
+  final viajesHoy = await Supabase.instance.client
+      .from('trips')
+      .select('id')
+      .eq('driver_id', driver['id'])
+      .eq('status', 'completado')
+      .gte('finished_at', inicioDia)
+      .lte('finished_at', finDia);
+
+  final totalViajes = (viajesHoy as List).length;
+
+  final viajesConMonto = await Supabase.instance.client
+      .from('trips')
+      .select('amount_total, drivers(commission_pct)')
+      .eq('driver_id', driver['id'])
+      .eq('status', 'completado')
+      .gte('finished_at', inicioDia)
+      .lte('finished_at', finDia);
+
+  final ganancia = (viajesConMonto as List).fold<double>(0.0, (sum, v) {
+    final row = (v as Map).cast<String, dynamic>();
+    final monto = ((row['amount_total'] as num?) ?? 0).toDouble();
+    final d = row['drivers'];
+    Map<String, dynamic>? dm;
+    if (d is Map<String, dynamic>) dm = d;
+    if (d is Map) dm = d.cast<String, dynamic>();
+    if (d is List && d.isNotEmpty) {
+      final first = d.first;
+      if (first is Map<String, dynamic>) dm = first;
+      if (first is Map) dm = first.cast<String, dynamic>();
+    }
+    final pct = ((dm?['commission_pct'] as num?) ?? 0).toDouble();
+    return sum + monto * (1 - pct / 100);
+  });
+
+  return _ConductorHoyStats(
+    totalViajes: totalViajes,
+    ganancia: ganancia,
+  );
+});
 
 class _DisponibilidadCard extends StatelessWidget {
   const _DisponibilidadCard({

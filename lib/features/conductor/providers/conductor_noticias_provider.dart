@@ -34,6 +34,8 @@ class ConductorNoticiasController extends StateNotifier<ConductorNoticiasState> 
     } catch (_) {}
   }
 
+  Future<void> reload() => _load();
+
   Future<void> publicar({
     required MockNewsType type,
     required String title,
@@ -41,49 +43,32 @@ class ConductorNoticiasController extends StateNotifier<ConductorNoticiasState> 
   }) async {
     final t = title.trim();
     final d = description.trim();
-    final now = DateTime.now();
     final user = Supabase.instance.client.auth.currentUser;
-    final profile = user == null
-        ? null
-        : await Supabase.instance.client
-            .from('profiles')
-            .select('name')
-            .eq('id', user.id)
-            .maybeSingle();
-    final driverName = profile?['name']?.toString() ?? 'Conductor';
+    if (user == null) throw Exception('No hay una sesión activa.');
 
-    try {
-      final row = await Supabase.instance.client.from('news_posts').insert({
-        'type': type.name,
-        'title': t,
-        'text': d,
-        'driver_profile_id': user?.id,
-        'driver_name': driverName,
-        'created_at': now.toIso8601String(),
-      }).select().single();
+    final driver = await Supabase.instance.client
+        .from('drivers')
+        .select('id, plate, profiles(name)')
+        .eq('profile_id', user.id)
+        .single();
 
-      final post = _fromRow(row);
-      if (post != null) state = state.copyWith(items: [post, ...state.items]);
-    } catch (_) {
-      final hh = now.hour.toString().padLeft(2, '0');
-      final mm = now.minute.toString().padLeft(2, '0');
-      final post = MockNewsPost(
-        id: 'c_${now.microsecondsSinceEpoch}',
-        type: type,
-        title: t,
-        text: d,
-        driverName: driverName,
-        dateLabel: 'Hoy $hh:$mm',
-      );
-      state = state.copyWith(items: [post, ...state.items]);
-    }
+    await Supabase.instance.client.from('news_posts').insert({
+      'type': type.name,
+      'title': t,
+      'body': d,
+      'author_driver_id': driver['id'],
+      'driver_profile_id': user.id,
+      'driver_name': (driver['profiles'] as Map)['name'],
+    });
+
+    await _load();
   }
 
   MockNewsPost? _fromRow(Map<String, dynamic> r) {
     final id = r['id']?.toString();
     final typeRaw = r['type']?.toString();
     final title = r['title']?.toString();
-    final text = r['text']?.toString();
+    final text = (r['body'] ?? r['text'])?.toString();
     final driverName = r['driver_name']?.toString();
     final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
 

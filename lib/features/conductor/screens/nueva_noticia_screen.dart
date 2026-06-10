@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
@@ -20,6 +21,7 @@ class _NuevaNoticiaScreenState extends ConsumerState<NuevaNoticiaScreen> {
   MockNewsType _type = MockNewsType.incidencia;
   late final TextEditingController _title;
   late final TextEditingController _desc;
+  bool _isPublishing = false;
 
   @override
   void initState() {
@@ -35,7 +37,7 @@ class _NuevaNoticiaScreenState extends ConsumerState<NuevaNoticiaScreen> {
     super.dispose();
   }
 
-  void _publish() {
+  Future<void> _publish() async {
     final title = _title.text.trim();
     final desc = _desc.text.trim();
 
@@ -48,13 +50,41 @@ class _NuevaNoticiaScreenState extends ConsumerState<NuevaNoticiaScreen> {
       return;
     }
 
-    ref.read(conductorNoticiasProvider.notifier).publicar(
-          type: _type,
-          title: title,
-          description: desc,
-        );
-    AppSnackbars.success(context, 'Incidencia publicada. Visible para todos.');
-    context.pop();
+    if (_isPublishing) return;
+    setState(() => _isPublishing = true);
+
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        AppSnackbars.error(context, 'No hay una sesión activa');
+        return;
+      }
+
+      final driver = await Supabase.instance.client
+          .from('drivers')
+          .select('id, plate, profiles(name)')
+          .eq('profile_id', user.id)
+          .single();
+
+      await Supabase.instance.client.from('news_posts').insert({
+        'type': _type.name,
+        'title': title,
+        'body': desc,
+        'author_driver_id': driver['id'],
+        'driver_profile_id': user.id,
+        'driver_name': (driver['profiles'] as Map)['name'],
+      });
+
+      await ref.read(conductorNoticiasProvider.notifier).reload();
+      if (!mounted) return;
+      AppSnackbars.success(context, 'Publicación enviada');
+      context.pop();
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se pudo publicar: $e');
+    } finally {
+      if (mounted) setState(() => _isPublishing = false);
+    }
   }
 
   @override
@@ -131,8 +161,8 @@ class _NuevaNoticiaScreenState extends ConsumerState<NuevaNoticiaScreen> {
                   borderRadius: BorderRadius.circular(AppRadius.r12),
                 ),
               ),
-              onPressed: _publish,
-              child: const Text('Publicar'),
+              onPressed: _isPublishing ? null : _publish,
+              child: Text(_isPublishing ? 'Publicando...' : 'Publicar'),
             ),
           ],
         ),
