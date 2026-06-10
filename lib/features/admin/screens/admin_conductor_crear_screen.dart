@@ -1,13 +1,52 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_conductores_provider.dart';
+import 'admin_vehiculo_crear_screen.dart';
+import 'admin_vehiculos_screen.dart';
+
+final adminAvailableVehiclesProvider = FutureProvider<List<AdminAvailableVehicle>>((ref) async {
+  final availableVehicles = await Supabase.instance.client
+      .from('vehicles')
+      .select('id, plate, label, vehicle_type, total_seats')
+      .filter('driver_id', 'is', null)
+      .eq('active', true)
+      .order('plate');
+
+  return (availableVehicles as List)
+      .cast<Map<String, dynamic>>()
+      .map(AdminAvailableVehicle.fromMap)
+      .toList(growable: false);
+});
+
+class AdminAvailableVehicle {
+  const AdminAvailableVehicle({
+    required this.id,
+    required this.plate,
+    required this.vehicleType,
+    required this.capacity,
+  });
+
+  final String id;
+  final String plate;
+  final String vehicleType;
+  final int capacity;
+
+  factory AdminAvailableVehicle.fromMap(Map<String, dynamic> map) {
+    return AdminAvailableVehicle(
+      id: map['id']?.toString() ?? '',
+      plate: map['plate']?.toString() ?? '',
+      vehicleType: map['vehicle_type']?.toString() ?? '',
+      capacity: (map['total_seats'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
 
 class AdminConductorCrearScreen extends ConsumerStatefulWidget {
   const AdminConductorCrearScreen({super.key});
@@ -17,424 +56,365 @@ class AdminConductorCrearScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearScreen> {
-  late final TextEditingController _nombresController;
-  late final TextEditingController _apellidosController;
+  final _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _nombreController;
+  late final TextEditingController _apellidoController;
   late final TextEditingController _dniController;
   late final TextEditingController _telefonoController;
-  late final TextEditingController _correoController;
+  late final TextEditingController _emailController;
   late final TextEditingController _passwordController;
-  late final TextEditingController _placaController;
-  late final TextEditingController _comisionController;
 
-  String _vehiculoTipo = 'Toyota Hiace';
-  int _capacidad = 8;
-  double _comision = 15.0;
-  bool _submitting = false;
-  bool _passwordObscure = true;
+  bool _guardando = false;
+  bool _ocultarPassword = true;
+  String? _selectedVehicleId;
 
   @override
   void initState() {
     super.initState();
-    _nombresController = TextEditingController();
-    _apellidosController = TextEditingController();
+    _nombreController = TextEditingController();
+    _apellidoController = TextEditingController();
     _dniController = TextEditingController();
     _telefonoController = TextEditingController();
-    _correoController = TextEditingController();
+    _emailController = TextEditingController();
     _passwordController = TextEditingController();
-    _placaController = TextEditingController();
-    _comisionController = TextEditingController(text: _comision.toStringAsFixed(1));
   }
 
   @override
   void dispose() {
-    _nombresController.dispose();
-    _apellidosController.dispose();
+    _nombreController.dispose();
+    _apellidoController.dispose();
     _dniController.dispose();
     _telefonoController.dispose();
-    _correoController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
-    _placaController.dispose();
-    _comisionController.dispose();
     super.dispose();
   }
 
-  void _syncComisionFromText() {
-    final raw = _comisionController.text.replaceAll(',', '.').trim();
-    final parsed = double.tryParse(raw);
-    if (parsed == null) return;
-    final clamped = parsed.clamp(0.0, 30.0);
-    if (clamped == _comision) return;
-    setState(() => _comision = clamped);
+  String? _requiredValidator(String? value, String label) {
+    if (value == null || value.trim().isEmpty) return '$label es obligatorio';
+    return null;
   }
 
-  void _syncComisionTextFromSlider() {
-    final nextText = _comision.toStringAsFixed(1);
-    if (_comisionController.text.trim() == nextText) return;
-    _comisionController.text = nextText;
+  String _functionErrorMessage(Object error) {
+    final text = error.toString();
+    if (text.contains('Failed to fetch') || text.contains('ClientException')) {
+      return 'No se pudo crear el usuario. Verifica la conexión.';
+    }
+    return text.replaceFirst('Exception: ', '');
   }
 
-  Future<void> _submit() async {
-    if (_submitting) return;
-    setState(() => _submitting = true);
-
-    final nombreCompleto = '${_nombresController.text.trim()} ${_apellidosController.text.trim()}'.trim();
-    final placa = _placaController.text.trim().toUpperCase();
-    final correo = _correoController.text.trim();
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmar registro'),
-        content: Text(
-          '¿Registrar a $nombreCompleto con placa $placa?\n\n'
-          'Se crearán sus credenciales de acceso.',
+  Future<void> _guardar(List<AdminAvailableVehicle> vehicles) async {
+    if (_guardando) return;
+    if (!_formKey.currentState!.validate()) return;
+    if (_selectedVehicleId == null || _selectedVehicleId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: AppColors.error,
+          content: Text('Selecciona un vehículo disponible'),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFF97316),
-              foregroundColor: AppColors.white,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Confirmar'),
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    if (ok != true) {
-      setState(() => _submitting = false);
+      );
       return;
     }
 
-    final controller = ref.read(adminConductoresProvider.notifier);
-    final result = await controller.crearConductor(
-      nombres: _nombresController.text,
-      apellidos: _apellidosController.text,
-      dni: _dniController.text,
-      telefono: _telefonoController.text,
-      correo: _correoController.text,
-      password: _passwordController.text,
-      placa: _placaController.text,
-      vehiculoTipo: _vehiculoTipo,
-      capacidad: _capacidad,
-      comisionPorcentaje: _comision,
-    );
-    if (!mounted) return;
-    setState(() => _submitting = false);
+    final selectedVehicle = vehicles.where((v) => v.id == _selectedVehicleId).firstOrNull;
+    if (selectedVehicle == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: AppColors.error,
+          content: Text('El vehículo seleccionado ya no está disponible'),
+        ),
+      );
+      return;
+    }
 
-    switch (result.type) {
-      case AdminCrearConductorResultType.ok:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: AppColors.success,
-            content: Text('Conductor registrado. Credenciales enviadas a $correo'),
-          ),
-        );
-        context.go('/admin/conductores/${result.createdId}');
-        return;
-      case AdminCrearConductorResultType.duplicateDni:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: AppColors.error, content: Text('DNI duplicado')),
-        );
-        return;
-      case AdminCrearConductorResultType.duplicatePlaca:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(backgroundColor: AppColors.error, content: Text('Placa duplicada')),
-        );
-        return;
-      case AdminCrearConductorResultType.invalid:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: AppColors.error, content: Text(result.message ?? 'Datos inválidos')),
-        );
-        return;
+    final email = _emailController.text.trim().toLowerCase();
+    final password = _passwordController.text.trim();
+    final firstName = _nombreController.text.trim();
+    final lastName = _apellidoController.text.trim();
+    final dni = _dniController.text.trim();
+    final phone = _telefonoController.text.trim();
+
+    setState(() => _guardando = true);
+    try {
+      final response = await Supabase.instance.client.functions.invoke(
+        'create-driver',
+        body: {
+          'email': email,
+          'password': password,
+          'first_name': firstName,
+          'last_name': lastName,
+          'dni': dni,
+          'phone': phone,
+          'plate': selectedVehicle.plate,
+          'vehicle_type': selectedVehicle.vehicleType,
+          'capacity': selectedVehicle.capacity,
+          'commission_pct': 15,
+        },
+      );
+
+      if (!mounted) return;
+
+      if (response.status >= 400) {
+        final data = response.data;
+        final message = data is Map<String, dynamic>
+            ? data['error']?.toString()
+            : data?.toString();
+        throw Exception(message ?? 'No se pudo crear el usuario. Verifica la conexión.');
+      }
+
+      final data = response.data;
+      final profileId = data is Map<String, dynamic> ? data['user_id']?.toString() : null;
+      final newDriverId = data is Map<String, dynamic> ? data['driver_id']?.toString() : null;
+
+      if (newDriverId != null && newDriverId.isNotEmpty) {
+        await Supabase.instance.client
+            .from('vehicles')
+            .update({'driver_id': newDriverId})
+            .eq('id', selectedVehicle.id);
+
+        await Supabase.instance.client.from('drivers').update({
+          'plate': selectedVehicle.plate,
+          'vehicle_type': selectedVehicle.vehicleType,
+          'capacity': selectedVehicle.capacity,
+        }).eq('id', newDriverId);
+      }
+
+      ref.invalidate(adminAvailableVehiclesProvider);
+      ref.invalidate(adminVehiculosProvider);
+      ref.invalidate(adminVehiculoAssignableDriversProvider);
+      await ref.read(adminConductoresProvider.notifier).refresh();
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: AppColors.success,
+          content: Text('Conductor registrado correctamente.'),
+        ),
+      );
+
+      if (profileId != null && profileId.isNotEmpty) {
+        context.go('/admin/conductores/$profileId');
+      } else {
+        context.go(AppRoutes.adminConductores);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.error,
+          content: Text(_functionErrorMessage(error)),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _guardando = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    const appBarBg = Color(0xFF0F172A);
     const pageBg = Color(0xFFF8FAFC);
-
-    final state = ref.watch(adminConductoresProvider);
-    final dni = _dniController.text.trim();
-    final placa = _placaController.text.trim().toUpperCase();
-
-    final dniValid = RegExp(r'^\d{8}$').hasMatch(dni);
-    final placaValid = RegExp(r'^[A-Z]{3}-\d{3}$').hasMatch(placa);
-    final telefonoRaw = _telefonoController.text.trim();
-    final telefonoValid = telefonoRaw.isEmpty || RegExp(r'^\d{9}$').hasMatch(telefonoRaw);
-    final correo = _correoController.text.trim();
-    final correoValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(correo);
-    final password = _passwordController.text;
-    final passwordValid = password.trim().length >= 8;
-
-    final dniDuplicado = dniValid && state.listaConductores.any((e) => e.dni == dni);
-    final placaDuplicada = placaValid && state.listaConductores.any((e) => e.placa.toUpperCase() == placa);
-
-    final nombresOk = _nombresController.text.trim().isNotEmpty;
-    final apellidosOk = _apellidosController.text.trim().isNotEmpty;
-    final comisionOk = _comision > 0 && _comision <= 30;
-
-    final canSubmit = nombresOk &&
-        apellidosOk &&
-        dniValid &&
-        !dniDuplicado &&
-        telefonoValid &&
-        correoValid &&
-        passwordValid &&
-        placaValid &&
-        !placaDuplicada &&
-        comisionOk;
-
-    final sampleComision = (480.0 * _comision / 100);
+    final availableVehiclesAsync = ref.watch(adminAvailableVehiclesProvider);
 
     return Scaffold(
       backgroundColor: pageBg,
       appBar: AppBar(
-        backgroundColor: appBarBg,
+        backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
         title: const Text('Nuevo conductor'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.p20),
-        children: [
-          _SectionCard(
-            title: 'Datos personales',
-            child: Column(
-              children: [
-                TextField(
-                  controller: _nombresController,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    labelText: 'Nombre completo',
-                    errorText: nombresOk ? null : 'Obligatorio',
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                TextField(
-                  controller: _apellidosController,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    labelText: 'Apellidos',
-                    errorText: apellidosOk ? null : 'Obligatorio',
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                TextField(
-                  controller: _dniController,
-                  onChanged: (_) => setState(() {}),
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: 'DNI',
-                    hintText: '8 dígitos',
-                    errorText: !dniValid
-                        ? (dni.isEmpty ? 'Obligatorio' : 'Debe tener 8 dígitos')
-                        : (dniDuplicado ? 'DNI duplicado' : null),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                TextField(
-                  controller: _telefonoController,
-                  onChanged: (_) => setState(() {}),
-                  keyboardType: TextInputType.phone,
-                  decoration: InputDecoration(
-                    labelText: 'Teléfono',
-                    hintText: '9 dígitos',
-                    errorText: telefonoValid ? null : 'Teléfono inválido',
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                TextField(
-                  controller: _correoController,
-                  onChanged: (_) => setState(() {}),
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(
-                    labelText: 'Correo electrónico',
-                    hintText: 'correo@ejemplo.com',
-                    errorText: correoValid ? null : (correo.isEmpty ? 'Obligatorio' : 'Correo inválido'),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                TextField(
-                  controller: _passwordController,
-                  onChanged: (_) => setState(() {}),
-                  obscureText: _passwordObscure,
-                  decoration: InputDecoration(
-                    labelText: 'Contraseña',
-                    hintText: 'Mínimo 8 caracteres',
-                    errorText: passwordValid ? null : (password.trim().isEmpty ? 'Obligatorio' : 'Mínimo 8 caracteres'),
-                    suffixIcon: IconButton(
-                      onPressed: () => setState(() => _passwordObscure = !_passwordObscure),
-                      icon: Icon(_passwordObscure ? Icons.visibility_rounded : Icons.visibility_off_rounded),
+      body: availableVehiclesAsync.when(
+        data: (vehicles) => Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.all(AppSpacing.p20),
+            children: [
+              _SectionCard(
+                title: 'Datos personales',
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: _nombreController,
+                      decoration: const InputDecoration(labelText: 'Nombre'),
+                      validator: (value) => _requiredValidator(value, 'El nombre'),
                     ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _SectionCard(
-            title: 'Datos del vehículo',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _placaController,
-                  onChanged: (_) => setState(() {}),
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: InputDecoration(
-                    labelText: 'Placa del vehículo',
-                    hintText: 'ABC-123',
-                    errorText: !placaValid
-                        ? (placa.isEmpty ? 'Obligatorio' : 'Formato inválido (ABC-123)')
-                        : (placaDuplicada ? 'Placa duplicada' : null),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                InputDecorator(
-                  decoration: const InputDecoration(labelText: 'Tipo de vehículo'),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _vehiculoTipo,
-                      isExpanded: true,
-                      items: const [
-                        DropdownMenuItem(value: 'Auto', child: Text('Auto')),
-                        DropdownMenuItem(value: 'Van', child: Text('Van')),
-                        DropdownMenuItem(value: 'Combi', child: Text('Combi')),
-                        DropdownMenuItem(value: 'Nissan Urvan', child: Text('Nissan Urvan')),
-                        DropdownMenuItem(value: 'Toyota Hiace', child: Text('Toyota Hiace')),
-                      ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _vehiculoTipo = v);
+                    const SizedBox(height: AppSpacing.sm),
+                    TextFormField(
+                      controller: _apellidoController,
+                      decoration: const InputDecoration(labelText: 'Apellido'),
+                      validator: (value) => _requiredValidator(value, 'El apellido'),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    TextFormField(
+                      controller: _dniController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'DNI', hintText: '8 dígitos'),
+                      validator: (value) {
+                        final required = _requiredValidator(value, 'El DNI');
+                        if (required != null) return required;
+                        return RegExp(r'^\d{8}$').hasMatch(value!.trim())
+                            ? null
+                            : 'El DNI debe tener 8 dígitos';
                       },
                     ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Capacidad',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  children: [4, 6, 8, 15]
-                      .map(
-                        (v) => ChoiceChip(
-                          label: Text('$v'),
-                          selected: _capacidad == v,
-                          onSelected: (_) => setState(() => _capacidad = v),
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Este vehículo quedará asignado permanentemente a este conductor.\n'
-                  'Solo el administrador puede modificarlo.',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _SectionCard(
-            title: 'Configuración de comisión',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Slider(
-                        value: _comision,
-                        min: 0,
-                        max: 30,
-                        divisions: 60,
-                        onChanged: (v) {
-                          setState(() => _comision = v);
-                          _syncComisionTextFromSlider();
-                        },
-                      ),
+                    const SizedBox(height: AppSpacing.sm),
+                    TextFormField(
+                      controller: _telefonoController,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(labelText: 'Teléfono', hintText: '9 dígitos'),
+                      validator: (value) {
+                        final required = _requiredValidator(value, 'El teléfono');
+                        if (required != null) return required;
+                        return RegExp(r'^\d{9}$').hasMatch(value!.trim())
+                            ? null
+                            : 'El teléfono debe tener 9 dígitos';
+                      },
                     ),
-                    SizedBox(
-                      width: 88,
-                      child: TextField(
-                        controller: _comisionController,
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        onChanged: (_) => _syncComisionFromText(),
-                        decoration: const InputDecoration(
-                          labelText: '%',
+                    const SizedBox(height: AppSpacing.sm),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(labelText: 'Email'),
+                      validator: (value) {
+                        final required = _requiredValidator(value, 'El email');
+                        if (required != null) return required;
+                        return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value!.trim())
+                            ? null
+                            : 'Ingresa un email válido';
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _ocultarPassword,
+                      decoration: InputDecoration(
+                        labelText: 'Contraseña',
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(() => _ocultarPassword = !_ocultarPassword),
+                          icon: Icon(
+                            _ocultarPassword
+                                ? Icons.visibility_rounded
+                                : Icons.visibility_off_rounded,
+                          ),
                         ),
                       ),
+                      validator: (value) {
+                        final required = _requiredValidator(value, 'La contraseña');
+                        if (required != null) return required;
+                        return value!.trim().length >= 8
+                            ? null
+                            : 'La contraseña debe tener al menos 8 caracteres';
+                      },
                     ),
                   ],
                 ),
-                if (!comisionOk)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      'Ingresa un valor mayor a 0 y hasta 30%',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: AppColors.error,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              _SectionCard(
+                title: 'Vehículo asignado',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (vehicles.isEmpty) ...[
+                      Text(
+                        'No hay vehículos activos sin conductor asignado.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: AppColors.textSecondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      FilledButton(
+                        onPressed: () => context.push(AppRoutes.adminVehiculosNuevo),
+                        child: const Text('Crear vehículo primero'),
+                      ),
+                    ] else ...[
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedVehicleId,
+                        decoration: const InputDecoration(labelText: 'Vehículo disponible'),
+                        items: vehicles
+                            .map(
+                              (vehicle) => DropdownMenuItem<String>(
+                                value: vehicle.id,
+                                child: Text(
+                                  '${vehicle.plate} · ${vehicle.vehicleType} · ${vehicle.capacity} asientos',
+                                ),
+                              ),
+                            )
+                            .toList(growable: false),
+                        onChanged: (value) => setState(() => _selectedVehicleId = value),
+                        validator: (value) => value == null ? 'Selecciona un vehículo' : null,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF97316),
+                  foregroundColor: AppColors.white,
+                  minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.r12),
                   ),
+                ),
+                onPressed: _guardando || vehicles.isEmpty ? null : () => _guardar(vehicles),
+                child: _guardando
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.white,
+                        ),
+                      )
+                    : const Text('Registrar conductor'),
+              ),
+            ],
+          ),
+        ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.p20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline_rounded, size: 56, color: AppColors.error),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Con ${_comision.toStringAsFixed(1)}%: si el conductor recauda S/480,\n'
-                  'su comisión será S/ ${sampleComision.toStringAsFixed(0)}',
+                  'No se pudieron cargar los vehículos disponibles.',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w900,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  '$error',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w600,
                       ),
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFF97316),
-              foregroundColor: AppColors.white,
-              minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.r12),
-              ),
-            ),
-            onPressed: (!canSubmit || _submitting) ? null : _submit,
-            child: _submitting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.white,
-                    ),
-                  )
-                : const Text('Registrar conductor'),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
 
 class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.child});
+  const _SectionCard({
+    required this.title,
+    required this.child,
+  });
 
   final String title;
   final Widget child;

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
+import '../../../roles/admin/admin_shell_screen.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -98,7 +98,6 @@ class _AdminPagosScreenState extends ConsumerState<AdminPagosScreen> with Single
 
   @override
   Widget build(BuildContext context) {
-    const appBarBg = Color(0xFF0F172A);
     const pageBg = Color(0xFFF8FAFC);
 
     final state = ref.watch(adminPagosProvider);
@@ -108,62 +107,59 @@ class _AdminPagosScreenState extends ConsumerState<AdminPagosScreen> with Single
     final pendientesCount = state.solicitudesPendientes.length;
     final banner = state.banner;
 
-    return Scaffold(
+    return AdminShellScreen(
+      currentRoute: AppRoutes.adminPagos,
+      title: 'Pagos de comisiones',
       backgroundColor: pageBg,
-      appBar: AppBar(
-        backgroundColor: appBarBg,
-        foregroundColor: AppColors.white,
-        title: const Text('Pagos de comisiones'),
-        actions: [
-          IconButton(
-            onPressed: () async {
-              final created = await controller.simularNuevaSolicitud();
-              if (!context.mounted || created == null) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  backgroundColor: const Color(0xFF0F172A),
-                  content: Text('Solicitud simulada: ${created.conductor} · S/ ${created.monto.toStringAsFixed(0)}'),
-                ),
-              );
-            },
-            icon: const Icon(Icons.bug_report_rounded),
-            tooltip: 'Simular solicitud (debug)',
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: const Color(0xFFF97316),
-          labelColor: AppColors.white,
-          unselectedLabelColor: const Color(0xFF94A3B8),
-          tabs: [
-            Tab(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('Pendientes'),
-                  if (pendientesCount > 0) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDC2626),
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                      ),
-                      child: Text(
-                        '$pendientesCount',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.white,
-                              fontWeight: FontWeight.w900,
-                            ),
-                      ),
-                    ),
-                  ],
-                ],
+      actions: [
+        IconButton(
+          onPressed: () async {
+            final created = await controller.simularNuevaSolicitud();
+            if (!context.mounted || created == null) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: const Color(0xFF0F172A),
+                content: Text('Solicitud simulada: ${created.conductor} · S/ ${created.monto.toStringAsFixed(0)}'),
               ),
-            ),
-            const Tab(text: 'Historial'),
-          ],
+            );
+          },
+          icon: const Icon(Icons.bug_report_rounded),
+          tooltip: 'Simular solicitud (debug)',
         ),
+      ],
+      appBarBottom: TabBar(
+        controller: _tabController,
+        indicatorColor: const Color(0xFFF97316),
+        labelColor: AppColors.white,
+        unselectedLabelColor: const Color(0xFF94A3B8),
+        tabs: [
+          Tab(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Pendientes'),
+                if (pendientesCount > 0) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFDC2626),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                    ),
+                    child: Text(
+                      '$pendientesCount',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.white,
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const Tab(text: 'Historial'),
+        ],
       ),
       body: Column(
         children: [
@@ -276,7 +272,6 @@ class _AdminPagosScreenState extends ConsumerState<AdminPagosScreen> with Single
           ),
         ],
       ),
-      bottomNavigationBar: const _AdminBottomNav(currentIndex: 2),
     );
   }
 }
@@ -287,60 +282,6 @@ class AdminPagosHistorialScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return const AdminPagosScreen(initialTab: 1);
-  }
-}
-
-class _AdminBottomNav extends StatelessWidget {
-  const _AdminBottomNav({required this.currentIndex});
-
-  final int currentIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    const bg = Color(0xFF0F172A);
-    const active = Color(0xFFF97316);
-    const inactive = Color(0xFF64748B);
-
-    return Container(
-      color: bg,
-      child: SafeArea(
-        top: false,
-        child: BottomNavigationBar(
-          currentIndex: currentIndex,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: bg,
-          selectedItemColor: active,
-          unselectedItemColor: inactive,
-          onTap: (i) {
-            switch (i) {
-              case 0:
-                context.go(AppRoutes.adminHome);
-                return;
-              case 1:
-                context.go(AppRoutes.adminConductores);
-                return;
-              case 2:
-                context.go(AppRoutes.adminPagos);
-                return;
-              case 3:
-                context.go(AppRoutes.adminMonitoreo);
-                return;
-              case 4:
-              default:
-                context.go(AppRoutes.adminAnalitica);
-                return;
-            }
-          },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Inicio'),
-            BottomNavigationBarItem(icon: Icon(Icons.directions_bus_rounded), label: 'Conductores'),
-            BottomNavigationBarItem(icon: Icon(Icons.attach_money_rounded), label: 'Pagos'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Monitoreo'),
-            BottomNavigationBarItem(icon: Icon(Icons.bar_chart_rounded), label: 'Analítica'),
-          ],
-        ),
-      ),
-    );
   }
 }
 

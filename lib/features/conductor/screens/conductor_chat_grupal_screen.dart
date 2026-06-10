@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -19,28 +18,50 @@ class ConductorChatGrupalScreen extends ConsumerStatefulWidget {
 
 class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalScreen> {
   late final TextEditingController _controller;
+  late final ScrollController _scrollController;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController();
+    _scrollController = ScrollController();
+    ref.listenManual<ConductorChatGrupalState>(conductorChatGrupalProvider, (previous, next) {
+      if ((previous?.messages.length ?? 0) != next.messages.length) {
+        _scrollToBottom();
+      }
+    });
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    _controller.clear();
-    await ref.read(conductorChatGrupalProvider.notifier).send(
-          senderName: MockData.conductorNombre,
-          senderPlate: MockData.conductorPlaca,
-          text: text,
-        );
+    try {
+      _controller.clear();
+      await ref.read(conductorChatGrupalProvider.notifier).send(text: text);
+    } catch (error) {
+      if (!mounted) return;
+      _controller.text = text;
+      _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+      AppSnackbars.error(context, error.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   @override
@@ -98,20 +119,12 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
         title: Row(
           children: [
             const Expanded(child: Text('Chat grupal (Admin + conductores)')),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E40AF).withAlpha(26),
-                borderRadius: BorderRadius.circular(AppRadius.pill),
+            if (state.isLoading)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-              child: Text(
-                '${state.online.length} online',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF1E40AF),
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-            ),
           ],
         ),
       ),
@@ -138,18 +151,33 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
             ),
           ),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(AppSpacing.p20),
-              itemCount: messages.length,
-              itemBuilder: (context, index) {
-                final m = messages[index];
-                final isMe = m.senderPlate == MockData.conductorPlaca;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: _GroupBubble(message: m, isMe: isMe),
-                );
-              },
-            ),
+            child: state.errorMessage != null && messages.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.p20),
+                      child: Text(
+                        state.errorMessage!,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: AppColors.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(AppSpacing.p20),
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) {
+                      final m = messages[index];
+                      final isMe = m.senderId == state.currentUserId;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: _GroupBubble(message: m, isMe: isMe),
+                      );
+                    },
+                  ),
           ),
           SafeArea(
             top: false,
@@ -222,7 +250,7 @@ class _GroupBubble extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  '${message.senderName} (${message.senderPlate})',
+                  '${message.senderName} · ${message.senderRole}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,

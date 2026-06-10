@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
+import '../../../roles/admin/admin_shell_screen.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -45,12 +46,10 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
   }
 
   Future<void> _loadIcons() async {
-    print('>>> Cargando íconos...');
     final disponible = await _combiMarker(const Color(0xFF16A34A));
     final enRuta = await _combiMarker(const Color(0xFF2563EB));
     final activo = await _combiMarker(const Color(0xFFF97316));
     final inactivo = await _combiMarker(const Color(0xFF94A3B8));
-    print('>>> Íconos cargados correctamente');
     if (!mounted) return;
     setState(() {
       _iconDisponible = disponible;
@@ -129,20 +128,15 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
   @override
   Widget build(BuildContext context) {
     const pageBg = Color(0xFFF8FAFC);
-    const appBarBg = Color(0xFF0F172A);
-
     final state = ref.watch(adminMonitoreoProvider);
     final vehiculos = state.vehiculosActivos;
     final activosCount = vehiculos.where((v) => v.estado != AdminVehiculoEstado.inactivo).length;
 
     if (kIsWeb) {
-      return Scaffold(
+      return AdminShellScreen(
+        currentRoute: AppRoutes.adminMonitoreo,
+        title: 'Monitoreo de flota',
         backgroundColor: pageBg,
-        appBar: AppBar(
-          backgroundColor: appBarBg,
-          foregroundColor: AppColors.white,
-          title: const Text('Monitoreo de flota'),
-        ),
         body: Column(
           children: [
             Container(
@@ -185,7 +179,6 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
             ),
           ],
         ),
-        bottomNavigationBar: const _AdminBottomNav(currentIndex: 3),
       );
     }
 
@@ -202,13 +195,10 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
       );
     }
 
-    return Scaffold(
+    return AdminShellScreen(
+      currentRoute: AppRoutes.adminMonitoreo,
+      title: 'Monitoreo de flota',
       backgroundColor: pageBg,
-      appBar: AppBar(
-        backgroundColor: appBarBg,
-        foregroundColor: AppColors.white,
-        title: const Text('Monitoreo de flota'),
-      ),
       body: Stack(
         children: [
           GoogleMap(
@@ -296,7 +286,6 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: const _AdminBottomNav(currentIndex: 3),
     );
   }
 }
@@ -640,56 +629,3 @@ Future<BitmapDescriptor> _combiMarker(Color color) async {
   return BitmapDescriptor.bytes(data!.buffer.asUint8List());
 }
 
-class _AdminBottomNav extends StatelessWidget {
-  const _AdminBottomNav({required this.currentIndex});
-
-  final int currentIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    const bg = Color(0xFF0F172A);
-    const active = Color(0xFFF97316);
-    const inactive = Color(0xFF64748B);
-
-    return Container(
-      color: bg,
-      child: SafeArea(
-        top: false,
-        child: BottomNavigationBar(
-          currentIndex: currentIndex,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: bg,
-          selectedItemColor: active,
-          unselectedItemColor: inactive,
-          onTap: (i) {
-            switch (i) {
-              case 0:
-                context.go(AppRoutes.adminHome);
-                return;
-              case 1:
-                context.go(AppRoutes.adminConductores);
-                return;
-              case 2:
-                context.go(AppRoutes.adminPagos);
-                return;
-              case 3:
-                context.go(AppRoutes.adminMonitoreo);
-                return;
-              case 4:
-              default:
-                context.go(AppRoutes.adminAnalitica);
-                return;
-            }
-          },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Inicio'),
-            BottomNavigationBarItem(icon: Icon(Icons.directions_bus_rounded), label: 'Conductores'),
-            BottomNavigationBarItem(icon: Icon(Icons.attach_money_rounded), label: 'Pagos'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Monitoreo'),
-            BottomNavigationBarItem(icon: Icon(Icons.bar_chart_rounded), label: 'Analítica'),
-          ],
-        ),
-      ),
-    );
-  }
-}

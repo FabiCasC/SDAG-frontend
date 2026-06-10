@@ -842,6 +842,7 @@ enum MockAdminConductorEstado {
 class MockAdminConductor {
   const MockAdminConductor({
     required this.id,
+    this.driverRecordId,
     required this.nombres,
     required this.apellidos,
     required this.dni,
@@ -860,6 +861,7 @@ class MockAdminConductor {
   });
 
   final String id;
+  final String? driverRecordId;
   final String nombres;
   final String apellidos;
   final String dni;
@@ -879,6 +881,7 @@ class MockAdminConductor {
   String get nombreCompleto => '$nombres $apellidos';
 
   MockAdminConductor copyWith({
+    String? driverRecordId,
     String? nombres,
     String? apellidos,
     String? dni,
@@ -897,6 +900,7 @@ class MockAdminConductor {
   }) {
     return MockAdminConductor(
       id: id,
+      driverRecordId: driverRecordId ?? this.driverRecordId,
       nombres: nombres ?? this.nombres,
       apellidos: apellidos ?? this.apellidos,
       dni: dni ?? this.dni,

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../core/mock/mock_data.dart';
+import '../../../roles/admin/admin_shell_screen.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -14,27 +15,23 @@ class AdminConductoresScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    const appBarBg = Color(0xFF0F172A);
     const bg = Color(0xFFF8FAFC);
 
     final state = ref.watch(adminConductoresProvider);
     final controller = ref.read(adminConductoresProvider.notifier);
     final items = state.listaFiltrada;
 
-    return Scaffold(
+    return AdminShellScreen(
+      currentRoute: AppRoutes.adminConductores,
+      title: 'Conductores',
       backgroundColor: bg,
-      appBar: AppBar(
-        backgroundColor: appBarBg,
-        foregroundColor: AppColors.white,
-        title: const Text('Conductores'),
-        actions: [
-          IconButton(
-            onPressed: () => context.push(AppRoutes.adminConductoresNuevo),
-            icon: const Icon(Icons.add_rounded, color: Color(0xFFF97316)),
-            tooltip: 'Nuevo conductor',
-          ),
-        ],
-      ),
+      actions: [
+        IconButton(
+          onPressed: () => context.push(AppRoutes.adminConductoresNuevo),
+          icon: const Icon(Icons.add_rounded),
+          tooltip: 'Nuevo conductor',
+        ),
+      ],
       body: Column(
         children: [
           Padding(
@@ -80,7 +77,7 @@ class AdminConductoresScreen extends ConsumerWidget {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   backgroundColor: AppColors.success,
-                                  content: Text('Conductor desactivado'),
+                                  content: Text('Conductor desactivado correctamente'),
                                 ),
                               );
                             } catch (_) {
@@ -100,7 +97,7 @@ class AdminConductoresScreen extends ConsumerWidget {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   backgroundColor: AppColors.success,
-                                  content: Text('Conductor reactivado'),
+                                  content: Text('Conductor activado correctamente'),
                                 ),
                               );
                             } catch (_) {
@@ -119,61 +116,6 @@ class AdminConductoresScreen extends ConsumerWidget {
                   ),
           ),
         ],
-      ),
-      bottomNavigationBar: const _AdminBottomNav(currentIndex: 1),
-    );
-  }
-}
-
-class _AdminBottomNav extends StatelessWidget {
-  const _AdminBottomNav({required this.currentIndex});
-
-  final int currentIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    const bg = Color(0xFF0F172A);
-    const active = Color(0xFFF97316);
-    const inactive = Color(0xFF64748B);
-
-    return Container(
-      color: bg,
-      child: SafeArea(
-        top: false,
-        child: BottomNavigationBar(
-          currentIndex: currentIndex,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: bg,
-          selectedItemColor: active,
-          unselectedItemColor: inactive,
-          onTap: (i) {
-            switch (i) {
-              case 0:
-                context.go(AppRoutes.adminHome);
-                return;
-              case 1:
-                context.go(AppRoutes.adminConductores);
-                return;
-              case 2:
-                context.go(AppRoutes.adminPagos);
-                return;
-              case 3:
-                context.go(AppRoutes.adminMonitoreo);
-                return;
-              case 4:
-              default:
-                context.go(AppRoutes.adminAnalitica);
-                return;
-            }
-          },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Inicio'),
-            BottomNavigationBarItem(icon: Icon(Icons.directions_bus_rounded), label: 'Conductores'),
-            BottomNavigationBarItem(icon: Icon(Icons.attach_money_rounded), label: 'Pagos'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Monitoreo'),
-            BottomNavigationBarItem(icon: Icon(Icons.bar_chart_rounded), label: 'Analítica'),
-          ],
-        ),
       ),
     );
   }
@@ -379,6 +321,27 @@ class _ConductorCard extends StatelessWidget {
                   },
                 ),
               ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Align(
+              alignment: Alignment.centerRight,
+              child: conductor.estado == MockAdminConductorEstado.inactivo
+                  ? FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF16A34A),
+                        foregroundColor: AppColors.white,
+                      ),
+                      onPressed: onReactivar,
+                      child: const Text('Activar'),
+                    )
+                  : OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFDC2626),
+                        side: const BorderSide(color: Color(0xFFDC2626)),
+                      ),
+                      onPressed: onDesactivar,
+                      child: const Text('Desactivar'),
+                    ),
             ),
           ],
         ),

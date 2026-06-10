@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../core/mock/mock_data.dart';
+import '../../../roles/admin/admin_shell_screen.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -57,8 +58,17 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
     final fleetItems = _buildFleet(monitoreo.vehiculosActivos);
     final conductoresActivos = fleetItems.where((e) => e.status != _FleetStatus.inactivo).length;
 
-    return Scaffold(
+    return AdminShellScreen(
+      currentRoute: AppRoutes.adminHome,
+      title: 'Panel de administración',
       backgroundColor: pageBg,
+      actions: [
+        IconButton(
+          onPressed: () => context.push(AppRoutes.adminPerfil),
+          icon: const Icon(Icons.person_rounded),
+          tooltip: 'Perfil',
+        ),
+      ],
       body: SingleChildScrollView(
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -89,23 +99,6 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                const Spacer(),
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: AppColors.white.withAlpha(28),
-                                    borderRadius: BorderRadius.circular(AppRadius.r16),
-                                    border: Border.all(color: AppColors.white.withAlpha(46)),
-                                  ),
-                                  child: IconButton(
-                                    onPressed: () => context.push(AppRoutes.adminPerfil),
-                                    icon: const Icon(Icons.person_rounded, color: AppColors.white),
-                                    tooltip: 'Perfil',
-                                  ),
-                                ),
-                              ],
-                            ),
                             const SizedBox(height: 6),
                             Text(
                               'Panel de administración',
@@ -154,12 +147,12 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                      _QuickSummaryGrid(
-                        viajesHoy: stats.viajesCompletados,
-                        ingresosHoy: stats.ingresosTotales,
-                        ocupacionPromedio: stats.ocupacionPromedio,
-                        conductoresActivos: conductoresActivos,
-                      ),
+                        _QuickSummaryGrid(
+                          viajesHoy: stats.viajesCompletados,
+                          ingresosHoy: stats.ingresosTotales,
+                          ocupacionPromedio: stats.ocupacionPromedio,
+                          conductoresActivos: conductoresActivos,
+                        ),
                         const SizedBox(height: AppSpacing.lg),
                         _PagosPendientesSection(
                           solicitudes: pagos.solicitudesPendientes,
@@ -187,7 +180,6 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: const _AdminBottomNav(currentIndex: 0),
     );
   }
 
@@ -211,60 +203,6 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
   }
 }
 
-class _AdminBottomNav extends StatelessWidget {
-  const _AdminBottomNav({required this.currentIndex});
-
-  final int currentIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    const bg = Color(0xFF0F172A);
-    const active = Color(0xFFF97316);
-    const inactive = Color(0xFF64748B);
-
-    return Container(
-      color: bg,
-      child: SafeArea(
-        top: false,
-        child: BottomNavigationBar(
-          currentIndex: currentIndex,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: bg,
-          selectedItemColor: active,
-          unselectedItemColor: inactive,
-          onTap: (i) {
-            switch (i) {
-              case 0:
-                context.go(AppRoutes.adminHome);
-                return;
-              case 1:
-                context.go(AppRoutes.adminConductores);
-                return;
-              case 2:
-                context.go(AppRoutes.adminPagos);
-                return;
-              case 3:
-                context.go(AppRoutes.adminMonitoreo);
-                return;
-              case 4:
-              default:
-                context.go(AppRoutes.adminAnalitica);
-                return;
-            }
-          },
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Inicio'),
-            BottomNavigationBarItem(icon: Icon(Icons.directions_bus_rounded), label: 'Conductores'),
-            BottomNavigationBarItem(icon: Icon(Icons.attach_money_rounded), label: 'Pagos'),
-            BottomNavigationBarItem(icon: Icon(Icons.map_rounded), label: 'Monitoreo'),
-            BottomNavigationBarItem(icon: Icon(Icons.bar_chart_rounded), label: 'Analítica'),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _QuickSummaryGrid extends StatelessWidget {
   const _QuickSummaryGrid({
     required this.viajesHoy,
@@ -280,42 +218,48 @@ class _QuickSummaryGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
-      crossAxisSpacing: AppSpacing.sm,
-      mainAxisSpacing: AppSpacing.sm,
+    final items = [
+      _SummaryCard(
+        title: 'Viajes hoy',
+        subtitle: 'viajes completados hoy',
+        value: '$viajesHoy',
+        color: const Color(0xFF2563EB),
+        icon: Icons.directions_bus_rounded,
+      ),
+      _SummaryCard(
+        title: 'Ingresos hoy',
+        subtitle: 'recaudado hoy',
+        value: 'S/ ${_formatNumber(ingresosHoy.round())}',
+        color: const Color(0xFF16A34A),
+        icon: Icons.attach_money_rounded,
+      ),
+      _SummaryCard(
+        title: 'Ocupación',
+        subtitle: 'promedio de asientos',
+        value: '${(ocupacionPromedio * 100).round()}%',
+        color: const Color(0xFFF97316),
+        icon: Icons.people_rounded,
+      ),
+      _SummaryCard(
+        title: 'Conductores activos',
+        subtitle: 'conductores en operación',
+        value: '$conductoresActivos',
+        color: const Color(0xFF9333EA),
+        icon: Icons.person_pin_rounded,
+      ),
+    ];
+
+    return GridView.builder(
+      itemCount: items.length,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      children: [
-        _SummaryCard(
-          title: 'Viajes hoy',
-          subtitle: 'viajes completados hoy',
-          value: '$viajesHoy',
-          color: const Color(0xFF2563EB),
-          icon: Icons.directions_bus_rounded,
-        ),
-        _SummaryCard(
-          title: 'Ingresos hoy',
-          subtitle: 'recaudado hoy',
-          value: 'S/ ${_formatNumber(ingresosHoy.round())}',
-          color: const Color(0xFF16A34A),
-          icon: Icons.attach_money_rounded,
-        ),
-        _SummaryCard(
-          title: 'Ocupación',
-          subtitle: 'promedio de asientos',
-          value: '${(ocupacionPromedio * 100).round()}%',
-          color: const Color(0xFFF97316),
-          icon: Icons.people_rounded,
-        ),
-        _SummaryCard(
-          title: 'Conductores activos',
-          subtitle: 'conductores en operación',
-          value: '$conductoresActivos',
-          color: const Color(0xFF9333EA),
-          icon: Icons.person_pin_rounded,
-        ),
-      ],
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: AppSpacing.sm,
+        mainAxisSpacing: AppSpacing.sm,
+        mainAxisExtent: 120,
+      ),
+      itemBuilder: (context, index) => items[index],
     );
   }
 }
@@ -366,32 +310,38 @@ class _SummaryCard extends StatelessWidget {
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           title,
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: AppColors.textPrimary,
                                 fontWeight: FontWeight.w800,
+                                fontSize: 13,
                               ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: AppSpacing.xs),
+                        const SizedBox(height: 4),
                         Text(
                           value,
                           style: Theme.of(context).textTheme.displaySmall?.copyWith(
                                 color: color,
                                 fontWeight: FontWeight.w900,
-                                fontSize: 36,
+                                fontSize: 24,
                                 height: 1.0,
                               ),
                         ),
-                        const SizedBox(height: AppSpacing.xs),
+                        const SizedBox(height: 4),
                         Text(
                           subtitle,
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 color: const Color(0xFF62748E),
-                                fontSize: 12,
+                                fontSize: 11,
                                 fontWeight: FontWeight.w500,
                               ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),

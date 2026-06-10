@@ -4,9 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../core/mock/mock_data.dart';
-import 'admin_conductores_provider.dart';
-
 enum AdminVehiculoEstado {
   disponible,
   enRuta,

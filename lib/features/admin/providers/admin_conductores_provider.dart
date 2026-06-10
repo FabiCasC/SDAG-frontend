@@ -73,8 +73,9 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
         final p = d['profiles'] as Map<String, dynamic>?;
         if (p == null) continue;
 
+        final driverId = d['id']?.toString();
         final pid = d['profile_id']?.toString();
-        if (pid == null) continue;
+        if (pid == null || driverId == null) continue;
 
         final nombres = p['first_name']?.toString() ?? '';
         final apellidos = p['last_name']?.toString() ?? '';
@@ -102,6 +103,7 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
         conductores.add(
           MockAdminConductor(
             id: pid,
+            driverRecordId: driverId,
             nombres: nombres.isEmpty ? '—' : nombres,
             apellidos: apellidos.isEmpty ? '—' : apellidos,
             dni: dni,
@@ -337,16 +339,32 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     final current = getById(id);
     if (current == null) return;
     if (current.estado == MockAdminConductorEstado.inactivo) return;
-    await Supabase.instance.client.from('drivers').update({'cuenta_activa': false}).eq('profile_id', id);
-    await _loadFromSupabase();
+    final driverId = current.driverRecordId;
+    if (driverId == null || driverId.isEmpty) return;
+
+    await Supabase.instance.client.from('drivers').update({'cuenta_activa': false}).eq('id', driverId);
+    _replaceConductor(
+      current.copyWith(
+        estado: MockAdminConductorEstado.inactivo,
+      ),
+    );
   }
 
   Future<void> reactivarConductor(String id) async {
     final current = getById(id);
     if (current == null) return;
     if (current.estado != MockAdminConductorEstado.inactivo) return;
-    await Supabase.instance.client.from('drivers').update({'cuenta_activa': true}).eq('profile_id', id);
-    await _loadFromSupabase();
+    final driverId = current.driverRecordId;
+    if (driverId == null || driverId.isEmpty) return;
+
+    await Supabase.instance.client.from('drivers').update({'cuenta_activa': true}).eq('id', driverId);
+    _replaceConductor(
+      current.copyWith(
+        estado: current.bloqueadoPorPago
+            ? MockAdminConductorEstado.bloqueado
+            : MockAdminConductorEstado.disponible,
+      ),
+    );
   }
 
   Future<void> desbloquearConductor(String id) async {
@@ -394,6 +412,14 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
       if (v.id == viajeId) return v;
     }
     return null;
+  }
+
+  void _replaceConductor(MockAdminConductor updated) {
+    final next = [
+      for (final conductor in state.listaConductores)
+        if (conductor.id == updated.id) updated else conductor,
+    ];
+    state = _copyWith(listaConductores: next);
   }
 
   AdminConductoresState _copyWith({

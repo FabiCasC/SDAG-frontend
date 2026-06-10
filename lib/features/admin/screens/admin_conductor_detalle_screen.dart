@@ -111,7 +111,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         backgroundColor: AppColors.success,
-        content: Text('Conductor desactivado'),
+        content: Text('Conductor desactivado correctamente'),
       ),
     );
   }
@@ -145,7 +145,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         backgroundColor: AppColors.success,
-        content: Text('Conductor reactivado'),
+        content: Text('Conductor activado correctamente'),
       ),
     );
   }
@@ -432,7 +432,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.r12)),
                     ),
                     onPressed: () => _confirmDesactivar(conductor),
-                    child: const Text('Desactivar conductor'),
+                    child: const Text('Desactivar'),
                   ),
                 if (showReactivate)
                   FilledButton(
@@ -443,7 +443,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.r12)),
                     ),
                     onPressed: () => _confirmReactivar(conductor),
-                    child: const Text('Reactivar conductor'),
+                    child: const Text('Activar'),
                   ),
               ],
             ),

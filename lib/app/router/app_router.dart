@@ -5,7 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'dart:async';
 
-import '../../roles/admin/admin_shell_screen.dart';
 import '../../roles/passenger/passenger_shell_screen.dart';
 import '../../roles/passenger/screens/profile/payment_methods_screen.dart';
 import '../../features/busqueda/screens/busqueda_screen.dart';
@@ -45,6 +44,8 @@ import '../../features/admin/screens/admin_conductor_detalle_screen.dart';
 import '../../features/admin/screens/admin_conductor_editar_screen.dart';
 import '../../features/admin/screens/admin_conductores_screen.dart';
 import '../../features/admin/screens/admin_configuracion_screen.dart';
+import '../../features/admin/screens/admin_vehiculo_crear_screen.dart';
+import '../../features/admin/screens/admin_vehiculos_screen.dart';
 import '../../features/admin/screens/admin_historial_viajes_screen.dart';
 import '../../features/admin/screens/admin_home_screen.dart';
 import '../../features/admin/screens/admin_bloqueado_screen.dart';
@@ -327,6 +328,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: AppRoutes.adminVehiculos,
+        builder: (context, state) => const AdminVehiculosScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.adminVehiculosNuevo,
+        builder: (context, state) => const AdminVehiculoCrearScreen(),
+      ),
+      GoRoute(
         path: AppRoutes.adminPagos,
         builder: (context, state) => const AdminPagosScreen(),
       ),
@@ -380,13 +389,11 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.adminFleet,
-        builder: (context, state) =>
-            AdminShellScreen(initialRoute: state.uri.path),
+        redirect: (context, state) => AppRoutes.adminConductores,
       ),
       GoRoute(
         path: AppRoutes.adminSettings,
-        builder: (context, state) =>
-            AdminShellScreen(initialRoute: state.uri.path),
+        redirect: (context, state) => AppRoutes.adminConfiguracion,
       ),
     ],
     redirect: (context, state) {
