@@ -45,8 +45,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       AppSnackbars.error(context, error);
       return;
     }
-    await ref.read(adminAuthProvider.notifier).logout();
-    await ref.read(conductorAuthProvider.notifier).logout();
     if (!mounted) return;
     context.go(AppRoutes.passengerHome);
   }
@@ -69,8 +67,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       switch (result) {
         case AdminLoginResult.ok:
-          ref.read(passengerSessionProvider.notifier).logout();
-          await ref.read(conductorAuthProvider.notifier).logout();
           if (!mounted) return;
           context.go(AppRoutes.adminHome);
           return;
@@ -91,8 +87,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       switch (result) {
         case ConductorLoginResult.ok:
-          ref.read(passengerSessionProvider.notifier).logout();
-          await ref.read(adminAuthProvider.notifier).logout();
           if (!mounted) return;
           context.go(AppRoutes.driverHome);
           return;
