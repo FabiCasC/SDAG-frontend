@@ -192,23 +192,20 @@ class ConductorTripChatController extends StateNotifier<ConductorTripChatState> 
     return out;
   }
 
-  Future<void> sendMessage(String text) async {
-    final value = text.trim();
-    if (value.isEmpty || _invalid) return;
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
+ Future<void> sendMessage(String text) async {
+  final value = text.trim();
+  if (value.isEmpty || _invalid) return;
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) return;
 
-    await Supabase.instance.client.from('trip_messages').insert({
-      'trip_id': tripId,
-      'passenger_id': passengerProfileId,
-      'sender_id': user.id,
-      'sender_profile_id': user.id,
-      'message': value,
-      'body': value,
-      'sender_role': 'driver',
-      'message_type': 'normal',
-    });
-  }
+  await Supabase.instance.client.from('trip_messages').insert({
+    'trip_id': tripId,
+    'passenger_id': passengerProfileId,
+    'sender_id': user.id,
+    'message': value,
+    'sender_role': 'driver',
+  });
+}
 
   Future<void> sendAlternativePickup(String text) async {
     final v = text.trim();
