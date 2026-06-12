@@ -154,6 +154,8 @@ class _ConductorGestionMapCardState extends State<ConductorGestionMapCard> {
               onMapCreated: _inicializarMapa,
               scrollGesturesEnabled: true,
               zoomGesturesEnabled: true,
+              tiltGesturesEnabled: true,
+              rotateGesturesEnabled: true,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
               initialCameraPosition: const CameraPosition(
@@ -171,7 +173,7 @@ class _ConductorGestionMapCardState extends State<ConductorGestionMapCard> {
                       ),
                     }
                   : const {},
-              zoomControlsEnabled: false,
+              zoomControlsEnabled: true,
             ),
             if (_loading)
               const Positioned.fill(

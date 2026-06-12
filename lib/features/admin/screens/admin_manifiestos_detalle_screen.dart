@@ -12,7 +12,7 @@ final adminManifestEntriesProvider =
     FutureProvider.family<List<AdminManifestEntry>, String>((ref, manifestId) async {
   final entries = await Supabase.instance.client
       .from('manifest_entries')
-      .select('seat_number, first_name, last_name, dni, phone, pickup_text, boarding')
+      .select('seat_number, first_name, last_name, dni, phone, pickup_text, boarding_status')
       .eq('manifest_id', manifestId)
       .order('seat_number');
 
@@ -23,7 +23,7 @@ final adminManifestEntriesProvider =
         id: raw['seat_number']?.toString() ?? '',
         seatNumber: int.tryParse(raw['seat_number']?.toString() ?? '') ?? 0,
         pickupText: raw['pickup_text']?.toString() ?? '',
-        boarding: raw['boarding']?.toString() ?? 'pendiente',
+        boarding: raw['boarding_status']?.toString() ?? 'pendiente',
         firstName: raw['first_name']?.toString() ?? '',
         lastName: raw['last_name']?.toString() ?? '',
         dni: raw['dni']?.toString() ?? '—',

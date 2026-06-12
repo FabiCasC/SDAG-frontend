@@ -14,6 +14,7 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/maps/google_eta_service.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/viaje_provider.dart';
 import 'punto_alternativo_screen.dart';
@@ -237,9 +238,15 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
 
     final statusChip = _StatusChip(status: viaje.status);
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go(AppRoutes.passengerHome);
+      },
+      child: Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.passengerHome),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -400,6 +407,7 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 
@@ -422,8 +430,10 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
     final confirmado = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('¿Confirmar bajada?'),
-        content: const Text('¿Confirmas que ya llegaste a tu destino?'),
+        title: const Text('Bajada anticipada'),
+        content: const Text(
+          'Te estás bajando antes de tiempo.\n\n¡Muchas gracias por viajar con nosotros!',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -431,7 +441,7 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Sí, me bajo aquí'),
+            child: const Text('Confirmar bajada'),
           ),
         ],
       ),
@@ -444,7 +454,6 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
 
     final reserva = ref.read(reservaProvider);
     final reservaId = reserva.reservaId;
-    final driverId = reserva.conductorSeleccionado?.driverId;
 
     if (reservaId == null || reservaId.isEmpty) {
       if (!mounted) return;
@@ -465,15 +474,15 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
 
       final manifestEntries = await Supabase.instance.client
           .from('manifest_entries')
-          .select('id, boarding')
+          .select('id, boarding_status')
           .eq('reservation_id', reservaId);
 
       for (final raw in (manifestEntries as List).cast<Map<String, dynamic>>()) {
-        final boarding = raw['boarding']?.toString() ?? raw['boarding_status']?.toString();
+        final boarding = raw['boarding_status']?.toString();
         if (boarding == 'abordo') continue;
         await Supabase.instance.client
             .from('manifest_entries')
-            .update({'boarding': 'no_abordo'})
+            .update({'boarding_status': 'no_abordo'})
             .eq('id', raw['id']);
       }
 
@@ -481,8 +490,7 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
       ref.invalidate(viajeProvider);
 
       if (!mounted) return;
-      final ratingDriverId = driverId ?? '';
-      context.go('${AppRoutes.passengerCalificacion}?tripId=$reservaId&driverId=$ratingDriverId');
+      context.go(AppRoutes.passengerHome);
     } catch (_) {
       if (!mounted) return;
       AppSnackbars.error(context, 'No se pudo completar el viaje');

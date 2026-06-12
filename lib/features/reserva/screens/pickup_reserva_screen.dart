@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,7 +11,6 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/maps/google_places_service.dart';
-import '../../../shared/maps/widgets/places_address_search_field.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
 
@@ -32,8 +29,9 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
   GoogleMapController? _mapController;
   bool _loadingContext = true;
   bool _resolvingGeo = false;
-  bool _ignoreAddressEvents = false;
+  bool _buscando = false;
 
+  List<PlacePrediction> _sugerencias = [];
   String? _puntoSeleccionado;
   LatLng? _coordenadasSeleccionadas;
 
@@ -70,8 +68,9 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
   bool get _canContinue =>
       !_loadingContext &&
       !_resolvingGeo &&
+      !_buscando &&
       _puntoSeleccionado != null &&
-      _puntoSeleccionado!.trim().length >= 3 &&
+      _puntoSeleccionado!.trim().isNotEmpty &&
       _coordenadasSeleccionadas != null;
 
   Set<Marker> get _markers {
@@ -81,6 +80,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       Marker(
         markerId: const MarkerId('pickup'),
         position: coords,
+        infoWindow: InfoWindow(title: _puntoSeleccionado ?? 'Punto de recojo'),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
       ),
     };
@@ -88,33 +88,29 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
 
   void _clearSelection() {
     setState(() {
+      _addressController.clear();
       _puntoSeleccionado = null;
       _coordenadasSeleccionadas = null;
+      _sugerencias = [];
     });
   }
 
-  void _onAddressEdited() {
-    if (_ignoreAddressEvents) return;
-    _clearSelection();
-  }
-
-  Future<void> _applyMapSelection({
+  Future<void> _applySelection({
     required String address,
     required LatLng coords,
   }) async {
-    _ignoreAddressEvents = true;
-    _addressController.text = address;
-    _ignoreAddressEvents = false;
-
     setState(() {
+      _addressController.text = address;
       _puntoSeleccionado = address;
       _coordenadasSeleccionadas = coords;
+      _sugerencias = [];
       _resolvingGeo = false;
+      _buscando = false;
     });
 
     final controller = _mapController;
     if (controller != null) {
-      await controller.animateCamera(CameraUpdate.newLatLngZoom(coords, 15));
+      await controller.animateCamera(CameraUpdate.newLatLngZoom(coords, 16));
     }
   }
 
@@ -135,40 +131,75 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       setState(() => _resolvingGeo = false);
       AppSnackbars.warning(
         context,
-        'No se pudo ubicar la dirección en el mapa. Elige una sugerencia o toca el mapa.',
+        'No se pudo ubicar la dirección en el mapa. Elige una sugerencia de la lista.',
       );
       return;
     }
 
-    await _applyMapSelection(address: trimmed, coords: position);
+    await _applySelection(address: trimmed, coords: position);
   }
 
-  Future<void> _onPlaceChosen(PlacePrediction prediction, String displayText) async {
-    final address = displayText.trim();
-    final coords = await GooglePlacesService.latLngForPlaceId(prediction.placeId);
-    if (!mounted) return;
-    if (coords == null) {
-      await _confirmAddress(address);
-      return;
-    }
-    await _applyMapSelection(address: address, coords: coords);
-  }
-
-  Future<void> _onMapTap(LatLng coords) async {
+  Future<void> _onSuggestionTap(PlacePrediction prediction) async {
+    final seleccionado = prediction.description;
     setState(() {
+      _addressController.text = seleccionado;
+      _sugerencias = [];
+      _puntoSeleccionado = seleccionado;
+      _buscando = true;
       _resolvingGeo = true;
-      _puntoSeleccionado = null;
-      _coordenadasSeleccionadas = null;
     });
 
-    final address = await GooglePlacesService.reverseGeocode(coords.latitude, coords.longitude);
-    if (!mounted) return;
+    try {
+      var coords = await GooglePlacesService.latLngForPlaceId(prediction.placeId);
+      coords ??= await GooglePlacesService.geocodeAddress(seleccionado);
+      if (!mounted) return;
 
-    final resolved = (address != null && address.trim().isNotEmpty)
-        ? address.trim()
-        : '${coords.latitude.toStringAsFixed(5)}, ${coords.longitude.toStringAsFixed(5)}';
+      if (coords == null) {
+        setState(() {
+          _buscando = false;
+          _resolvingGeo = false;
+          _puntoSeleccionado = null;
+        });
+        AppSnackbars.warning(context, 'No se pudo obtener la ubicación. Intenta otra dirección.');
+        return;
+      }
 
-    await _applyMapSelection(address: resolved, coords: coords);
+      await _applySelection(address: seleccionado, coords: coords);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _buscando = false;
+          _resolvingGeo = false;
+          _puntoSeleccionado = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _onAddressChanged(String value) async {
+    if (value.trim() != (_puntoSeleccionado ?? '').trim()) {
+      setState(() {
+        _puntoSeleccionado = null;
+        _coordenadasSeleccionadas = null;
+      });
+    }
+
+    if (value.length < 3) {
+      setState(() => _sugerencias = []);
+      return;
+    }
+
+    setState(() => _buscando = true);
+    try {
+      final predictions = await GooglePlacesService.autocomplete(value);
+      if (!mounted) return;
+      setState(() {
+        _sugerencias = predictions.take(5).toList();
+        _buscando = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _buscando = false);
+    }
   }
 
   Future<void> _loadContextForTrip(String tripId) async {
@@ -242,7 +273,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
 
     if (current != null && current.isNotEmpty) {
       if (lat != null && lng != null) {
-        await _applyMapSelection(address: current, coords: LatLng(lat, lng));
+        await _applySelection(address: current, coords: LatLng(lat, lng));
         return;
       }
       await _confirmAddress(current);
@@ -260,7 +291,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
   Future<void> _onContinue() async {
     if (!_canContinue) {
       if (!mounted) return;
-      AppSnackbars.error(context, 'Por favor selecciona un punto de recojo en el mapa o en las sugerencias.');
+      AppSnackbars.error(context, 'Por favor selecciona un punto de recojo en las sugerencias.');
       return;
     }
 
@@ -302,6 +333,98 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     });
   }
 
+  Widget _buildSearchField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _addressController,
+          decoration: InputDecoration(
+            labelText: '¿Dónde te recogemos?',
+            hintText: 'Escribe tu dirección o referencia...',
+            prefixIcon: const Icon(Icons.location_on_rounded),
+            suffixIcon: _buscando || _resolvingGeo
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : _puntoSeleccionado != null
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: _clearSelection,
+                      )
+                    : null,
+          ),
+          onChanged: (value) => unawaited(_onAddressChanged(value)),
+        ),
+        if (_sugerencias.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: AppSpacing.xs),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _sugerencias.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final prediction = _sugerencias[index];
+                return ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.location_on_outlined, size: 20),
+                  title: Text(
+                    prediction.description,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  onTap: () => unawaited(_onSuggestionTap(prediction)),
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildQuickPickups(String selected) {
+    if (_preferredFromProfile.isEmpty && _routePickupAddresses.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          if (_preferredFromProfile.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.sm),
+              child: ChoiceChip(
+                label: Text(_preferredFromProfile, overflow: TextOverflow.ellipsis),
+                selected: selected == _preferredFromProfile,
+                onSelected: (_) => unawaited(_confirmAddress(_preferredFromProfile)),
+              ),
+            ),
+          ..._routePickupAddresses.map((p) {
+            return Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.sm),
+              child: ChoiceChip(
+                label: Text(p, overflow: TextOverflow.ellipsis),
+                selected: selected == p,
+                onSelected: (_) => unawaited(_confirmAddress(p)),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final driver = ref.watch(reservaProvider).conductorSeleccionado;
@@ -323,159 +446,68 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  AppCard(
-                    child: Padding(
-                      padding: const EdgeInsets.all(AppSpacing.md),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Ruta del conductor',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: AppColors.textPrimary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                          const SizedBox(height: AppSpacing.xs),
-                          Text(
-                            driver.routeLabel,
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                  color: AppColors.textSecondary,
-                                ),
-                          ),
-                        ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  driver.routeLabel,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textSecondary,
                       ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                if (_loadingContext) const LinearProgressIndicator(),
+                if (_contextError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                    child: Text(
+                      'No se pudieron cargar los puntos de ruta: $_contextError',
+                      style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.lg),
-                  if (_loadingContext) const LinearProgressIndicator(),
-                  if (_resolvingGeo) const LinearProgressIndicator(),
-                  if (_contextError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                      child: Text(
-                        'No se pudieron cargar los puntos de ruta: $_contextError',
-                        style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-                      ),
-                    ),
-                  PlacesAddressSearchField(
-                    controller: _addressController,
-                    label: '¿Dónde te recogemos?',
-                    hint: 'Escribe tu dirección...',
-                    prefixIcon: Icons.location_on_rounded,
-                    onTextEdited: _onAddressEdited,
-                    onAddressResolved: (formatted) => unawaited(_confirmAddress(formatted)),
-                    onPlaceChosen: (p, text) => unawaited(_onPlaceChosen(p, text)),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Toca el mapa para elegir el punto exacto',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  SizedBox(
-                    height: 220,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: GoogleMap(
-                        initialCameraPosition: const CameraPosition(target: _lima, zoom: 13),
-                        scrollGesturesEnabled: true,
-                        zoomGesturesEnabled: true,
-                        tiltGesturesEnabled: false,
-                        rotateGesturesEnabled: false,
-                        myLocationEnabled: true,
-                        myLocationButtonEnabled: true,
-                        markers: _markers,
-                        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                          Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
-                        },
-                        onMapCreated: (c) {
-                          _mapController = c;
-                          Geolocator.getCurrentPosition().then((pos) {
-                            if (!mounted) return;
-                            _mapController?.animateCamera(
-                              CameraUpdate.newLatLngZoom(
-                                LatLng(pos.latitude, pos.longitude),
-                                15,
-                              ),
-                            );
-                          }).catchError((_) {});
-                        },
-                        onTap: (coords) => unawaited(_onMapTap(coords)),
-                        zoomControlsEnabled: true,
-                      ),
-                    ),
-                  ),
-                  if (selected.isNotEmpty) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      'Punto seleccionado: $selected',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.md),
-                  if (_preferredFromProfile.isNotEmpty) ...[
-                    Text(
-                      'Tu punto favorito',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: ChoiceChip(
-                        label: Text(_preferredFromProfile, overflow: TextOverflow.ellipsis),
-                        selected: selected == _preferredFromProfile,
-                        onSelected: (_) => unawaited(_confirmAddress(_preferredFromProfile)),
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  if (_routePickupAddresses.isNotEmpty) ...[
-                    Text(
-                      'Puntos de la ruta',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.sm,
-                      children: _routePickupAddresses.map((p) {
-                        return ChoiceChip(
-                          label: Text(p, overflow: TextOverflow.ellipsis),
-                          selected: selected == p,
-                          onSelected: (_) => unawaited(_confirmAddress(p)),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                ],
-              ),
+                _buildSearchField(),
+                const SizedBox(height: AppSpacing.sm),
+                _buildQuickPickups(selected),
+              ],
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
-          AppPrimaryButton(
-            label: 'Continuar',
-            onPressed: _canContinue
-                ? () {
-                    unawaited(_onContinue());
-                  }
-                : null,
+          Expanded(
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+              child: GoogleMap(
+                initialCameraPosition: const CameraPosition(target: _lima, zoom: 13),
+                scrollGesturesEnabled: true,
+                zoomGesturesEnabled: true,
+                tiltGesturesEnabled: true,
+                rotateGesturesEnabled: true,
+                zoomControlsEnabled: true,
+                myLocationEnabled: true,
+                myLocationButtonEnabled: true,
+                markers: _markers,
+                onMapCreated: (controller) {
+                  _mapController = controller;
+                  Geolocator.getCurrentPosition().then((pos) {
+                    if (!mounted) return;
+                    _mapController?.animateCamera(
+                      CameraUpdate.newLatLngZoom(
+                        LatLng(pos.latitude, pos.longitude),
+                        15,
+                      ),
+                    );
+                  }).catchError((_) {});
+                },
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: AppPrimaryButton(
+              label: 'Continuar',
+              onPressed: _canContinue ? () => unawaited(_onContinue()) : null,
+            ),
           ),
         ],
       ),

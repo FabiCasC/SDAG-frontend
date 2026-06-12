@@ -378,6 +378,25 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
         return;
       }
 
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      final tripId = ref.read(reservaProvider).conductorSeleccionado?.tripId;
+      if (userId != null && tripId != null && tripId.isNotEmpty) {
+        final existente = await Supabase.instance.client
+            .from('reservations')
+            .select('id')
+            .eq('trip_id', tripId)
+            .eq('passenger_profile_id', userId)
+            .eq('status', 'activa')
+            .maybeSingle();
+
+        if (existente != null) {
+          if (!mounted) return;
+          AppSnackbars.error(context, 'Ya tienes una reserva activa en este viaje.');
+          setState(() => _paying = false);
+          return;
+        }
+      }
+
       await _persistSavedIfNeeded(option);
 
       if (option == _PaymentOption.yape) {

@@ -169,6 +169,10 @@ class _MapaRutaWidgetState extends State<MapaRutaWidget> {
           target: _routePoints.first,
           zoom: 11.5,
         ),
+        scrollGesturesEnabled: true,
+        zoomGesturesEnabled: true,
+        tiltGesturesEnabled: true,
+        rotateGesturesEnabled: true,
         polylines: _polylines,
         markers: _markers,
         onMapCreated: (controller) {

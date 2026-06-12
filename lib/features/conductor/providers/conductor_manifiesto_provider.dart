@@ -362,7 +362,7 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
           ? const <Map<String, dynamic>>[]
           : ((await Supabase.instance.client
                   .from('manifest_entries')
-                  .select('reservation_id, seat_number, boarding')
+                  .select('reservation_id, seat_number, boarding_status')
                   .eq('manifest_id', manifestId)) as List)
               .cast<Map<String, dynamic>>();
 
@@ -405,7 +405,7 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
             }
           }
 
-          final boarding = entry?['boarding'] ?? entry?['boarding_status'] ?? 'pendiente';
+          final boarding = entry?['boarding_status'] ?? 'pendiente';
 
           out.add(
             ManifiestoItem(

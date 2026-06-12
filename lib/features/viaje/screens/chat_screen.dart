@@ -16,6 +16,8 @@ import '../../../features/reserva/providers/reserva_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../app/router/app_routes.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 
 // ─── Data model ─────────────────────────────────────────────────────────────
@@ -279,6 +281,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.passengerReservaActiva),
         title: Row(
           children: [
             CircleAvatar(

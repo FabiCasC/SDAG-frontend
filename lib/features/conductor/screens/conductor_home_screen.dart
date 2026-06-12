@@ -218,42 +218,32 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
             vehicles(id, plate, vehicle_type, total_seats, active)
           ''')
           .eq('profile_id', user.id)
-          .single();
+          .maybeSingle();
+
+      if (driverData == null) {
+        debugPrint('[Home] No se encontró driver para profile_id=${user.id}');
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'No se encontró el conductor asociado a esta cuenta.';
+        });
+        return;
+      }
 
       final driverId = driverData['id'];
       final capacidad = (driverData['capacity'] as num?)?.toInt() ?? 0;
-
-      final tripData = await Supabase.instance.client
-          .from('trips')
-          .select('''
-            id, status, scheduled_departure_at, eta_minutes, amount_total,
-            routes(id, name, from_label, to_label)
-          ''')
-          .eq('driver_id', driverId)
-          .inFilter('status', ['esperando', 'lleno', 'en_ruta'])
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-
       final stats = await _loadTodayStats(driverId);
 
       if (!mounted) return;
       setState(() {
         _driverData = driverData;
-        _tripData = tripData;
         _capacidad = capacidad;
         _totalViajesHoy = stats.totalViajes;
         _gananciaHoy = stats.ganancia;
-        _reservas = const [];
-        _asientosOcupados = 0;
         _errorMessage = null;
       });
 
-      if (tripData != null) {
-        final tripId = tripData['id'].toString();
-        await _cargarPasajeros(tripId);
-        _suscribirMensajes(tripId);
-      }
+      await _inicializarViaje();
 
       if (!mounted) return;
       setState(() {
@@ -311,7 +301,58 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
     );
   }
 
-  Future<void> _cargarPasajeros(String tripId) async {
+  Future<void> _inicializarViaje() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    final driver = await Supabase.instance.client
+        .from('drivers')
+        .select('id, plate, capacity')
+        .eq('profile_id', user.id)
+        .maybeSingle();
+
+    if (driver == null) {
+      debugPrint('[Home] No se encontró driver para profile_id=${user.id}');
+      if (!mounted) return;
+      setState(() {
+        _tripData = null;
+        _reservas = const [];
+        _asientosOcupados = 0;
+      });
+      return;
+    }
+
+    debugPrint('[Home] driver_id=${driver['id']} plate=${driver['plate']}');
+
+    final trip = await Supabase.instance.client
+        .from('trips')
+        .select('''
+          id, status, route_id, scheduled_departure_at, eta_minutes, amount_total,
+          routes(id, name, from_label, to_label)
+        ''')
+        .eq('driver_id', driver['id'])
+        .inFilter('status', ['esperando', 'en_ruta', 'lleno'])
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+
+    if (trip == null) {
+      debugPrint('[Home] No hay trip activo para driver_id=${driver['id']}');
+      if (!mounted) return;
+      setState(() {
+        _tripData = null;
+        _reservas = const [];
+        _asientosOcupados = 0;
+      });
+      return;
+    }
+
+    final tripId = trip['id']?.toString() ?? '';
+    debugPrint('[Home] trip_id=$tripId status=${trip['status']}');
+
+    if (!mounted) return;
+    setState(() => _tripData = trip);
+
     await _fetchPasajeros(tripId);
 
     _cancelReservasSubscription();
@@ -319,9 +360,12 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
         .from('reservations')
         .stream(primaryKey: ['id'])
         .eq('trip_id', tripId)
-        .listen((_) async {
-      await _fetchPasajeros(tripId);
+        .listen((data) {
+      debugPrint('[Home] Realtime recibió ${data.length} reservas');
+      unawaited(_fetchPasajeros(tripId));
     });
+
+    _suscribirMensajes(tripId);
   }
 
   Future<void> _fetchPasajeros(String tripId) async {
@@ -329,15 +373,19 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
       final data = await Supabase.instance.client
           .from('reservations')
           .select('''
-            id, passenger_profile_id, seats, pickup_point, status, amount,
-            profiles:passenger_profile_id(name, first_name, last_name, phone, dni),
+            id, seats, pickup_point, status, passenger_profile_id, amount,
+            profiles:passenger_profile_id(id, name, first_name, last_name, phone, dni),
             reservation_companions(full_name, seat_number)
           ''')
           .eq('trip_id', tripId)
           .eq('status', 'activa');
 
-      await _applyReservations((data as List).cast<Map<String, dynamic>>());
+      final reservas = (data as List).cast<Map<String, dynamic>>();
+      debugPrint('[Home] Pasajeros activos: ${reservas.length}');
+
+      await _applyReservations(reservas);
     } catch (e) {
+      debugPrint('[Home] Error cargando pasajeros: $e');
       if (!mounted) return;
       setState(() {
         _errorMessage = 'No se pudo actualizar las reservas: $e';

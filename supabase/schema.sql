@@ -232,6 +232,9 @@ create table if not exists public.reservations (
 create index if not exists idx_reservations_trip_id on public.reservations(trip_id);
 create index if not exists idx_reservations_passenger_profile_id on public.reservations(passenger_profile_id);
 create index if not exists idx_reservations_status on public.reservations(status);
+create unique index if not exists reservations_unique_active_passenger_trip
+on public.reservations (trip_id, passenger_profile_id)
+where status = 'activa';
 
 create or replace trigger trg_reservations_updated_at
 before update on public.reservations
@@ -279,7 +282,7 @@ create table if not exists public.manifest_entries (
   phone text,
   seat_number integer not null,
   pickup_text text not null,
-  boarding public.boarding_status not null default 'pendiente',
+  boarding_status public.boarding_status not null default 'pendiente',
   fuera_de_ruta boolean not null default false,
   created_at timestamptz not null default now(),
   constraint entries_seat_chk check (seat_number between 1 and 99),
@@ -693,6 +696,13 @@ drop policy if exists "manifests_admin_insert" on public.manifests;
 drop policy if exists "manifests_admin_update" on public.manifests;
 drop policy if exists "manifests_admin_delete" on public.manifests;
 create policy "manifests_admin_insert" on public.manifests for insert to authenticated with check (public.is_admin());
+drop policy if exists "manifests_driver_insert" on public.manifests;
+create policy "manifests_driver_insert" on public.manifests for insert to authenticated
+with check (exists (
+  select 1 from public.trips t join public.drivers d on d.id = t.driver_id
+  where t.id = manifests.trip_id and d.profile_id = auth.uid()
+    and t.status in ('esperando', 'en_ruta', 'lleno')
+));
 create policy "manifests_admin_update" on public.manifests for update to authenticated using (public.is_admin()) with check (public.is_admin());
 create policy "manifests_admin_delete" on public.manifests for delete to authenticated using (public.is_admin());
 

@@ -105,7 +105,7 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
           .maybeSingle();
 
       if (reserva == null) {
-        setState(() => _resultado = 'QR invalido — reserva no encontrada');
+        setState(() => _resultado = '❌ Reserva no encontrada');
         await _reactivarEscanner();
         return;
       }
@@ -127,13 +127,21 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
           .from('drivers')
           .select('id')
           .eq('profile_id', user.id)
-          .single();
+          .maybeSingle();
+
+      if (driver == null) {
+        setState(() => _resultado = '❌ No se encontró el conductor');
+        await _reactivarEscanner();
+        return;
+      }
 
       final trip = await Supabase.instance.client
           .from('trips')
           .select('id')
           .eq('driver_id', driver['id'])
-          .inFilter('status', ['esperando', 'en_ruta'])
+          .inFilter('status', ['esperando', 'en_ruta', 'lleno'])
+          .order('created_at', ascending: false)
+          .limit(1)
           .maybeSingle();
 
       if (trip == null || reserva['trip_id']?.toString() != trip['id']?.toString()) {
@@ -142,11 +150,41 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
         return;
       }
 
-      final manifest = await Supabase.instance.client
+      final manifestRow = await Supabase.instance.client
           .from('manifests')
           .select('id')
           .eq('trip_id', trip['id'])
-          .single();
+          .maybeSingle();
+
+      late final String manifestId;
+      if (manifestRow == null) {
+        try {
+          final newManifest = await Supabase.instance.client
+              .from('manifests')
+              .insert({'trip_id': trip['id'], 'estado': 'en_curso'})
+              .select('id')
+              .single();
+          final createdId = newManifest['id']?.toString();
+          if (createdId == null || createdId.isEmpty) {
+            setState(() => _resultado = '❌ No se pudo crear el manifiesto');
+            await _reactivarEscanner();
+            return;
+          }
+          manifestId = createdId;
+        } catch (_) {
+          setState(() => _resultado = '❌ Manifiesto no disponible para este viaje');
+          await _reactivarEscanner();
+          return;
+        }
+      } else {
+        final existingId = manifestRow['id']?.toString();
+        if (existingId == null || existingId.isEmpty) {
+          setState(() => _resultado = '❌ Manifiesto inválido');
+          await _reactivarEscanner();
+          return;
+        }
+        manifestId = existingId;
+      }
 
       final passengerProfileId = reserva['passenger_profile_id']?.toString();
       if (passengerProfileId == null || passengerProfileId.isEmpty) {
@@ -157,16 +195,25 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
 
       final existingEntries = await Supabase.instance.client
           .from('manifest_entries')
-          .select('boarding_status')
-          .eq('manifest_id', manifest['id'])
+          .select('id, boarding_status')
+          .eq('manifest_id', manifestId)
           .eq('passenger_profile_id', passengerProfileId);
 
-      final alreadyBoarded = (existingEntries as List).any(
-        (entry) => (entry as Map)['boarding_status']?.toString() == 'abordo',
-      );
+      final alreadyBoarded = (existingEntries as List).any((entry) {
+        final map = (entry as Map).cast<String, dynamic>();
+        final status = map['boarding_status']?.toString();
+        return status == 'abordo';
+      });
 
       if (alreadyBoarded) {
         setState(() => _resultado = 'Este pasajero ya abordo');
+        await _reactivarEscanner();
+        return;
+      }
+
+      final entriesList = (existingEntries as List).cast<Map<String, dynamic>>();
+      if (entriesList.isEmpty) {
+        setState(() => _resultado = '❌ Pasajero no registrado en el manifiesto');
         await _reactivarEscanner();
         return;
       }
@@ -177,7 +224,7 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
             'boarding_status': 'abordo',
             'reservation_id': reservaId,
           })
-          .eq('manifest_id', manifest['id'])
+          .eq('manifest_id', manifestId)
           .eq('passenger_profile_id', passengerProfileId);
 
       ref.invalidate(conductorManifiestoProvider);
