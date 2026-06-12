@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
+
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -21,13 +21,21 @@ class AdminCalificacionesScreen extends ConsumerWidget {
     final conductores = ref.watch(adminConductoresProvider).listaConductores;
     final sorted = [...conductores]
       ..sort((a, b) {
-        final r = b.ratingPromedio.compareTo(a.ratingPromedio);
+        final aAvg = (a['ratingPromedio'] as num?)?.toDouble() ?? 0.0;
+        final bAvg = (b['ratingPromedio'] as num?)?.toDouble() ?? 0.0;
+        final r = bAvg.compareTo(aAvg);
         if (r != 0) return r;
-        return b.ratingCount.compareTo(a.ratingCount);
+        final aCount = (a['ratingCount'] as num?)?.toInt() ?? 0;
+        final bCount = (b['ratingCount'] as num?)?.toInt() ?? 0;
+        return bCount.compareTo(aCount);
       });
 
-    final totalRatings = sorted.fold<int>(0, (a, b) => a + b.ratingCount);
-    final weightedSum = sorted.fold<double>(0, (a, b) => a + (b.ratingPromedio * b.ratingCount));
+    final totalRatings = sorted.fold<int>(0, (sum, c) => sum + ((c['ratingCount'] as num?)?.toInt() ?? 0));
+    final weightedSum = sorted.fold<double>(0, (sum, c) {
+      final avg = (c['ratingPromedio'] as num?)?.toDouble() ?? 0.0;
+      final count = (c['ratingCount'] as num?)?.toInt() ?? 0;
+      return sum + (avg * count);
+    });
     final avg = totalRatings == 0 ? 0.0 : (weightedSum / totalRatings);
 
     return Scaffold(
@@ -103,16 +111,21 @@ class _ConductorRatingCard extends StatelessWidget {
   });
 
   final int rank;
-  final MockAdminConductor conductor;
+  final Map<String, dynamic> conductor;
 
   @override
   Widget build(BuildContext context) {
-    final initials = _initials(conductor.nombres, conductor.apellidos);
-    final dist = _distributionFor(conductor.ratingPromedio, conductor.ratingCount);
+    final nombres = conductor['nombres']?.toString() ?? '';
+    final apellidos = conductor['apellidos']?.toString() ?? '';
+    final nombreCompleto = '$nombres $apellidos'.trim();
+    final initials = _initials(nombres, apellidos);
+    final ratingCount = (conductor['ratingCount'] as num?)?.toInt() ?? 0;
+    final ratingPromedio = (conductor['ratingPromedio'] as num?)?.toDouble() ?? 0.0;
+    final dist = _distributionFor(ratingPromedio, ratingCount);
 
     return InkWell(
       borderRadius: BorderRadius.circular(AppRadius.r16),
-      onTap: conductor.ratingCount == 0
+      onTap: ratingCount == 0
           ? null
           : () {
               showDialog<void>(
@@ -126,13 +139,13 @@ class _ConductorRatingCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          '${conductor.nombreCompleto} · ${conductor.placa}',
+                          '$nombreCompleto · ${conductor['placa']?.toString() ?? ''}',
                           style: const TextStyle(fontWeight: FontWeight.w900),
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         Consumer(
                           builder: (context, ref, child) {
-                            final ratingsAsync = ref.watch(driverRatingsProvider(conductor.id));
+                            final ratingsAsync = ref.watch(driverRatingsProvider(conductor['id']?.toString() ?? ''));
                             return ratingsAsync.when(
                               data: (ratings) {
                                 if (ratings.isEmpty) return const Text('No hay comentarios recientes.');
@@ -246,7 +259,7 @@ class _ConductorRatingCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${conductor.nombreCompleto} · ${conductor.placa}',
+                        '$nombreCompleto · ${conductor['placa']?.toString() ?? ''}',
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                               color: AppColors.textPrimary,
                               fontWeight: FontWeight.w900,
@@ -256,12 +269,12 @@ class _ConductorRatingCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          _Stars(rating: conductor.ratingPromedio, count: conductor.ratingCount),
+                          _Stars(rating: ratingPromedio, count: ratingCount),
                           const SizedBox(width: 8),
                           Text(
-                            conductor.ratingCount == 0 ? '0 valoraciones' : '${conductor.ratingCount} valoraciones',
+                            ratingCount == 0 ? '0 valoraciones' : '$ratingCount valoraciones',
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: conductor.ratingCount == 0 ? const Color(0xFF94A3B8) : AppColors.textSecondary,
+                                  color: ratingCount == 0 ? const Color(0xFF94A3B8) : AppColors.textSecondary,
                                   fontWeight: FontWeight.w700,
                                 ),
                           ),

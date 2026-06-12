@@ -259,7 +259,7 @@ class _AdminPagosScreenState extends ConsumerState<AdminPagosScreen> with Single
                   },
                 ),
                 _HistorialTab(
-                  conductores: conductores.map((e) => e.nombreCompleto).toList(growable: false),
+                  conductores: conductores.map((e) => '${e['nombres']?.toString() ?? ''} ${e['apellidos']?.toString() ?? ''}'.trim()).toList(growable: false),
                   filtroConductor: state.filtroConductor,
                   filtroDesde: state.filtroFechaDesde,
                   filtroHasta: state.filtroFechaHasta,

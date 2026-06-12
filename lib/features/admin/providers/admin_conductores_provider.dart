@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../core/mock/mock_data.dart';
+
 
 class AdminConductoresState {
   const AdminConductoresState({
@@ -12,32 +12,33 @@ class AdminConductoresState {
     required this.viajes,
   });
 
-  final List<MockAdminConductor> listaConductores;
+  final List<Map<String, dynamic>> listaConductores;
   final String? conductorSeleccionado;
   final String queryBusqueda;
-  final MockAdminConductorEstado? filtroEstado;
-  final List<MockAdminViaje> viajes;
+  final String? filtroEstado;
+  final List<Map<String, dynamic>> viajes;
 
-  MockAdminConductor? get conductorSeleccionadoObj {
+  Map<String, dynamic>? get conductorSeleccionadoObj {
     final id = conductorSeleccionado;
     if (id == null) return null;
     for (final c in listaConductores) {
-      if (c.id == id) return c;
+      if (c['id'] == id) return c;
     }
     return null;
   }
 
-  List<MockAdminConductor> get listaFiltrada {
+  List<Map<String, dynamic>> get listaFiltrada {
     final q = queryBusqueda.trim().toLowerCase();
     final f = filtroEstado;
-    final filtered = <MockAdminConductor>[];
+    final filtered = <Map<String, dynamic>>[];
     for (final c in listaConductores) {
-      if (f != null && c.estado != f) continue;
+      if (f != null && c['estado'] != f) continue;
       if (q.isEmpty) {
         filtered.add(c);
         continue;
       }
-      final haystack = '${c.nombreCompleto} ${c.placa}'.toLowerCase();
+      final nombreCompleto = '${c['nombres']} ${c['apellidos']}';
+      final haystack = '$nombreCompleto ${c['placa']}'.toLowerCase();
       if (haystack.contains(q)) filtered.add(c);
     }
     return filtered;
@@ -68,7 +69,7 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
           .from('drivers')
           .select('*, profiles(*)');
 
-      final conductores = <MockAdminConductor>[];
+      final conductores = <Map<String, dynamic>>[];
       for (final d in (driversRaw as List).cast<Map<String, dynamic>>()) {
         final p = d['profiles'] as Map<String, dynamic>?;
         if (p == null) continue;
@@ -93,32 +94,28 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
         final estadoRaw = d['estado']?.toString();
 
         final estado = !cuentaActiva
-            ? MockAdminConductorEstado.inactivo
+            ? 'inactivo'
             : (!pagoConfirmado
-                ? MockAdminConductorEstado.bloqueado
-                : (estadoRaw == 'en_ruta'
-                    ? MockAdminConductorEstado.enRuta
-                    : MockAdminConductorEstado.disponible));
+                ? 'bloqueado'
+                : (estadoRaw == 'en_ruta' ? 'en_ruta' : 'disponible'));
 
-        conductores.add(
-          MockAdminConductor(
-            id: pid,
-            driverRecordId: driverId,
-            nombres: nombres.isEmpty ? '—' : nombres,
-            apellidos: apellidos.isEmpty ? '—' : apellidos,
-            dni: dni,
-            telefono: telefono,
-            correo: correo,
-            placa: placa,
-            vehiculoTipo: vehiculoTipo,
-            capacidad: capacidad,
-            comisionPorcentaje: comision,
-            ratingPromedio: ratingAvg,
-            ratingCount: ratingCount,
-            estado: estado,
-            bloqueadoPorPago: !pagoConfirmado,
-          ),
-        );
+        conductores.add({
+          'id': pid,
+          'driverRecordId': driverId,
+          'nombres': nombres.isEmpty ? '—' : nombres,
+          'apellidos': apellidos.isEmpty ? '—' : apellidos,
+          'dni': dni,
+          'telefono': telefono,
+          'correo': correo,
+          'placa': placa,
+          'vehiculoTipo': vehiculoTipo,
+          'capacidad': capacidad,
+          'comisionPorcentaje': comision,
+          'ratingPromedio': ratingAvg,
+          'ratingCount': ratingCount,
+          'estado': estado,
+          'bloqueadoPorPago': !pagoConfirmado,
+        });
       }
 
       final tripsRaw = await Supabase.instance.client
@@ -127,7 +124,7 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
           .order('created_at', ascending: false)
           .limit(200);
 
-      final viajes = <MockAdminViaje>[];
+      final viajes = <Map<String, dynamic>>[];
       for (final tm in (tripsRaw as List).cast<Map<String, dynamic>>()) {
           final id = tm['id']?.toString();
           final driverId = tm['driver_id']?.toString();
@@ -147,16 +144,14 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
             }
           }
 
-          viajes.add(
-            MockAdminViaje(
-              id: id,
-              conductorId: conductorProfileId ?? driverId,
-              fecha: createdAt,
-              rutaLabel: rutaLabel,
-              monto: monto,
-              estado: status == 'cancelado' ? MockAdminViajeEstado.cancelado : MockAdminViajeEstado.completado,
-            ),
-          );
+          viajes.add({
+            'id': id,
+            'conductorId': conductorProfileId ?? driverId,
+            'fecha': createdAt,
+            'rutaLabel': rutaLabel,
+            'monto': monto,
+            'estado': status == 'cancelado' ? 'cancelado' : 'completado',
+          });
       }
 
       state = _copyWith(
@@ -176,7 +171,7 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     state = _copyWith(conductorSeleccionado: id);
   }
 
-  void setFiltroEstado(MockAdminConductorEstado? estado) {
+  void setFiltroEstado(String? estado) {
     state = _copyWith(filtroEstado: estado);
   }
 
@@ -227,10 +222,10 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     }
 
     for (final item in state.listaConductores) {
-      if (item.dni == d) {
+      if (item['dni'] == d) {
         return const AdminCrearConductorResult.duplicateDni();
       }
-      if (item.placa.toUpperCase() == p) {
+      if (item['placa']?.toString().toUpperCase() == p) {
         return const AdminCrearConductorResult.duplicatePlaca();
       }
     }
@@ -289,7 +284,7 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     if (current == null) return const AdminEditarConductorResult.notFound();
 
     final t = (telefono ?? '').trim();
-    final c = (correo ?? current.correo).trim().toLowerCase();
+    final c = (correo ?? current['correo']).toString().trim().toLowerCase();
     final p = placa.trim().toUpperCase();
 
     if (t.isNotEmpty && !_telefonoRe.hasMatch(t)) {
@@ -309,8 +304,8 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
     }
 
     for (final item in state.listaConductores) {
-      if (item.id == id) continue;
-      if (item.placa.toUpperCase() == p) return const AdminEditarConductorResult.duplicatePlaca();
+      if (item['id'] == id) continue;
+      if (item['placa']?.toString().toUpperCase() == p) return const AdminEditarConductorResult.duplicatePlaca();
     }
 
     try {
@@ -338,39 +333,33 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
   Future<void> desactivarConductor(String id) async {
     final current = getById(id);
     if (current == null) return;
-    if (current.estado == MockAdminConductorEstado.inactivo) return;
-    final driverId = current.driverRecordId;
+    if (current['estado'] == 'inactivo') return;
+    final driverId = current['driverRecordId']?.toString();
     if (driverId == null || driverId.isEmpty) return;
 
     await Supabase.instance.client.from('drivers').update({'cuenta_activa': false}).eq('id', driverId);
-    _replaceConductor(
-      current.copyWith(
-        estado: MockAdminConductorEstado.inactivo,
-      ),
-    );
+    final updated = Map<String, dynamic>.from(current);
+    updated['estado'] = 'inactivo';
+    _replaceConductor(updated);
   }
 
   Future<void> reactivarConductor(String id) async {
     final current = getById(id);
     if (current == null) return;
-    if (current.estado != MockAdminConductorEstado.inactivo) return;
-    final driverId = current.driverRecordId;
+    if (current['estado'] != 'inactivo') return;
+    final driverId = current['driverRecordId']?.toString();
     if (driverId == null || driverId.isEmpty) return;
 
     await Supabase.instance.client.from('drivers').update({'cuenta_activa': true}).eq('id', driverId);
-    _replaceConductor(
-      current.copyWith(
-        estado: current.bloqueadoPorPago
-            ? MockAdminConductorEstado.bloqueado
-            : MockAdminConductorEstado.disponible,
-      ),
-    );
+    final updated = Map<String, dynamic>.from(current);
+    updated['estado'] = current['bloqueadoPorPago'] == true ? 'bloqueado' : 'disponible';
+    _replaceConductor(updated);
   }
 
   Future<void> desbloquearConductor(String id) async {
     final current = getById(id);
     if (current == null) return;
-    if (current.estado != MockAdminConductorEstado.bloqueado && !current.bloqueadoPorPago) return;
+    if (current['estado'] != 'bloqueado' && current['bloqueadoPorPago'] != true) return;
     try {
       await Supabase.instance.client.from('drivers').update({
         'pago_confirmado': true,
@@ -391,43 +380,43 @@ class AdminConductoresController extends StateNotifier<AdminConductoresState> {
         .then((_) => _loadFromSupabase());
   }
 
-  MockAdminConductor? getById(String id) {
+  Map<String, dynamic>? getById(String id) {
     for (final c in state.listaConductores) {
-      if (c.id == id) return c;
+      if (c['id'] == id) return c;
     }
     return null;
   }
 
-  List<MockAdminViaje> viajesDeConductor(String conductorId) {
-    final list = <MockAdminViaje>[];
+  List<Map<String, dynamic>> viajesDeConductor(String conductorId) {
+    final list = <Map<String, dynamic>>[];
     for (final v in state.viajes) {
-      if (v.conductorId == conductorId) list.add(v);
+      if (v['conductorId'] == conductorId) list.add(v);
     }
-    list.sort((a, b) => b.fecha.compareTo(a.fecha));
+    list.sort((a, b) => (b['fecha'] as DateTime).compareTo(a['fecha'] as DateTime));
     return list;
   }
 
-  MockAdminViaje? getViajeById(String viajeId) {
+  Map<String, dynamic>? getViajeById(String viajeId) {
     for (final v in state.viajes) {
-      if (v.id == viajeId) return v;
+      if (v['id'] == viajeId) return v;
     }
     return null;
   }
 
-  void _replaceConductor(MockAdminConductor updated) {
+  void _replaceConductor(Map<String, dynamic> updated) {
     final next = [
       for (final conductor in state.listaConductores)
-        if (conductor.id == updated.id) updated else conductor,
+        if (conductor['id'] == updated['id']) updated else conductor,
     ];
     state = _copyWith(listaConductores: next);
   }
 
   AdminConductoresState _copyWith({
-    List<MockAdminConductor>? listaConductores,
+    List<Map<String, dynamic>>? listaConductores,
     String? conductorSeleccionado,
     String? queryBusqueda,
-    MockAdminConductorEstado? filtroEstado,
-    List<MockAdminViaje>? viajes,
+    String? filtroEstado,
+    List<Map<String, dynamic>>? viajes,
   }) {
     return AdminConductoresState(
       listaConductores: listaConductores ?? state.listaConductores,

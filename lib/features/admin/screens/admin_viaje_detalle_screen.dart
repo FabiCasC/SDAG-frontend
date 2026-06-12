@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -20,28 +19,35 @@ class AdminViajeDetalleScreen extends ConsumerWidget {
 
     final controller = ref.read(adminConductoresProvider.notifier);
     final viajes = ref.watch(adminConductoresProvider).viajes;
-    final v = viajes.where((e) => e.id == viajeId).cast<MockAdminViaje?>().firstWhere(
+    final v = viajes.where((e) => e['id']?.toString() == viajeId).cast<Map<String, dynamic>?>().firstWhere(
           (e) => e != null,
           orElse: () => null,
         );
-    final conductor = v == null ? null : controller.getById(v.conductorId);
+    final conductor = v == null ? null : controller.getById(v['conductorId']?.toString() ?? '');
 
-    final placa = conductor?.placa ?? '—';
-    final nombre = conductor?.nombreCompleto ?? '—';
-    final vehiculo = conductor?.vehiculoTipo ?? '—';
-    final capacidad = conductor?.capacidad ?? 8;
+    final placa = conductor?['placa']?.toString() ?? '—';
+    final nombres = conductor?['nombres']?.toString() ?? '';
+    final apellidos = conductor?['apellidos']?.toString() ?? '';
+    final nombre = conductor == null ? '—' : '$nombres $apellidos'.trim();
+    final vehiculo = conductor?['vehiculoTipo']?.toString() ?? '—';
+    final capacidad = (conductor?['capacidad'] as num?)?.toInt() ?? 8;
     final ocupados = (capacidad - (viajeId.hashCode.abs() % (capacidad + 1))).clamp(0, capacidad);
     final vacios = (capacidad - ocupados).clamp(0, capacidad);
     final rutaTomada = viajeId.hashCode.isEven ? 'La Priale' : 'Javier Prado';
-    final salida = v?.fecha ?? DateTime.now();
+    final salida = (v?['fecha'] as DateTime?) ?? DateTime.now();
     final duracion = Duration(minutes: 30 + (viajeId.hashCode.abs() % 25));
     final llegada = salida.add(duracion);
 
     final montoRecaudado = (ocupados * 15.0) + (viajeId.hashCode.abs() % 10);
-    final porcentaje = conductor?.comisionPorcentaje ?? 15.0;
+    final porcentaje = (conductor?['comisionPorcentaje'] as num?)?.toDouble() ?? 15.0;
     final comision = montoRecaudado * porcentaje / 100;
 
-    final pasajeros = MockData.pasajerosViajeActivo.take(capacidad).toList(growable: false);
+    final pasajeros = List.generate(ocupados, (i) => {
+      'nombres': 'Pasajero',
+      'apellidos': '${i + 1}',
+      'dni': '1234567${i % 10}',
+      'asiento': i + 1,
+    });
     final abordaron = ocupados;
 
     return Scaffold(
@@ -104,7 +110,7 @@ class AdminViajeDetalleScreen extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                _KeyValue(label: 'Ruta', value: v?.rutaLabel ?? '—'),
+                _KeyValue(label: 'Ruta', value: v?['rutaLabel']?.toString() ?? '—'),
                 _KeyValue(label: 'Ruta tomada', value: rutaTomada),
                 _KeyValue(label: 'Hora de salida', value: _formatTimeOnly(salida)),
                 _KeyValue(label: 'Hora de llegada', value: _formatTimeOnly(llegada)),
@@ -170,7 +176,7 @@ class AdminViajeDetalleScreen extends ConsumerWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '${p.nombres} ${p.apellidos}',
+                                  '${p['nombres']} ${p['apellidos']}',
                                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                                         color: AppColors.textPrimary,
                                         fontWeight: FontWeight.w900,
@@ -178,7 +184,7 @@ class AdminViajeDetalleScreen extends ConsumerWidget {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'DNI: ${p.dni} · Asiento ${p.asiento}',
+                                  'DNI: ${p['dni']} · Asiento ${p['asiento']}',
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                         color: AppColors.textSecondary,
                                         fontWeight: FontWeight.w700,
