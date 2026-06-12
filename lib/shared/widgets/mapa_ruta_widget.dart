@@ -20,7 +20,6 @@ class _MapaRutaWidgetState extends State<MapaRutaWidget> {
   List<LatLng> _routePoints = [];
   bool _loading = true;
 
-  // ⚠️ Pon aquí tu API Key de Google Maps
   static const String _apiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
 
   @override
@@ -31,12 +30,21 @@ class _MapaRutaWidgetState extends State<MapaRutaWidget> {
 
   Future<void> _cargarRutaReal() async {
     final points = widget.routePolyline.points;
-    if (points.length < 2) return;
+
+    // 🔍 DEBUG: ver cuántos puntos llegan
+    print('🗺️ [MapaRuta] puntos recibidos: ${points.length}');
+    for (var i = 0; i < points.length; i++) {
+      print('🗺️ [MapaRuta] punto[$i]: lat=${points[i].lat}, lng=${points[i].lng}');
+    }
+
+    if (points.length < 2) {
+      print('🗺️ [MapaRuta] ❌ menos de 2 puntos, abortando');
+      return;
+    }
 
     final origin = '${points.first.lat},${points.first.lng}';
     final destination = '${points.last.lat},${points.last.lng}';
 
-    // Waypoints intermedios (si tienes más de 2 puntos)
     String waypointsParam = '';
     if (points.length > 2) {
       final waypoints = points
@@ -54,18 +62,33 @@ class _MapaRutaWidgetState extends State<MapaRutaWidget> {
           '&key=$_apiKey',
     );
 
+    // 🔍 DEBUG: ver la URL exacta que se envía
+    print('🗺️ [MapaRuta] URL: $url');
+
     try {
       final response = await http.get(url);
-      final data = jsonDecode(response.body);
 
-      if (data['status'] == 'OK') {
+      // 🔍 DEBUG: ver respuesta completa
+      print('🗺️ [MapaRuta] STATUS HTTP: ${response.statusCode}');
+      print('🗺️ [MapaRuta] BODY: ${response.body}');
+
+      final data = jsonDecode(response.body);
+      final status = data['status'];
+      print('🗺️ [MapaRuta] Google status: $status');
+
+      if (status == 'OK') {
         final encoded = data['routes'][0]['overview_polyline']['points'] as String;
         _routePoints = _decodePolyline(encoded);
+        print('🗺️ [MapaRuta] ✅ ruta decodificada con ${_routePoints.length} puntos');
       } else {
-        // Fallback: usar los puntos directos si Directions falla
+        print('🗺️ [MapaRuta] ⚠️ Directions falló ($status), usando fallback de puntos directos');
+        if (data['error_message'] != null) {
+          print('🗺️ [MapaRuta] error_message: ${data['error_message']}');
+        }
         _routePoints = points.map((p) => LatLng(p.lat, p.lng)).toList();
       }
-    } catch (_) {
+    } catch (e) {
+      print('🗺️ [MapaRuta] ❌ excepción: $e');
       _routePoints = points.map((p) => LatLng(p.lat, p.lng)).toList();
     }
 
@@ -73,7 +96,12 @@ class _MapaRutaWidgetState extends State<MapaRutaWidget> {
   }
 
   void _construirMapa() {
-    if (_routePoints.isEmpty) return;
+    if (_routePoints.isEmpty) {
+      print('🗺️ [MapaRuta] ❌ _routePoints vacío, no se construye el mapa');
+      return;
+    }
+
+    print('🗺️ [MapaRuta] ✅ construyendo mapa con ${_routePoints.length} puntos');
 
     _polylines.add(
       Polyline(

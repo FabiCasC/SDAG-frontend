@@ -1,6 +1,17 @@
+// lib/features/viaje/providers/viaje_provider.dart
+//
+// Reemplaza la versión 100% mock.
+// Fuente de datos real: tabla driver_locations (ubicación + ETA del conductor)
+// leída desde Supabase cada vez que se llama a refreshFromSupabase().
+// El estado de la UI (status, finished, etc.) lo controla el controller igual
+// que antes, pero la posición y ETA provienen de Supabase, no de hardcode.
+
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+// ─── Modelos ────────────────────────────────────────────────────────────────
 
 class ViajeMessage {
   const ViajeMessage({
@@ -34,148 +45,169 @@ class ViajeState {
     required this.status,
     required this.etaMinutes,
     required this.showArrivalBanner,
-    required this.vehicleIndex,
-    required this.vehiclePath,
+    required this.driverPosition,
     required this.messages,
     required this.readOnlyChat,
     required this.showAlternativePickup,
     required this.alternativePickupText,
     required this.finished,
+    required this.locationError,
   });
 
   final ViajeStatus status;
   final int etaMinutes;
   final bool showArrivalBanner;
-  final int vehicleIndex;
-  final List<GeoPoint> vehiclePath;
+
+  /// Posición real del conductor leída de driver_locations.
+  /// null = aún no disponible o error de lectura.
+  final GeoPoint? driverPosition;
+
   final List<ViajeMessage> messages;
   final bool readOnlyChat;
   final bool showAlternativePickup;
   final String? alternativePickupText;
   final bool finished;
 
-  GeoPoint get vehiclePosition {
-    if (vehiclePath.isEmpty) return const GeoPoint(0, 0);
-    final idx = vehicleIndex.clamp(0, vehiclePath.length - 1);
-    return vehiclePath[idx];
-  }
+  /// Mensaje de error de la última lectura de Supabase (null = sin error).
+  final String? locationError;
 
   ViajeState copyWith({
     ViajeStatus? status,
     int? etaMinutes,
     bool? showArrivalBanner,
-    int? vehicleIndex,
-    List<GeoPoint>? vehiclePath,
+    GeoPoint? driverPosition,
+    bool clearDriverPosition = false,
     List<ViajeMessage>? messages,
     bool? readOnlyChat,
     bool? showAlternativePickup,
     String? alternativePickupText,
     bool? finished,
+    String? locationError,
+    bool clearLocationError = false,
   }) {
     return ViajeState(
       status: status ?? this.status,
       etaMinutes: etaMinutes ?? this.etaMinutes,
       showArrivalBanner: showArrivalBanner ?? this.showArrivalBanner,
-      vehicleIndex: vehicleIndex ?? this.vehicleIndex,
-      vehiclePath: vehiclePath ?? this.vehiclePath,
+      driverPosition:
+      clearDriverPosition ? null : (driverPosition ?? this.driverPosition),
       messages: messages ?? this.messages,
       readOnlyChat: readOnlyChat ?? this.readOnlyChat,
-      showAlternativePickup: showAlternativePickup ?? this.showAlternativePickup,
-      alternativePickupText: alternativePickupText ?? this.alternativePickupText,
+      showAlternativePickup:
+      showAlternativePickup ?? this.showAlternativePickup,
+      alternativePickupText:
+      alternativePickupText ?? this.alternativePickupText,
       finished: finished ?? this.finished,
+      locationError:
+      clearLocationError ? null : (locationError ?? this.locationError),
     );
   }
 
   static ViajeState initial() {
-    final now = DateTime.now();
-    return ViajeState(
+    return const ViajeState(
       status: ViajeStatus.esperandoConductor,
-      etaMinutes: 12,
+      etaMinutes: 0,
       showArrivalBanner: false,
-      vehicleIndex: 0,
-      vehiclePath: const [
-        GeoPoint(-12.0931, -76.9662),
-        GeoPoint(-12.0860, -76.9550),
-        GeoPoint(-12.0790, -76.9460),
-        GeoPoint(-12.0700, -76.9360),
-        GeoPoint(-12.0600, -76.9250),
-        GeoPoint(-12.0464, -76.9156),
-        GeoPoint(-12.0200, -76.8600),
-        GeoPoint(-11.9800, -76.8000),
-        GeoPoint(-11.9333, -76.7000),
-      ],
-      messages: [
-        ViajeMessage(
-          id: 'm1',
-          isDriver: true,
-          text: 'Hola, ya estoy en camino.',
-          timestamp: now.subtract(const Duration(minutes: 6)),
-        ),
-        ViajeMessage(
-          id: 'm2',
-          isDriver: false,
-          text: 'Perfecto, estaré en el punto de recojo.',
-          timestamp: now.subtract(const Duration(minutes: 5)),
-        ),
-        ViajeMessage(
-          id: 'm3',
-          isDriver: true,
-          text: 'Voy por la ruta indicada. Te aviso al llegar.',
-          timestamp: now.subtract(const Duration(minutes: 4)),
-        ),
-        ViajeMessage(
-          id: 'm4',
-          isDriver: false,
-          text: 'Gracias.',
-          timestamp: now.subtract(const Duration(minutes: 3)),
-        ),
-      ],
+      driverPosition: null,
+      messages: [],
       readOnlyChat: false,
       showAlternativePickup: false,
       alternativePickupText: null,
       finished: false,
+      locationError: null,
     );
   }
 }
 
+// ─── Controller ─────────────────────────────────────────────────────────────
+
 class ViajeController extends StateNotifier<ViajeState> {
   ViajeController() : super(ViajeState.initial());
 
-  Timer? _statusTimer;
   Timer? _etaTimer;
-  Timer? _vehicleTimer;
+  Timer? _locationTimer;
   bool _started = false;
+  String? _currentDriverId;
 
-  void start() {
-    if (_started) return;
+  /// Iniciar el ciclo de polling. Llamar con el driver_id de la reserva activa.
+  void start(String driverId) {
+    if (_started && _currentDriverId == driverId) return;
     _started = true;
+    _currentDriverId = driverId;
 
-    _statusTimer = Timer(const Duration(seconds: 6), () {
-      state = state.copyWith(status: ViajeStatus.conductorEnCamino);
-      state = state.copyWith(
-        showAlternativePickup: true,
-        alternativePickupText: 'Entrada principal, al lado del grifo.',
-      );
-      _statusTimer = Timer(const Duration(seconds: 8), () {
-        state = state.copyWith(status: ViajeStatus.enRuta);
-      });
-    });
+    // Primera carga inmediata
+    refreshFromSupabase(driverId);
 
+    // Poll de ubicación cada 15 s
+    _locationTimer?.cancel();
+    _locationTimer = Timer.periodic(
+      const Duration(seconds: 15),
+          (_) => refreshFromSupabase(driverId, silent: true),
+    );
+
+    // Decremento local de ETA cada 60 s (suaviza la UI entre polls)
+    _etaTimer?.cancel();
     _etaTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (state.finished) return;
       final next = (state.etaMinutes - 1).clamp(0, 999);
-      final banner = next <= 2;
+      final banner = next <= 2 && next > 0;
       state = state.copyWith(etaMinutes: next, showArrivalBanner: banner);
-      if (next == 0) {
-        _finishTrip();
-      }
     });
+  }
 
-    _vehicleTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (state.finished) return;
-      final next = (state.vehicleIndex + 1) % state.vehiclePath.length;
-      state = state.copyWith(vehicleIndex: next);
-    });
+  /// Lee driver_locations desde Supabase y actualiza el estado.
+  Future<void> refreshFromSupabase(String driverId, {bool silent = false}) async {
+    if (state.finished) return;
+    try {
+      final row = await Supabase.instance.client
+          .from('driver_locations')
+          .select('lat, lng, eta_minutes, estado')
+          .eq('driver_id', driverId)
+          .single();
+
+      final lat = (row['lat'] as num?)?.toDouble();
+      final lng = (row['lng'] as num?)?.toDouble();
+      final etaRaw = row['eta_minutes'] as int?;
+      final estado = row['estado']?.toString() ?? '';
+
+      if (lat == null || lng == null) {
+        state = state.copyWith(
+          locationError: 'La ubicación del conductor aún no está disponible.',
+        );
+        return;
+      }
+
+      final newStatus = _resolveStatus(estado);
+      final eta = etaRaw ?? state.etaMinutes;
+      final banner = eta <= 2 && eta > 0;
+
+      state = state.copyWith(
+        driverPosition: GeoPoint(lat, lng),
+        etaMinutes: eta,
+        showArrivalBanner: banner,
+        status: newStatus,
+        clearLocationError: true,
+      );
+    } catch (e) {
+      if (!silent) {
+        state = state.copyWith(
+          locationError:
+          'No se pudo obtener la ubicación: ${e.toString().replaceFirst('Exception: ', '')}',
+        );
+      }
+    }
+  }
+
+  ViajeStatus _resolveStatus(String estado) {
+    switch (estado) {
+      case 'en_viaje':
+        return ViajeStatus.enRuta;
+      case 'disponible':
+      case 'en_ruta':
+        return ViajeStatus.conductorEnCamino;
+      default:
+        return state.status; // no cambiar si no se reconoce
+    }
   }
 
   void dismissAlternativePickup() {
@@ -183,29 +215,19 @@ class ViajeController extends StateNotifier<ViajeState> {
     state = state.copyWith(showAlternativePickup: false);
   }
 
-  void sendMessage(String text) {
+  /// Agrega un mensaje local (el mensaje real se inserta en trip_messages
+  /// desde ChatScreen directamente en Supabase).
+  void addLocalMessage(ViajeMessage msg) {
     if (state.readOnlyChat) return;
-    final value = text.trim();
-    if (value.isEmpty) return;
-    final next = [
-      ...state.messages,
-      ViajeMessage(
-        id: 'm_${DateTime.now().microsecondsSinceEpoch}',
-        isDriver: false,
-        text: value,
-        timestamp: DateTime.now(),
-      ),
-    ];
-    state = state.copyWith(messages: next);
+    state = state.copyWith(messages: [...state.messages, msg]);
   }
 
-  void markFinished() {
-    _finishTrip();
-  }
+  void markFinished() => _finishTrip();
 
   void reset() {
     _cancelTimers();
     _started = false;
+    _currentDriverId = null;
     state = ViajeState.initial();
   }
 
@@ -216,12 +238,10 @@ class ViajeController extends StateNotifier<ViajeState> {
   }
 
   void _cancelTimers() {
-    _statusTimer?.cancel();
     _etaTimer?.cancel();
-    _vehicleTimer?.cancel();
-    _statusTimer = null;
+    _locationTimer?.cancel();
     _etaTimer = null;
-    _vehicleTimer = null;
+    _locationTimer = null;
   }
 
   @override
@@ -232,5 +252,5 @@ class ViajeController extends StateNotifier<ViajeState> {
 }
 
 final viajeProvider = StateNotifierProvider<ViajeController, ViajeState>(
-  (ref) => ViajeController(),
+      (ref) => ViajeController(),
 );
