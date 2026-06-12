@@ -91,7 +91,10 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
     if (!_started) {
       _started = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        controller.start();
+        final driverId = reserva.conductorSeleccionado?.driverId;
+        if (driverId != null && driverId.isNotEmpty) {
+          controller.start(driverId);
+        }
       });
     }
 

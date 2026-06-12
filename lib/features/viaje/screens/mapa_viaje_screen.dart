@@ -48,9 +48,9 @@ List<LatLng> _decodePolyline(String encoded) {
 Future<List<LatLng>> _fetchDirections(LatLng origin, LatLng destination) async {
   final url = Uri.parse(
     'https://maps.googleapis.com/maps/api/directions/json'
-    '?origin=${origin.latitude},${origin.longitude}'
-    '&destination=${destination.latitude},${destination.longitude}'
-    '&key=$_mapsApiKey&language=es',
+        '?origin=${origin.latitude},${origin.longitude}'
+        '&destination=${destination.latitude},${destination.longitude}'
+        '&key=$_mapsApiKey&language=es',
   );
   try {
     final response = await http.get(url);
@@ -120,6 +120,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
       _initialized = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _loadMapData(driver.driverId);
+        ref.read(viajeProvider.notifier).start(driver.driverId);
         _refreshTimer?.cancel();
         _refreshTimer = Timer.periodic(
           const Duration(seconds: 15),

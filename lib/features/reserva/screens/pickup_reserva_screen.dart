@@ -158,168 +158,177 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          AppCard(
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
+          Expanded(
+            child: SingleChildScrollView(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    'Ruta del conductor',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w700,
-                        ),
+                  AppCard(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Ruta del conductor',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            driver.routeLabel,
+                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: AppSpacing.xs),
+                  const SizedBox(height: AppSpacing.lg),
+                  if (_loadingContext) const LinearProgressIndicator(),
+                  if (_contextError != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: Text(
+                        'No se pudieron cargar los puntos de ruta: $_contextError',
+                        style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
+                      ),
+                    ),
                   Text(
-                    driver.routeLabel,
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
+                    '¿Dónde te recogemos?',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.textPrimary),
                   ),
+                  const SizedBox(height: AppSpacing.sm),
+                  if (_preferredFromProfile.isNotEmpty) ...[
+                    Text(
+                      'Tu punto favorito',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: ChoiceChip(
+                        label: Text(_preferredFromProfile, overflow: TextOverflow.ellipsis),
+                        selected: value.trim() == _preferredFromProfile,
+                        onSelected: (_) => _selectAddress(_preferredFromProfile),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+                  if (_routePickupAddresses.isNotEmpty) ...[
+                    Text(
+                      'Puntos de la ruta',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.sm,
+                      children: _routePickupAddresses.map((p) {
+                        return ChoiceChip(
+                          label: Text(p, overflow: TextOverflow.ellipsis),
+                          selected: value.trim() == p,
+                          onSelected: (_) => _selectAddress(p),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+                  Text(
+                    'Buscar otra dirección (Google Places)',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: AppColors.textPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  PlacesAddressSearchField(
+                    controller: _placesSearch,
+                    label: 'Dirección en Perú',
+                    hint: 'Ej: Av. Javier Prado, San Isidro',
+                    onAddressResolved: (formatted) => _selectAddress(formatted),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  OutlinedButton.icon(
+                    onPressed: _openMapPicker,
+                    icon: const Icon(Icons.map_rounded),
+                    label: const Text('Elegir en el mapa'),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  TextField(
+                    controller: _controller,
+                    onChanged: (_) => setState(() {}),
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      labelText: 'Punto de recojo final',
+                      hintText: 'Se rellena al elegir arriba; puedes editarlo',
+                      errorText: value.isEmpty || valid ? null : 'Mínimo 3 caracteres',
+                    ),
+                  ),
+                  if (favoritePickups.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      'Puntos guardados (local)',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.sm,
+                      children: favoritePickups
+                          .map(
+                            (p) => ActionChip(
+                          label: Text(p, overflow: TextOverflow.ellipsis),
+                          onPressed: () => _selectAddress(p),
+                        ),
+                      )
+                          .toList(),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.md),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _saveAsFavorite,
+                    onChanged: (v) => setState(() => _saveAsFavorite = v ?? false),
+                    title: const Text('Guardar como punto favorito en mi perfil'),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
-          if (_loadingContext) const LinearProgressIndicator(),
-          if (_contextError != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: Text(
-                'No se pudieron cargar los puntos de ruta: $_contextError',
-                style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
-              ),
-            ),
-          Text(
-            '¿Dónde te recogemos?',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.textPrimary),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          if (_preferredFromProfile.isNotEmpty) ...[
-            Text(
-              'Tu punto favorito',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: ChoiceChip(
-                label: Text(_preferredFromProfile, overflow: TextOverflow.ellipsis),
-                selected: value.trim() == _preferredFromProfile,
-                onSelected: (_) => _selectAddress(_preferredFromProfile),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-          ],
-          if (_routePickupAddresses.isNotEmpty) ...[
-            Text(
-              'Puntos de la ruta',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: _routePickupAddresses.map((p) {
-                return ChoiceChip(
-                  label: Text(p, overflow: TextOverflow.ellipsis),
-                  selected: value.trim() == p,
-                  onSelected: (_) => _selectAddress(p),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: AppSpacing.md),
-          ],
-          Text(
-            'Buscar otra dirección (Google Places)',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          PlacesAddressSearchField(
-            controller: _placesSearch,
-            label: 'Dirección en Perú',
-            hint: 'Ej: Av. Javier Prado, San Isidro',
-            onAddressResolved: (formatted) => _selectAddress(formatted),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          OutlinedButton.icon(
-            onPressed: _openMapPicker,
-            icon: const Icon(Icons.map_rounded),
-            label: const Text('Elegir en el mapa'),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          TextField(
-            controller: _controller,
-            onChanged: (_) => setState(() {}),
-            maxLines: 2,
-            decoration: InputDecoration(
-              labelText: 'Punto de recojo final',
-              hintText: 'Se rellena al elegir arriba; puedes editarlo',
-              errorText: value.isEmpty || valid ? null : 'Mínimo 3 caracteres',
-            ),
-          ),
-          if (favoritePickups.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'Puntos guardados (local)',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: favoritePickups
-                  .map(
-                    (p) => ActionChip(
-                      label: Text(p, overflow: TextOverflow.ellipsis),
-                      onPressed: () => _selectAddress(p),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.md),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            value: _saveAsFavorite,
-            onChanged: (v) => setState(() => _saveAsFavorite = v ?? false),
-            title: const Text('Guardar como punto favorito en mi perfil'),
-            controlAffinity: ListTileControlAffinity.leading,
-          ),
-          const Spacer(),
           AppPrimaryButton(
             label: 'Continuar',
             onPressed: valid && !_loadingContext
                 ? () async {
-                    final text = _controller.text.trim();
-                    controller.setPickup(text);
-                    if (_saveAsFavorite) {
-                      favorites.add(text);
-                      final uid = Supabase.instance.client.auth.currentUser?.id;
-                      if (uid != null) {
-                        try {
-                          await Supabase.instance.client
-                              .from('profiles')
-                              .update({'preferred_pickup': text}).eq('id', uid);
-                        } catch (_) {}
-                      }
-                    }
-                    if (context.mounted) context.push(AppRoutes.passengerReservaResumen);
-                  }
+              final text = _controller.text.trim();
+              controller.setPickup(text);
+              if (_saveAsFavorite) {
+                favorites.add(text);
+                final uid = Supabase.instance.client.auth.currentUser?.id;
+                if (uid != null) {
+                  try {
+                    await Supabase.instance.client
+                        .from('profiles')
+                        .update({'preferred_pickup': text}).eq('id', uid);
+                  } catch (_) {}
+                }
+              }
+              if (context.mounted) context.push(AppRoutes.passengerReservaResumen);
+            }
                 : null,
           ),
         ],
