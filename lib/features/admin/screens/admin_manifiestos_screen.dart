@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../app/router/app_routes.dart';
 
 final adminManifiestosProvider = FutureProvider<List<AdminManifestItem>>((ref) async {
   final manifests = await Supabase.instance.client
@@ -163,6 +164,11 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
         title: const Text('Manifiestos'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go(AppRoutes.adminHome),
+          tooltip: 'Volver al Inicio',
+        ),
         actions: [
           IconButton(
             onPressed: () => ref.refresh(adminManifiestosProvider),

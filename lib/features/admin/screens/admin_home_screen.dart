@@ -3,9 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../roles/admin/admin_shell_screen.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
@@ -110,7 +108,7 @@ class _AdminHomeScreenState extends ConsumerState<AdminHomeScreen> {
                             ),
                             const SizedBox(height: AppSpacing.xs),
                             Text(
-                              'Buenos días, ${_adminSaludoNombre(MockData.adminNombre)}',
+                              'Buenos días, ${_adminSaludoNombre('Administrador')}',
                               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                                     color: AppColors.white,
                                     fontWeight: FontWeight.w900,

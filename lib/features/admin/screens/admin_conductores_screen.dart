@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
 import '../../../roles/admin/admin_shell_screen.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
@@ -62,17 +61,18 @@ class AdminConductoresScreen extends ConsumerWidget {
                     itemCount: items.length,
                     itemBuilder: (context, index) {
                       final c = items[index];
+                      final id = c['id'];
                       return Padding(
                         padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                         child: _ConductorCard(
                           conductor: c,
-                          onTap: () => context.push('/admin/conductores/${c.id}'),
-                          onVerPerfil: () => context.push('/admin/conductores/${c.id}'),
-                          onEditar: () => context.push('/admin/conductores/${c.id}/editar'),
-                          onVerHistorial: () => context.push('/admin/conductores/${c.id}/historial'),
+                          onTap: () => context.push('/admin/conductores/$id'),
+                          onVerPerfil: () => context.push('/admin/conductores/$id'),
+                          onEditar: () => context.push('/admin/conductores/$id/editar'),
+                          onVerHistorial: () => context.push('/admin/conductores/$id/historial'),
                           onDesactivar: () async {
                             try {
-                              await controller.desactivarConductor(c.id);
+                              await controller.desactivarConductor(id);
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -92,7 +92,7 @@ class AdminConductoresScreen extends ConsumerWidget {
                           },
                           onReactivar: () async {
                             try {
-                              await controller.reactivarConductor(c.id);
+                              await controller.reactivarConductor(id);
                               if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
@@ -132,7 +132,7 @@ class _ConductorCard extends StatelessWidget {
     required this.onVerHistorial,
   });
 
-  final MockAdminConductor conductor;
+  final Map<String, dynamic> conductor;
   final VoidCallback onTap;
   final VoidCallback onVerPerfil;
   final VoidCallback onEditar;
@@ -143,8 +143,10 @@ class _ConductorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const avatarBg = Color(0xFF1E40AF);
-    final initials = _initials(conductor.nombres, conductor.apellidos);
-    final (chipBg, chipLabel) = _statusChip(conductor.estado);
+    final nombres = conductor['nombres']?.toString() ?? '';
+    final apellidos = conductor['apellidos']?.toString() ?? '';
+    final initials = _initials(nombres, apellidos);
+    final (chipBg, chipLabel) = _statusChip(conductor['estado']?.toString() ?? 'inactivo');
 
     return InkWell(
       onTap: onTap,
@@ -187,7 +189,7 @@ class _ConductorCard extends StatelessWidget {
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Text(
-                    conductor.nombreCompleto,
+                    '$nombres $apellidos'.trim(),
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                           color: const Color(0xFF314158),
                           fontWeight: FontWeight.w900,
@@ -224,7 +226,7 @@ class _ConductorCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(AppRadius.pill),
                   ),
                   child: Text(
-                    conductor.placa,
+                    conductor['placa']?.toString() ?? '',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: const Color(0xFF0F172A),
                           fontWeight: FontWeight.w900,
@@ -232,7 +234,7 @@ class _ConductorCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  conductor.vehiculoTipo,
+                  conductor['vehiculoTipo']?.toString() ?? '',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFF62748E),
                         fontSize: 14,
@@ -240,7 +242,7 @@ class _ConductorCard extends StatelessWidget {
                       ),
                 ),
                 Text(
-                  '${conductor.capacidad} asientos',
+                  '${conductor['capacidad']} asientos',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFF62748E),
                         fontSize: 14,
@@ -255,14 +257,17 @@ class _ConductorCard extends StatelessWidget {
                 const Icon(Icons.percent_rounded, size: 18, color: Color(0xFF62748E)),
                 const SizedBox(width: 6),
                 Text(
-                  '${conductor.comisionPorcentaje.toStringAsFixed(1)}%',
+                  '${(conductor['comisionPorcentaje'] as double?)?.toStringAsFixed(1) ?? '15.0'}%',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFF314158),
                         fontWeight: FontWeight.w800,
                       ),
                 ),
                 const SizedBox(width: AppSpacing.md),
-                _Stars(rating: conductor.ratingPromedio, count: conductor.ratingCount),
+                _Stars(
+                  rating: (conductor['ratingPromedio'] as double?) ?? 0.0,
+                  count: (conductor['ratingCount'] as int?) ?? 0,
+                ),
                 const Spacer(),
                 PopupMenuButton<_ConductorMenuAction>(
                   icon: const Icon(Icons.more_horiz_rounded, color: AppColors.textSecondary),
@@ -300,7 +305,7 @@ class _ConductorCard extends StatelessWidget {
                         child: Text('Ver historial'),
                       ),
                     ];
-                    if (conductor.estado == MockAdminConductorEstado.inactivo) {
+                    if (conductor['estado'] == 'inactivo') {
                       items.insert(
                         2,
                         const PopupMenuItem(
@@ -325,7 +330,7 @@ class _ConductorCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Align(
               alignment: Alignment.centerRight,
-              child: conductor.estado == MockAdminConductorEstado.inactivo
+              child: conductor['estado'] == 'inactivo'
                   ? FilledButton(
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF16A34A),
@@ -402,16 +407,18 @@ String _initials(String nombres, String apellidos) {
   return out.isEmpty ? '—' : out;
 }
 
-(Color, String) _statusChip(MockAdminConductorEstado estado) {
+(Color, String) _statusChip(String estado) {
   switch (estado) {
-    case MockAdminConductorEstado.enRuta:
+    case 'en_ruta':
       return (const Color(0xFF2563EB), 'En ruta');
-    case MockAdminConductorEstado.disponible:
+    case 'disponible':
       return (const Color(0xFF16A34A), 'Disponible');
-    case MockAdminConductorEstado.inactivo:
+    case 'inactivo':
       return (const Color(0xFF94A3B8), 'Inactivo');
-    case MockAdminConductorEstado.bloqueado:
+    case 'bloqueado':
       return (const Color(0xFFDC2626), 'Bloqueado');
+    default:
+      return (const Color(0xFF94A3B8), 'Desconocido');
   }
 }
 

@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
-import '../../../core/mock/mock_data.dart';
+
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -93,8 +93,10 @@ class AdminConductorDetalleScreen extends ConsumerStatefulWidget {
 }
 
 class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDetalleScreen> {
-  Future<void> _openComisionSheet(MockAdminConductor conductor) async {
-    final initial = (conductor.comisionPendientePorcentaje ?? conductor.comisionPorcentaje).clamp(0.0, 30.0);
+  Future<void> _openComisionSheet(Map<String, dynamic> conductor) async {
+    final pendiente = (conductor['comisionPendientePorcentaje'] as num?)?.toDouble();
+    final actual = (conductor['comisionPorcentaje'] as num?)?.toDouble() ?? 15.0;
+    final initial = (pendiente ?? actual).clamp(0.0, 30.0);
     final result = await showModalBottomSheet<double>(
       context: context,
       showDragHandle: true,
@@ -104,7 +106,8 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     if (!mounted) return;
     if (result == null) return;
 
-    ref.read(adminConductoresProvider.notifier).actualizarComision(conductor.id, result);
+    final id = conductor['id']?.toString() ?? '';
+    ref.read(adminConductoresProvider.notifier).actualizarComision(id, result);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         backgroundColor: AppColors.success,
@@ -113,7 +116,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     );
   }
 
-  Future<void> _confirmDesbloqueo(MockAdminConductor conductor) async {
+  Future<void> _confirmDesbloqueo(Map<String, dynamic> conductor) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -141,7 +144,8 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     if (!mounted) return;
     if (ok != true) return;
 
-    ref.read(adminConductoresProvider.notifier).desbloquearConductor(conductor.id);
+    final id = conductor['id']?.toString() ?? '';
+    ref.read(adminConductoresProvider.notifier).desbloquearConductor(id);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         backgroundColor: AppColors.success,
@@ -150,8 +154,8 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     );
   }
 
-  Future<void> _confirmDesactivar(MockAdminConductor conductor) async {
-    final warning = conductor.estado == MockAdminConductorEstado.enRuta;
+  Future<void> _confirmDesactivar(Map<String, dynamic> conductor) async {
+    final warning = conductor['estado'] == 'en_ruta';
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -180,7 +184,8 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     if (!mounted) return;
     if (ok != true) return;
 
-    await ref.read(adminConductoresProvider.notifier).desactivarConductor(conductor.id);
+    final id = conductor['id']?.toString() ?? '';
+    await ref.read(adminConductoresProvider.notifier).desactivarConductor(id);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -190,7 +195,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     );
   }
 
-  Future<void> _confirmReactivar(MockAdminConductor conductor) async {
+  Future<void> _confirmReactivar(Map<String, dynamic> conductor) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -214,7 +219,8 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     );
     if (!mounted) return;
     if (ok != true) return;
-    await ref.read(adminConductoresProvider.notifier).reactivarConductor(conductor.id);
+    final id = conductor['id']?.toString() ?? '';
+    await ref.read(adminConductoresProvider.notifier).reactivarConductor(id);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -239,30 +245,45 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
       );
     }
 
-    final actividadAsync = ref.watch(adminConductorActividadProvider(conductor.driverRecordId ?? ''));
-    final initials = _initials(conductor.nombres, conductor.apellidos);
+    final id = conductor['id']?.toString() ?? '';
+    final driverRecordId = conductor['driverRecordId']?.toString() ?? '';
+    final nombres = conductor['nombres']?.toString() ?? '';
+    final apellidos = conductor['apellidos']?.toString() ?? '';
+    final nombreCompleto = '$nombres $apellidos'.trim();
+    final placa = conductor['placa']?.toString() ?? '';
+    final vehiculoTipo = conductor['vehiculoTipo']?.toString() ?? '';
+    final capacidad = (conductor['capacidad'] as num?)?.toInt() ?? 0;
+    final ratingPromedio = (conductor['ratingPromedio'] as num?)?.toDouble() ?? 0.0;
+    final ratingCount = (conductor['ratingCount'] as num?)?.toInt() ?? 0;
+    final estado = conductor['estado']?.toString() ?? '';
+    final bloqueadoPorPago = conductor['bloqueadoPorPago'] == true;
+    final comisionPorcentaje = (conductor['comisionPorcentaje'] as num?)?.toDouble() ?? 15.0;
+    final comisionPendientePorcentaje = (conductor['comisionPendientePorcentaje'] as num?)?.toDouble();
+
+    final actividadAsync = ref.watch(adminConductorActividadProvider(driverRecordId));
+    final initials = _initials(nombres, apellidos);
     final estaEnRuta = actividadAsync.maybeWhen(
       data: (actividad) => actividad.estaEnRuta,
-      orElse: () => conductor.estado == MockAdminConductorEstado.enRuta,
+      orElse: () => estado == 'en_ruta',
     );
     final (chipBg, chipFg, chipLabel) = _statusChip(estaEnRuta);
-    final showUnlock = conductor.bloqueadoPorPago || conductor.estado == MockAdminConductorEstado.bloqueado;
-    final showDeactivate = conductor.estado != MockAdminConductorEstado.inactivo;
-    final showReactivate = conductor.estado == MockAdminConductorEstado.inactivo;
+    final showUnlock = bloqueadoPorPago || estado == 'bloqueado';
+    final showDeactivate = estado != 'inactivo';
+    final showReactivate = estado == 'inactivo';
 
     return Scaffold(
       backgroundColor: pageBg,
       appBar: AppBar(
-        title: Text(conductor.nombreCompleto),
+        title: Text(nombreCompleto),
         actions: [
           PopupMenuButton<_DetalleAction>(
             onSelected: (value) {
               switch (value) {
                 case _DetalleAction.editar:
-                  context.push('/admin/conductores/${conductor.id}/editar');
+                  context.push('/admin/conductores/$id/editar');
                   return;
                 case _DetalleAction.historial:
-                  context.push('/admin/conductores/${conductor.id}/historial');
+                  context.push('/admin/conductores/$id/historial');
                   return;
               }
             },
@@ -310,7 +331,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  conductor.nombreCompleto,
+                  nombreCompleto,
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: AppColors.textPrimary,
                         fontWeight: FontWeight.w900,
@@ -334,7 +355,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                   ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                _Stars(rating: conductor.ratingPromedio, count: conductor.ratingCount, big: true),
+                _Stars(rating: ratingPromedio, count: ratingCount, big: true),
               ],
             ),
           ),
@@ -358,7 +379,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Placa: ${conductor.placa}',
+                  'Placa: $placa',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,
@@ -366,7 +387,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Tipo: ${conductor.vehiculoTipo}',
+                  'Tipo: $vehiculoTipo',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,
@@ -374,7 +395,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Capacidad: ${conductor.capacidad} asientos',
+                  'Capacidad: $capacidad asientos',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w700,
@@ -426,7 +447,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  '${conductor.comisionPorcentaje.toStringAsFixed(1)}%',
+                  '${comisionPorcentaje.toStringAsFixed(1)}%',
                   style: Theme.of(context).textTheme.displaySmall?.copyWith(
                         color: const Color(0xFF2563EB),
                         fontWeight: FontWeight.w900,
@@ -435,13 +456,13 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Por cada S/480 recaudados → S/ ${(480 * conductor.comisionPorcentaje / 100).toStringAsFixed(0)} de comisión',
+                  'Por cada S/480 recaudados → S/ ${(480 * comisionPorcentaje / 100).toStringAsFixed(0)} de comisión',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textSecondary,
                         fontWeight: FontWeight.w600,
                       ),
                 ),
-                if (conductor.comisionPendientePorcentaje != null) ...[
+                if (comisionPendientePorcentaje != null) ...[
                   const SizedBox(height: AppSpacing.sm),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
@@ -450,7 +471,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                       borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
                     child: Text(
-                      'Cambio pendiente: ${conductor.comisionPendientePorcentaje!.toStringAsFixed(1)}% (aplica desde mañana)',
+                      'Cambio pendiente: ${comisionPendientePorcentaje.toStringAsFixed(1)}% (aplica desde mañana)',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: const Color(0xFF92400E),
                             fontWeight: FontWeight.w800,
@@ -568,7 +589,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                           ),
                         ),
                         TextButton(
-                          onPressed: () => context.push('/admin/conductores/${conductor.id}/historial'),
+                          onPressed: () => context.push('/admin/conductores/$id/historial'),
                           child: const Text('Ver todos'),
                         ),
                       ],
@@ -633,7 +654,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
                         ),
                       ),
                     OutlinedButton(
-                      onPressed: () => context.push('/admin/conductores/${conductor.id}/historial'),
+                      onPressed: () => context.push('/admin/conductores/$id/historial'),
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
                         shape: RoundedRectangleBorder(

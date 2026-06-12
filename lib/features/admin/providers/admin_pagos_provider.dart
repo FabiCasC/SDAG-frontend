@@ -2,8 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'admin_conductores_provider.dart';
-import '../../../core/mock/mock_data.dart';
-
+import 'admin_conductores_provider.dart';
 class AdminPagosState {
   const AdminPagosState({
     required this.solicitudesPendientes,
@@ -85,9 +84,10 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
           .select('id, profile_id, gross_amount, commission_amount, status, created_at')
           .order('created_at', ascending: false);
 
-      final byProfile = <String, MockAdminConductor>{};
+      final byProfile = <String, Map<String, dynamic>>{};
       for (final c in ref.read(adminConductoresProvider).listaConductores) {
-        byProfile[c.id] = c;
+        final id = c['id']?.toString();
+        if (id != null) byProfile[id] = c;
       }
 
       final solicitudes = <AdminPagoSolicitud>[];
@@ -101,17 +101,19 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
           if (id == null || profileId == null || createdAt == null || monto == null || total == null) continue;
           if (status != 'pendiente') continue;
           final c = byProfile[profileId];
+          final nombre = c != null ? '${c['nombres'] ?? ''} ${c['apellidos'] ?? ''}'.trim() : profileId;
+          
           solicitudes.add(
             AdminPagoSolicitud(
               id: id,
               profileId: profileId,
-              conductor: c?.nombreCompleto ?? profileId,
-              placa: c?.placa ?? '—',
+              conductor: nombre.isEmpty ? profileId : nombre,
+              placa: c?['placa']?.toString() ?? '—',
               monto: monto,
-              porcentaje: c?.comisionPorcentaje ?? 15.0,
+              porcentaje: (c?['comisionPorcentaje'] as num?)?.toDouble() ?? 15.0,
               totalRecaudado: total,
               solicitadoAt: createdAt,
-              detalleViajes: _buildDetalleViajes(total, createdAt),
+              detalleViajes: await _fetchDetalleViajes(c?['driverRecordId']?.toString() ?? '', createdAt),
             ),
           );
       }
@@ -126,17 +128,19 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
           final estado = pm['status']?.toString() ?? '—';
           if (id == null || profileId == null || createdAt == null || monto == null || total == null) continue;
           final c = byProfile[profileId];
+          final nombre = c != null ? '${c['nombres'] ?? ''} ${c['apellidos'] ?? ''}'.trim() : profileId;
+          
           historial.add(
             AdminPagoHistorial(
               id: id,
-              conductor: c?.nombreCompleto ?? profileId,
-              placa: c?.placa ?? '—',
+              conductor: nombre.isEmpty ? profileId : nombre,
+              placa: c?['placa']?.toString() ?? '—',
               monto: monto,
-              porcentaje: c?.comisionPorcentaje ?? 15.0,
+              porcentaje: (c?['comisionPorcentaje'] as num?)?.toDouble() ?? 15.0,
               totalRecaudado: total,
               confirmadoAt: createdAt,
               estado: estado,
-              detalleViajes: _buildDetalleViajes(total, createdAt),
+              detalleViajes: await _fetchDetalleViajes(c?['driverRecordId']?.toString() ?? '', createdAt),
             ),
           );
       }
@@ -194,34 +198,46 @@ class AdminPagosController extends StateNotifier<AdminPagosState> {
     final selected = conductores.isEmpty ? null : conductores.first;
     if (selected == null) return null;
 
-    final porcentaje = selected.comisionPorcentaje;
-    final total = 720.0;
+    final profileId = selected['id']?.toString();
+    final driverRecordId = selected['driverRecordId']?.toString();
+    if (profileId == null || driverRecordId == null) return null;
+
+    final porcentaje = (selected['comisionPorcentaje'] as double?) ?? 15.0;
+    
+    // Fetch real trips to calculate total
+    final detalleViajes = await _fetchDetalleViajes(driverRecordId, now);
+    final total = detalleViajes.fold<double>(0, (sum, item) => sum + item.monto);
+    if (total <= 0) return null; // No hay viajes para cobrar
+
     final monto = (total * porcentaje / 100);
     try {
       final row = await Supabase.instance.client.from('driver_payout_requests').insert({
-        'profile_id': selected.id,
+        'profile_id': profileId,
         'status': 'pendiente',
         'gross_amount': total,
         'commission_amount': double.parse(monto.toStringAsFixed(0)),
         'created_at': now.toIso8601String(),
       }).select('id').single();
       final id = row['id']?.toString() ?? 'sol-${now.millisecondsSinceEpoch}';
+      
+      final nombreCompleto = '${selected['nombres']} ${selected['apellidos']}';
+      
       final solicitud = AdminPagoSolicitud(
         id: id,
-        profileId: selected.id,
-        conductor: selected.nombreCompleto,
-        placa: selected.placa,
+        profileId: profileId,
+        conductor: nombreCompleto.trim(),
+        placa: selected['placa']?.toString() ?? '',
         monto: double.parse(monto.toStringAsFixed(0)),
         porcentaje: porcentaje,
         totalRecaudado: total,
         solicitadoAt: now,
-        detalleViajes: _buildDetalleViajes(total, now),
+        detalleViajes: detalleViajes,
       );
       state = state.copyWith(
         solicitudesPendientes: [...state.solicitudesPendientes, solicitud],
         banner: AdminPagoBanner(
           solicitudId: solicitud.id,
-          message: 'Nueva solicitud de pago — ${selected.nombreCompleto}: S/ ${solicitud.monto.toStringAsFixed(0)}',
+          message: 'Nueva solicitud de pago — ${nombreCompleto.trim()}: S/ ${solicitud.monto.toStringAsFixed(0)}',
         ),
       );
       return solicitud;
@@ -307,21 +323,34 @@ class AdminPagoBanner {
   final String message;
 }
 
-List<AdminPagoDetalleViaje> _buildDetalleViajes(double total, DateTime base) {
-  final t = total <= 0 ? 0.0 : total;
-  final a = (t * 0.35);
-  final b = (t * 0.33);
-  final c = (t - a - b);
-  String fmt(DateTime dt) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-    final ampm = dt.hour >= 12 ? 'PM' : 'AM';
-    return '${two(h)}:${two(dt.minute)} $ampm';
+Future<List<AdminPagoDetalleViaje>> _fetchDetalleViajes(String driverId, DateTime until) async {
+  try {
+    final tripsRaw = await Supabase.instance.client
+        .from('trips')
+        .select('id, amount, created_at, status')
+        .eq('driver_id', driverId)
+        .eq('status', 'completado')
+        .lte('created_at', until.toIso8601String())
+        .order('created_at', ascending: false)
+        .limit(10);
+        
+    final list = <AdminPagoDetalleViaje>[];
+    int count = 1;
+    for (final tm in (tripsRaw as List).cast<Map<String, dynamic>>()) {
+      final amount = ((tm['amount'] as num?)?.toDouble()) ?? 0.0;
+      final createdAtStr = tm['created_at']?.toString() ?? '';
+      final dt = DateTime.tryParse(createdAtStr) ?? DateTime.now();
+      
+      String two(int v) => v.toString().padLeft(2, '0');
+      final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+      final timeStr = '${two(h)}:${two(dt.minute)} $ampm';
+      
+      list.add(AdminPagoDetalleViaje(label: 'Viaje $count · $timeStr', monto: amount));
+      count++;
+    }
+    return list;
+  } catch (_) {
+    return [];
   }
-
-  return [
-    AdminPagoDetalleViaje(label: 'Viaje 1 · ${fmt(base.subtract(const Duration(hours: 3)))}', monto: a),
-    AdminPagoDetalleViaje(label: 'Viaje 2 · ${fmt(base.subtract(const Duration(hours: 2)))}', monto: b),
-    AdminPagoDetalleViaje(label: 'Viaje 3 · ${fmt(base.subtract(const Duration(hours: 1)))}', monto: c),
-  ];
 }

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/mock/mock_data.dart';
+
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -74,7 +74,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
     _comisionController.text = nextText;
   }
 
-  Future<void> _save(MockAdminConductor current) async {
+  Future<void> _save(Map<String, dynamic> current) async {
     if (_saving) return;
     setState(() => _saving = true);
     await Future<void>.delayed(const Duration(milliseconds: 650));
@@ -92,8 +92,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
     final correoValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(correo);
 
     final state = ref.read(adminConductoresProvider);
-    final placaDuplicada = placaValid &&
-        state.listaConductores.any((e) => e.id != current.id && e.placa.toUpperCase() == placa);
+    final placaDuplicada = placaValid && state.listaConductores.any((e) => e['id'] != current['id'] && (e['placa']?.toString() ?? '').toUpperCase() == placa);
 
     final canSave = nombresOk && apellidosOk && dniValid && placaValid && telefonoValid && correoValid && !placaDuplicada;
     if (!canSave) {
@@ -106,13 +105,13 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
 
     final controller = ref.read(adminConductoresProvider.notifier);
     final edit = await controller.editarConductor(
-      id: current.id,
+      id: current['id']?.toString() ?? '',
       telefono: _telefonoController.text,
       correo: _correoController.text,
       placa: _placaController.text,
       capacidad: _capacidad,
-      comisionPorcentaje: current.comisionPorcentaje,
-      cuentaActiva: current.estado != MockAdminConductorEstado.inactivo,
+      comisionPorcentaje: (current['comisionPorcentaje'] as num?)?.toDouble() ?? 15.0,
+      cuentaActiva: current['estado'] != 'inactivo',
     );
     if (!mounted) return;
 
@@ -132,7 +131,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
     }
 
     if (_comision != _comisionOriginal && _comision > 0 && _comision <= 30) {
-      controller.actualizarComision(current.id, _comision);
+      controller.actualizarComision(current['id']?.toString() ?? '', _comision);
     }
 
     final now = DateTime.now();
@@ -144,7 +143,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
       SnackBar(backgroundColor: AppColors.success, content: Text('Cambios guardados con fecha $stamp')),
     );
     if (!mounted) return;
-    context.go('/admin/conductores/${current.id}');
+    context.go('/admin/conductores/${current['id']?.toString() ?? ''}');
   }
 
   @override
@@ -164,15 +163,18 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
 
     if (!_prefilled) {
       _prefilled = true;
-      _nombresController.text = current.nombres;
-      _apellidosController.text = current.apellidos;
-      _dniController.text = current.dni;
-      _telefonoController.text = current.telefono == '—' ? '' : current.telefono;
-      _correoController.text = current.correo;
-      _placaController.text = current.placa;
-      _vehiculoTipo = current.vehiculoTipo;
-      _capacidad = current.capacidad;
-      _comisionOriginal = current.comisionPendientePorcentaje ?? current.comisionPorcentaje;
+      _nombresController.text = current['nombres']?.toString() ?? '';
+      _apellidosController.text = current['apellidos']?.toString() ?? '';
+      _dniController.text = current['dni']?.toString() ?? '';
+      final tel = current['telefono']?.toString() ?? '';
+      _telefonoController.text = tel == '—' ? '' : tel;
+      _correoController.text = current['correo']?.toString() ?? '';
+      _placaController.text = current['placa']?.toString() ?? '';
+      _vehiculoTipo = current['vehiculoTipo']?.toString() ?? 'Toyota Hiace';
+      _capacidad = (current['capacidad'] as num?)?.toInt() ?? 8;
+      final pendiente = (current['comisionPendientePorcentaje'] as num?)?.toDouble();
+      final actual = (current['comisionPorcentaje'] as num?)?.toDouble() ?? 15.0;
+      _comisionOriginal = pendiente ?? actual;
       _comision = _comisionOriginal;
       _comisionController.text = _comision.toStringAsFixed(1);
     }
@@ -186,8 +188,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
     final correo = _correoController.text.trim();
     final correoValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(correo);
 
-    final placaDuplicada =
-        placaValid && state.listaConductores.any((e) => e.id != current.id && e.placa.toUpperCase() == placa);
+    final placaDuplicada = placaValid && state.listaConductores.any((e) => e['id'] != current['id'] && (e['placa']?.toString() ?? '').toUpperCase() == placa);
 
     final nombresOk = _nombresController.text.trim().isNotEmpty;
     final apellidosOk = _apellidosController.text.trim().isNotEmpty;
@@ -199,7 +200,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
       appBar: AppBar(
         backgroundColor: appBarBg,
         foregroundColor: AppColors.white,
-        title: Text('Editar ${current.placa}'),
+        title: Text('Editar ${current['placa']?.toString() ?? ''}'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.p20),
