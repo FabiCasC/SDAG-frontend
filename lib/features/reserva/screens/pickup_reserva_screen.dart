@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +14,9 @@ import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/favorite_pickups_provider.dart';
 import '../providers/reserva_provider.dart';
 
+/// Origen del último cambio de texto (no programático).
+enum _PickupEditSource { none, places, pickup }
+
 class PickupReservaScreen extends ConsumerStatefulWidget {
   const PickupReservaScreen({super.key});
 
@@ -20,34 +25,91 @@ class PickupReservaScreen extends ConsumerStatefulWidget {
 }
 
 class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
-  late final TextEditingController _controller;
-  final _placesSearch = TextEditingController();
+  late final TextEditingController _placesCtrl;
+  late final TextEditingController _pickupCtrl;
   bool _saveAsFavorite = false;
 
   String _preferredFromProfile = '';
   List<String> _routePickupAddresses = const [];
   bool _loadingContext = true;
   String? _contextError;
-  String? _loadedTripId;
+  String? _contextLoadTripId;
+
+  bool _ignoreControllerEvents = false;
+  _PickupEditSource _lastEdit = _PickupEditSource.none;
+
+  void _onPlacesTextChanged() {
+    if (_ignoreControllerEvents) return;
+    _lastEdit = _PickupEditSource.places;
+    if (mounted) setState(() {});
+  }
+
+  void _onPickupTextChanged() {
+    if (_ignoreControllerEvents) return;
+    _lastEdit = _PickupEditSource.pickup;
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController();
+    _placesCtrl = TextEditingController();
+    _pickupCtrl = TextEditingController();
+    _placesCtrl.addListener(_onPlacesTextChanged);
+    _pickupCtrl.addListener(_onPickupTextChanged);
   }
 
   @override
   void dispose() {
-    _controller.dispose();
-    _placesSearch.dispose();
+    _placesCtrl.removeListener(_onPlacesTextChanged);
+    _pickupCtrl.removeListener(_onPickupTextChanged);
+    _placesCtrl.dispose();
+    _pickupCtrl.dispose();
     super.dispose();
   }
 
+  void _setBothFields(String value) {
+    _ignoreControllerEvents = true;
+    _pickupCtrl.text = value;
+    _placesCtrl.text = value;
+    _ignoreControllerEvents = false;
+    _lastEdit = _PickupEditSource.none;
+    if (mounted) setState(() {});
+  }
+
+  void _selectAddress(String value) {
+    _setBothFields(value);
+  }
+
+  /// Texto al continuar según si el usuario escribió en Places o en el campo final
+  /// (dos TextField con un solo controller falla en varias plataformas).
+  String _effectivePickupTrimmed() {
+    final p = _pickupCtrl.text.trim();
+    final q = _placesCtrl.text.trim();
+    if (_lastEdit == _PickupEditSource.places && q.length >= 3) return q;
+    if (_lastEdit == _PickupEditSource.pickup && p.length >= 3) return p;
+    if (p.length >= 3) return p;
+    if (q.length >= 3) return q;
+    return p.isNotEmpty ? p : q;
+  }
+
+  bool _isValidEffective() => _effectivePickupTrimmed().length >= 3;
+
   Future<void> _loadContextForTrip(String tripId) async {
+    if (!mounted) return;
+    if (tripId.trim().isEmpty) {
+      setState(() {
+        _loadingContext = false;
+        _contextError = 'Este viaje no tiene identificador; no se pueden cargar puntos de ruta.';
+      });
+      return;
+    }
+
     setState(() {
       _loadingContext = true;
       _contextError = null;
     });
+
     try {
       final userId = Supabase.instance.client.auth.currentUser?.id;
       var preferred = '';
@@ -80,15 +142,19 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       setState(() {
         _preferredFromProfile = preferred;
         _routePickupAddresses = routePoints;
-        _loadingContext = false;
       });
       _syncInitialPickup();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _loadingContext = false;
         _contextError = e.toString();
       });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingContext = false;
+        });
+      }
     }
   }
 
@@ -96,28 +162,17 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     final reserva = ref.read(reservaProvider);
     final current = reserva.puntoRecojo?.trim();
     if (current != null && current.isNotEmpty) {
-      _controller.text = current;
-      _placesSearch.text = current;
+      _setBothFields(current);
       return;
     }
     if (_preferredFromProfile.isNotEmpty) {
-      _controller.text = _preferredFromProfile;
-      _placesSearch.text = _preferredFromProfile;
+      _setBothFields(_preferredFromProfile);
       return;
     }
     if (_routePickupAddresses.isNotEmpty) {
-      _controller.text = _routePickupAddresses.first;
-      _placesSearch.text = _routePickupAddresses.first;
+      _setBothFields(_routePickupAddresses.first);
     }
   }
-
-  void _selectAddress(String value) {
-    _controller.text = value;
-    _placesSearch.text = value;
-    setState(() {});
-  }
-
-  bool _isValid(String value) => value.trim().length >= 3;
 
   Future<void> _openMapPicker() async {
     final addr = await showMapPickAddressSheet(context);
@@ -125,13 +180,62 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     _selectAddress(addr.trim());
   }
 
+  Future<void> _onContinue() async {
+    if (_loadingContext) return;
+    final text = _effectivePickupTrimmed();
+    if (text.length < 3) {
+      if (!mounted) return;
+      AppSnackbars.warning(context, 'Indica un punto de recojo (mínimo 3 caracteres).');
+      return;
+    }
+
+    final reservaNotifier = ref.read(reservaProvider.notifier);
+    final favorites = ref.read(favoritePickupsProvider.notifier);
+
+    reservaNotifier.setPickup(text);
+    if (_saveAsFavorite) {
+      favorites.add(text);
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid != null) {
+        try {
+          await Supabase.instance.client.from('profiles').update({'preferred_pickup': text}).eq('id', uid);
+        } catch (_) {}
+      }
+    }
+    if (mounted) context.push(AppRoutes.passengerReservaResumen);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final driver = ref.read(reservaProvider).conductorSeleccionado;
+    if (driver == null) return;
+    final tripId = driver.tripId.trim();
+    if (tripId.isEmpty) {
+      if (_contextLoadTripId != '') {
+        _contextLoadTripId = '';
+        scheduleMicrotask(() {
+          if (mounted) {
+            setState(() {
+              _loadingContext = false;
+              _contextError = 'Viaje sin ID; vuelve a elegir asientos.';
+            });
+          }
+        });
+      }
+      return;
+    }
+    if (_contextLoadTripId == tripId) return;
+    _contextLoadTripId = tripId;
+    scheduleMicrotask(() {
+      if (mounted) _loadContextForTrip(tripId);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final reserva = ref.watch(reservaProvider);
-    final controller = ref.read(reservaProvider.notifier);
-    final favorites = ref.read(favoritePickupsProvider.notifier);
+    final driver = ref.watch(reservaProvider).conductorSeleccionado;
     final favoritePickups = ref.watch(favoritePickupsProvider);
-    final driver = reserva.conductorSeleccionado;
 
     if (driver == null) {
       return const AppScaffold(
@@ -143,15 +247,8 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       );
     }
 
-    if (_loadedTripId != driver.tripId) {
-      _loadedTripId = driver.tripId;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _loadContextForTrip(driver.tripId);
-      });
-    }
-
-    final value = _controller.text;
-    final valid = _isValid(value);
+    final value = _effectivePickupTrimmed();
+    final valid = _isValidEffective();
 
     return AppScaffold(
       title: 'Punto de recojo',
@@ -160,6 +257,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
         children: [
           Expanded(
             child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -172,16 +270,16 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                           Text(
                             'Ruta del conductor',
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w700,
-                            ),
+                                  color: AppColors.textPrimary,
+                                  fontWeight: FontWeight.w700,
+                                ),
                           ),
                           const SizedBox(height: AppSpacing.xs),
                           Text(
                             driver.routeLabel,
                             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
+                                  color: AppColors.textSecondary,
+                                ),
                           ),
                         ],
                       ),
@@ -206,16 +304,16 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                     Text(
                       'Tu punto favorito',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: ChoiceChip(
                         label: Text(_preferredFromProfile, overflow: TextOverflow.ellipsis),
-                        selected: value.trim() == _preferredFromProfile,
+                        selected: value == _preferredFromProfile,
                         onSelected: (_) => _selectAddress(_preferredFromProfile),
                       ),
                     ),
@@ -225,9 +323,9 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                     Text(
                       'Puntos de la ruta',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
@@ -236,7 +334,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                       children: _routePickupAddresses.map((p) {
                         return ChoiceChip(
                           label: Text(p, overflow: TextOverflow.ellipsis),
-                          selected: value.trim() == p,
+                          selected: value == p,
                           onSelected: (_) => _selectAddress(p),
                         );
                       }).toList(),
@@ -246,13 +344,13 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                   Text(
                     'Buscar otra dirección (Google Places)',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
+                          color: AppColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                        ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   PlacesAddressSearchField(
-                    controller: _placesSearch,
+                    controller: _placesCtrl,
                     label: 'Dirección en Perú',
                     hint: 'Ej: Av. Javier Prado, San Isidro',
                     onAddressResolved: (formatted) => _selectAddress(formatted),
@@ -265,8 +363,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   TextField(
-                    controller: _controller,
-                    onChanged: (_) => setState(() {}),
+                    controller: _pickupCtrl,
                     maxLines: 2,
                     decoration: InputDecoration(
                       labelText: 'Punto de recojo final',
@@ -279,9 +376,9 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                     Text(
                       'Puntos guardados (local)',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w700,
-                      ),
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
@@ -290,10 +387,10 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                       children: favoritePickups
                           .map(
                             (p) => ActionChip(
-                          label: Text(p, overflow: TextOverflow.ellipsis),
-                          onPressed: () => _selectAddress(p),
-                        ),
-                      )
+                              label: Text(p, overflow: TextOverflow.ellipsis),
+                              onPressed: () => _selectAddress(p),
+                            ),
+                          )
                           .toList(),
                     ),
                   ],
@@ -310,26 +407,14 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
               ),
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
           AppPrimaryButton(
             label: 'Continuar',
-            onPressed: valid && !_loadingContext
-                ? () async {
-              final text = _controller.text.trim();
-              controller.setPickup(text);
-              if (_saveAsFavorite) {
-                favorites.add(text);
-                final uid = Supabase.instance.client.auth.currentUser?.id;
-                if (uid != null) {
-                  try {
-                    await Supabase.instance.client
-                        .from('profiles')
-                        .update({'preferred_pickup': text}).eq('id', uid);
-                  } catch (_) {}
-                }
-              }
-              if (context.mounted) context.push(AppRoutes.passengerReservaResumen);
-            }
-                : null,
+            onPressed: _loadingContext
+                ? null
+                : () {
+                    unawaited(_onContinue());
+                  },
           ),
         ],
       ),
