@@ -115,7 +115,7 @@ class BusquedaService {
             .from('reservations')
             .select('seats')
             .eq('trip_id', tripId)
-            .eq('status', 'activa');
+            .inFilter('status', ['activa', 'completada']);
 
         var occupiedSeats = 0;
         for (final rawReservation in reservationsRes as List) {

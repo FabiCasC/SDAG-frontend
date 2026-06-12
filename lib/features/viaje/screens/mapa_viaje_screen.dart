@@ -155,6 +155,11 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
               zoomGesturesEnabled: true,
               tiltGesturesEnabled: true,
               rotateGesturesEnabled: true,
+              zoomControlsEnabled: true,
+              compassEnabled: true,
+              mapToolbarEnabled: true,
+              myLocationEnabled: true,
+              myLocationButtonEnabled: true,
               onMapCreated: (controller) {
                 _mapController = controller;
                 _fitBounds();
@@ -176,8 +181,6 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                     icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
                   ),
               },
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: true,
             ),
           if (_loadingRoute && !kIsWeb)
             const Positioned.fill(

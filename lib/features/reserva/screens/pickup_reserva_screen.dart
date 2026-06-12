@@ -1,13 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
+import '../../../core/config/google_maps_config.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/maps/google_places_service.dart';
@@ -34,6 +39,8 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
   List<PlacePrediction> _sugerencias = [];
   String? _puntoSeleccionado;
   LatLng? _coordenadasSeleccionadas;
+  bool _sinResultados = false;
+  String _ultimaBusqueda = '';
 
   String _preferredFromProfile = '';
   List<String> _routePickupAddresses = const [];
@@ -92,6 +99,8 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       _puntoSeleccionado = null;
       _coordenadasSeleccionadas = null;
       _sugerencias = [];
+      _sinResultados = false;
+      _ultimaBusqueda = '';
     });
   }
 
@@ -114,7 +123,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     }
   }
 
-  Future<void> _confirmAddress(String address, {LatLng? coords}) async {
+  Future<void> _confirmAddress(String address, {LatLng? coords, bool silent = true}) async {
     final trimmed = address.trim();
     if (trimmed.length < 3) return;
 
@@ -128,11 +137,11 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     if (!mounted) return;
 
     if (position == null) {
+      debugPrint('[Geocode] No se pudo ubicar chip/favorito: $trimmed');
       setState(() => _resolvingGeo = false);
-      AppSnackbars.warning(
-        context,
-        'No se pudo ubicar la dirección en el mapa. Elige una sugerencia de la lista.',
-      );
+      if (!silent && mounted) {
+        AppSnackbars.error(context, 'Por favor selecciona un punto de recojo en las sugerencias.');
+      }
       return;
     }
 
@@ -150,17 +159,20 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     });
 
     try {
-      var coords = await GooglePlacesService.latLngForPlaceId(prediction.placeId);
+      LatLng? coords;
+      if (prediction.placeId.isNotEmpty) {
+        coords = await GooglePlacesService.latLngForPlaceId(prediction.placeId);
+      }
       coords ??= await GooglePlacesService.geocodeAddress(seleccionado);
       if (!mounted) return;
 
       if (coords == null) {
+        debugPrint('[Geocode] No se pudo obtener coordenadas para: $seleccionado');
         setState(() {
           _buscando = false;
           _resolvingGeo = false;
           _puntoSeleccionado = null;
         });
-        AppSnackbars.warning(context, 'No se pudo obtener la ubicación. Intenta otra dirección.');
         return;
       }
 
@@ -185,21 +197,101 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     }
 
     if (value.length < 3) {
-      setState(() => _sugerencias = []);
+      setState(() {
+        _sugerencias = [];
+        _sinResultados = false;
+        _ultimaBusqueda = '';
+      });
       return;
     }
 
-    setState(() => _buscando = true);
+    setState(() {
+      _buscando = true;
+      _sinResultados = false;
+      _ultimaBusqueda = value;
+    });
+
+    final key = googleMapsRestApiKey();
+    var sugerencias = <PlacePrediction>[];
+
     try {
-      final predictions = await GooglePlacesService.autocomplete(value);
-      if (!mounted) return;
-      setState(() {
-        _sugerencias = predictions.take(5).toList();
-        _buscando = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _buscando = false);
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/place/autocomplete/json'
+        '?input=${Uri.encodeComponent(value)}'
+        '&components=country:pe'
+        '&language=es'
+        '&key=$key',
+      );
+      final response = await http.get(url);
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final status = data['status']?.toString() ?? '';
+      final preds = data['predictions'];
+      final count = preds is List ? preds.length : 0;
+      debugPrint('[Places] status=$status predictions=$count');
+
+      if (status == 'OK' && preds is List) {
+        sugerencias = preds
+            .whereType<Map>()
+            .map((raw) {
+              final m = Map<String, dynamic>.from(raw);
+              final id = m['place_id']?.toString() ?? '';
+              final desc = m['description']?.toString() ?? '';
+              if (id.isEmpty || desc.isEmpty) return null;
+              return PlacePrediction(placeId: id, description: desc);
+            })
+            .whereType<PlacePrediction>()
+            .take(5)
+            .toList();
+      } else if (status == 'ZERO_RESULTS') {
+        sugerencias = [];
+      } else {
+        debugPrint('[Places] ERROR: $status - ${data['error_message']}');
+        sugerencias = [];
+      }
+    } catch (e) {
+      debugPrint('[Places] Exception: $e');
     }
+
+    if (sugerencias.isEmpty && value.length >= 3) {
+      try {
+        final geoUrl = Uri.parse(
+          'https://maps.googleapis.com/maps/api/geocode/json'
+          '?address=${Uri.encodeComponent('$value, Lima, Peru')}'
+          '&key=$key',
+        );
+        final geoRes = await http.get(geoUrl);
+        final geoData = jsonDecode(geoRes.body) as Map<String, dynamic>;
+        final geoStatus = geoData['status']?.toString() ?? '';
+        final results = geoData['results'];
+        final geoCount = results is List ? results.length : 0;
+        debugPrint('[Geocode] status=$geoStatus results=$geoCount');
+
+        if (geoStatus == 'OK' && results is List) {
+          sugerencias = results
+              .whereType<Map>()
+              .map((raw) {
+                final m = Map<String, dynamic>.from(raw);
+                final desc = m['formatted_address']?.toString() ?? '';
+                if (desc.isEmpty) return null;
+                return PlacePrediction(placeId: '', description: desc);
+              })
+              .whereType<PlacePrediction>()
+              .take(5)
+              .toList();
+        } else if (geoStatus != 'OK') {
+          debugPrint('[Geocode] ERROR: $geoStatus - ${geoData['error_message']}');
+        }
+      } catch (e) {
+        debugPrint('[Geocode] Exception: $e');
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _sugerencias = sugerencias;
+      _sinResultados = sugerencias.isEmpty && value.length >= 3;
+      _buscando = false;
+    });
   }
 
   Future<void> _loadContextForTrip(String tripId) async {
@@ -271,20 +363,17 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     final lat = reserva.pickupLat;
     final lng = reserva.pickupLng;
 
-    if (current != null && current.isNotEmpty) {
-      if (lat != null && lng != null) {
-        await _applySelection(address: current, coords: LatLng(lat, lng));
-        return;
-      }
-      await _confirmAddress(current);
+    if (current != null && current.isNotEmpty && lat != null && lng != null) {
+      await _applySelection(address: current, coords: LatLng(lat, lng));
       return;
     }
-    if (_preferredFromProfile.isNotEmpty) {
-      await _confirmAddress(_preferredFromProfile);
-      return;
-    }
-    if (_routePickupAddresses.isNotEmpty) {
-      await _confirmAddress(_routePickupAddresses.first);
+
+    // Solo prellenar texto; no geocodificar ni mostrar errores automáticamente.
+    final prefill = current ??
+        (_preferredFromProfile.isNotEmpty ? _preferredFromProfile : null) ??
+        (_routePickupAddresses.isNotEmpty ? _routePickupAddresses.first : null);
+    if (prefill != null && prefill.isNotEmpty && mounted) {
+      setState(() => _addressController.text = prefill);
     }
   }
 
@@ -361,6 +450,19 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
           ),
           onChanged: (value) => unawaited(_onAddressChanged(value)),
         ),
+        if (_sinResultados &&
+            !_buscando &&
+            _addressController.text.trim().length >= 3 &&
+            _addressController.text.trim() == _ultimaBusqueda.trim())
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: Text(
+              'Sin resultados para esta búsqueda',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+            ),
+          ),
         if (_sugerencias.isNotEmpty)
           Container(
             margin: const EdgeInsets.only(top: AppSpacing.xs),
@@ -443,6 +545,8 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
 
     return AppScaffold(
       title: 'Punto de recojo',
+      padding: EdgeInsets.zero,
+      fallbackRoute: AppRoutes.passengerSeatMap,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -484,9 +588,14 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                 tiltGesturesEnabled: true,
                 rotateGesturesEnabled: true,
                 zoomControlsEnabled: true,
+                compassEnabled: true,
+                mapToolbarEnabled: true,
                 myLocationEnabled: true,
                 myLocationButtonEnabled: true,
                 markers: _markers,
+                gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                  Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                },
                 onMapCreated: (controller) {
                   _mapController = controller;
                   Geolocator.getCurrentPosition().then((pos) {

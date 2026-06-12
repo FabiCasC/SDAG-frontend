@@ -242,7 +242,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
       return Scaffold(
         backgroundColor: pageBg,
         appBar: AppBar(
-          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
+          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminConductores),
           title: const Text('Conductor'),
         ),
         body: const Center(child: Text('No se encontró el conductor.')),
@@ -278,7 +278,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     return Scaffold(
       backgroundColor: pageBg,
       appBar: AppBar(
-        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminConductores),
         title: Text(nombreCompleto),
         actions: [
           PopupMenuButton<_DetalleAction>(

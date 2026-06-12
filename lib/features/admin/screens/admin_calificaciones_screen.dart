@@ -7,6 +7,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../providers/admin_conductores_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -43,6 +44,7 @@ class AdminCalificacionesScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: appBarBg,
         foregroundColor: AppColors.white,
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         title: const Text('Calificaciones de conductores'),
       ),
       body: ListView(

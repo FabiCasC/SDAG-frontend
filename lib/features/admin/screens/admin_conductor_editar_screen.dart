@@ -159,7 +159,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
       return Scaffold(
         backgroundColor: pageBg,
         appBar: AppBar(
-          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
+          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminConductores),
           title: const Text('Editar'),
         ),
         body: const Center(child: Text('No se encontró el conductor.')),
@@ -205,7 +205,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
       appBar: AppBar(
         backgroundColor: appBarBg,
         foregroundColor: AppColors.white,
-        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminConductores),
         title: Text('Editar ${current['placa']?.toString() ?? ''}'),
       ),
       body: ListView(

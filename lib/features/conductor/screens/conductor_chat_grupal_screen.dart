@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_chat_grupal_provider.dart';
 
@@ -73,10 +75,7 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
         backgroundColor: AppColors.backgroundLight,
         appBar: AppBar(
           title: const Text('Chat grupal (Admin + conductores)'),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () => context.pop(),
-          ),
+          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
         ),
         body: const Center(child: CircularProgressIndicator()),
       ),
@@ -93,10 +92,7 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
         title: const Text('Chat grupal (Admin + conductores)'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
       ),
       body: Center(
         child: Padding(
@@ -131,10 +127,7 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
         title: Row(
           children: [
             const Expanded(child: Text('Chat grupal (Admin + conductores)')),

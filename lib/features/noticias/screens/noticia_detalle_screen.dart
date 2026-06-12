@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 
@@ -15,7 +17,10 @@ class NoticiaDetalleScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
-      appBar: AppBar(title: const Text('Noticia')),
+      appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.passengerNews),
+        title: const Text('Noticia'),
+      ),
       body: FutureBuilder<_NewsDetailItem?>(
         future: _loadNews(newsId),
         builder: (context, snapshot) {

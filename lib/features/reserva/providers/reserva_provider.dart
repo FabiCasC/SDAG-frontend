@@ -265,7 +265,7 @@ final reservaProvider = StateNotifierProvider<ReservaController, ReservaState>(
   (ref) => ReservaController(),
 );
 
-/// Asientos ocupados en Supabase (`reservations` activas para el `trip_id`). Sin datos mock.
+/// Asientos ocupados en Supabase (`reservations` activas + completadas para el `trip_id`).
 final occupiedSeatsByTripProvider = FutureProvider.autoDispose.family<List<int>, String>(
   (ref, tripId) async {
     try {
@@ -275,7 +275,7 @@ final occupiedSeatsByTripProvider = FutureProvider.autoDispose.family<List<int>,
           .from('reservations')
           .select('seats')
           .eq('trip_id', tripId)
-          .eq('status', 'activa');
+          .inFilter('status', ['activa', 'completada']);
 
       final seats = <int>{};
       for (final rm in (rows as List).cast<Map<String, dynamic>>()) {

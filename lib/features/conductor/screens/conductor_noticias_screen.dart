@@ -7,6 +7,7 @@ import '../../../core/mock/mock_data.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../providers/conductor_noticias_provider.dart';
 
 class ConductorNoticiasScreen extends ConsumerWidget {
@@ -19,6 +20,7 @@ class ConductorNoticiasScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
         title: const Text('Noticias e incidencias'),
       ),
       floatingActionButton: FloatingActionButton(

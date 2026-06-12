@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../design/app_colors.dart';
 import '../design/app_radius.dart';
 import '../design/app_spacing.dart';
+import 'app_navigation_back.dart';
 
 class AppScaffold extends StatelessWidget {
   const AppScaffold({
@@ -13,6 +14,7 @@ class AppScaffold extends StatelessWidget {
     this.padding,
     this.backgroundColor,
     this.bottomNavigationBar,
+    this.fallbackRoute,
     super.key,
   });
 
@@ -23,6 +25,7 @@ class AppScaffold extends StatelessWidget {
   final EdgeInsets? padding;
   final Color? backgroundColor;
   final Widget? bottomNavigationBar;
+  final String? fallbackRoute;
 
   @override
   Widget build(BuildContext context) {
@@ -31,6 +34,10 @@ class AppScaffold extends StatelessWidget {
       appBar: showAppBar
           ? AppBar(
               title: Text(title),
+              leading: fallbackRoute != null
+                  ? AppBarLeadingBack(fallbackRoute: fallbackRoute!)
+                  : null,
+              automaticallyImplyLeading: fallbackRoute == null,
               actions: actions,
             )
           : null,

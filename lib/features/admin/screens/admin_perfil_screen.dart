@@ -7,6 +7,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 
 final adminPerfilProvider = FutureProvider<AdminPerfilData>((ref) async {
   final user = Supabase.instance.client.auth.currentUser;
@@ -83,6 +84,7 @@ class AdminPerfilScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         title: const Text('Perfil'),
         actions: [
           IconButton(

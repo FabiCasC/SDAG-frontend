@@ -6,6 +6,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
 import 'seat_map_screen.dart';
@@ -35,7 +36,10 @@ class ReservaResumenScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
-      appBar: AppBar(title: const Text('Resumen de reserva')),
+      appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.passengerReservaPickup),
+        title: const Text('Resumen de reserva'),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(AppSpacing.p20),

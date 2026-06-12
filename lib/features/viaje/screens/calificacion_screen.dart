@@ -7,6 +7,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../features/reserva/providers/reserva_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/viaje_provider.dart';
 
@@ -116,7 +117,10 @@ class _CalificacionScreenState extends ConsumerState<CalificacionScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
-      appBar: AppBar(title: const Text('Calificación')),
+      appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.passengerHome),
+        title: const Text('Calificación'),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(AppSpacing.p20),

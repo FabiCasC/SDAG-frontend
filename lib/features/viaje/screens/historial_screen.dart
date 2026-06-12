@@ -7,6 +7,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 
 class HistorialScreen extends ConsumerWidget {
   const HistorialScreen({super.key});
@@ -22,8 +23,8 @@ class HistorialScreen extends ConsumerWidget {
           child: SafeArea(
             bottom: false,
             child: AppBar(
+              leading: AppBarLeadingBack(fallbackRoute: AppRoutes.passengerHome),
               title: const Text('Mis viajes'),
-              automaticallyImplyLeading: false,
               elevation: 0,
               scrolledUnderElevation: 0,
             ),

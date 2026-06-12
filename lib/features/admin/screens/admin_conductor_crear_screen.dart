@@ -269,7 +269,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
-        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminConductores),
         title: const Text('Nuevo conductor'),
       ),
       body: availableVehiclesAsync.when(

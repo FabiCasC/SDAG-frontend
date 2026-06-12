@@ -5,7 +5,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_chat_provider.dart';
 import '../providers/conductor_manifiesto_provider.dart';
@@ -162,10 +164,7 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
     if (widget.pasajeroId.isEmpty) {
       return Scaffold(
         appBar: AppBar(
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () => context.pop(),
-          ),
+          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
           title: const Text('Chat'),
         ),
         body: const Center(child: Text('Pasajero no válido.')),
@@ -175,10 +174,7 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
     if (tripId == null || tripId.isEmpty) {
       return Scaffold(
         appBar: AppBar(
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded),
-            onPressed: () => context.pop(),
-          ),
+          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
           title: const Text('Chat'),
         ),
         body: const Center(
@@ -229,10 +225,7 @@ class _ConductorChatScreenState extends ConsumerState<ConductorChatScreen> {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
         title: Text(
           name,
           maxLines: 1,

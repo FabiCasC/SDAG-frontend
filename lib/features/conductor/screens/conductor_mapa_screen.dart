@@ -101,12 +101,15 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
               zoomGesturesEnabled: true,
               tiltGesturesEnabled: true,
               rotateGesturesEnabled: true,
+              zoomControlsEnabled: true,
+              compassEnabled: true,
+              mapToolbarEnabled: true,
+              myLocationEnabled: true,
+              myLocationButtonEnabled: true,
               onMapCreated: (controller) {
                 _mapController = controller;
                 _fitBounds();
               },
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: true,
               markers: markers,
               polylines: {
                 if (_routePolyline.length >= 2)

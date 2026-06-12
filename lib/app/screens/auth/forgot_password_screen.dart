@@ -60,7 +60,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Recuperar contraseña',
-      showAppBar: false,
+      fallbackRoute: AppRoutes.login,
       body: AppAuthCard(
         child: Column(
           mainAxisSize: MainAxisSize.min,

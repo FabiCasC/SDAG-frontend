@@ -7,6 +7,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart' hide SeatMapWidget;
 import '../providers/reserva_provider.dart';
 
@@ -117,6 +118,7 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
       );
     }
 
+    // Activas + completadas bloquean el asiento (pasajero que se bajó sigue ocupando).
     final occupiedAsync = ref.watch(occupiedSeatsByTripProvider(driver.tripId));
     final selectedSeats = state.asientosSeleccionados.toSet();
     final occupiedSeats = occupiedAsync.valueOrNull?.toSet() ?? <int>{};
@@ -125,6 +127,7 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.passengerSearch),
         title: const Text('Seleccionar asientos'),
       ),
       body: SafeArea(

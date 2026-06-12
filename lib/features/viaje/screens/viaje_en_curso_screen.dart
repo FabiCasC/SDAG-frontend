@@ -121,6 +121,7 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
 
     return AppScaffold(
       title: 'Viaje en curso',
+      fallbackRoute: AppRoutes.passengerHome,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -168,8 +169,11 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
                       zoomGesturesEnabled: true,
                       tiltGesturesEnabled: true,
                       rotateGesturesEnabled: true,
-                      myLocationButtonEnabled: false,
                       zoomControlsEnabled: true,
+                      compassEnabled: true,
+                      mapToolbarEnabled: true,
+                      myLocationEnabled: true,
+                      myLocationButtonEnabled: true,
                       polylines: _routePoints.length >= 2 ? {polyline} : const {},
                       markers: {
                         if (_routePoints.isNotEmpty)

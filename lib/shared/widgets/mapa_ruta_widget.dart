@@ -173,14 +173,17 @@ class _MapaRutaWidgetState extends State<MapaRutaWidget> {
         zoomGesturesEnabled: true,
         tiltGesturesEnabled: true,
         rotateGesturesEnabled: true,
+        zoomControlsEnabled: true,
+        compassEnabled: true,
+        mapToolbarEnabled: true,
+        myLocationEnabled: true,
+        myLocationButtonEnabled: true,
         polylines: _polylines,
         markers: _markers,
         onMapCreated: (controller) {
           _mapController = controller;
           _ajustarCamara();
         },
-        myLocationButtonEnabled: false,
-        zoomControlsEnabled: true,
       ),
     );
   }

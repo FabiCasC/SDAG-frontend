@@ -400,6 +400,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final location = state.uri.path;
 
+      // Siempre accesible, incluso con sesión de recuperación de contraseña.
       if (location == AppRoutes.resetPassword) return null;
 
       final isPassengerArea = location.startsWith('/passenger');
@@ -434,7 +435,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         return location == AppRoutes.splash ? null : AppRoutes.splash;
       }
 
-      if (isAuthRoute) return _homeForRole(role);
+      if (isAuthRoute && location != AppRoutes.resetPassword) return _homeForRole(role);
 
       if (isPassengerArea && role != AppRole.passenger) return _homeForRole(role);
       if (isDriverArea && role != AppRole.driver) return _homeForRole(role);

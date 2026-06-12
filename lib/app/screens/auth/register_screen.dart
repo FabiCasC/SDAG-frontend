@@ -74,7 +74,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     return AppScaffold(
       title: 'Registro',
-      showAppBar: false,
+      fallbackRoute: AppRoutes.login,
       body: AppAuthCard(
         child: Column(
           mainAxisSize: MainAxisSize.min,

@@ -72,7 +72,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   Widget build(BuildContext context) {
     return AppScaffold(
       title: 'Nueva contraseña',
-      showAppBar: false,
+      fallbackRoute: AppRoutes.login,
       body: AppAuthCard(
         child: Column(
           mainAxisSize: MainAxisSize.min,

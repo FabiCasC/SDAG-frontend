@@ -5,7 +5,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../providers/conductor_comisiones_provider.dart';
 
 enum _TripStatus { completado, enRuta }
@@ -38,10 +40,7 @@ class ConductorHistorialScreen extends ConsumerWidget {
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
         title: const Text('Mis viajes'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
       ),
       body: tripsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
