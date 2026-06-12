@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,12 +8,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../shared/design/app_colors.dart';
-import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
-import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_manifiesto_provider.dart';
-
-enum _ScanResultType { idle, success, error }
 
 class ConductorQrScannerScreen extends ConsumerStatefulWidget {
   const ConductorQrScannerScreen({super.key});
@@ -23,74 +18,108 @@ class ConductorQrScannerScreen extends ConsumerStatefulWidget {
   ConsumerState<ConductorQrScannerScreen> createState() => _ConductorQrScannerScreenState();
 }
 
-class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScreen> {
+class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScreen>
+    with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController(
     facing: CameraFacing.back,
     detectionSpeed: DetectionSpeed.noDuplicates,
+    returnImage: false,
   );
 
-  bool _processing = false;
-  bool _scannerPaused = false;
-  bool _cooldownFinished = true;
-  Timer? _cooldownTimer;
-  _ScanOutcome? _result;
+  static final _uuidRegex = RegExp(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    caseSensitive: false,
+  );
+
+  bool _escaneando = true;
+  bool _procesando = false;
+  String? _resultado;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void dispose() {
-    _cooldownTimer?.cancel();
-    _controller.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_controller.dispose());
     super.dispose();
   }
 
-  Future<void> _pauseScannerForCooldown() async {
-    _cooldownTimer?.cancel();
-    _cooldownFinished = false;
-    _scannerPaused = true;
-    await _controller.stop();
-    _cooldownTimer = Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      setState(() {
-        _cooldownFinished = true;
-      });
-    });
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_controller.start());
+    } else if (state == AppLifecycleState.paused) {
+      unawaited(_controller.stop());
+    }
   }
 
-  Future<void> _resetScanner() async {
-    if (!_cooldownFinished || _processing) return;
-    setState(() {
-      _result = null;
-      _scannerPaused = false;
-    });
-    await _controller.start();
-  }
-
-  Future<void> _setErrorResult(String message) async {
-    await _pauseScannerForCooldown();
+  Future<void> _reactivarEscanner({Duration delay = const Duration(seconds: 2)}) async {
+    await Future<void>.delayed(delay);
     if (!mounted) return;
     setState(() {
-      _result = _ScanOutcome.error(message: message);
+      _escaneando = true;
+      _resultado = null;
+      _procesando = false;
     });
   }
 
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_processing || _scannerPaused || _result != null) return;
-    final qrValue = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue?.trim() : null;
-    if (qrValue == null || qrValue.isEmpty) return;
+    if (!_escaneando || _procesando) return;
 
-    _processing = true;
+    final barcode = capture.barcodes.isNotEmpty ? capture.barcodes.first : null;
+    final raw = barcode?.rawValue?.trim();
+    if (raw == null || raw.isEmpty) return;
+
+    setState(() {
+      _escaneando = false;
+      _procesando = true;
+    });
+
+    await _procesarQR(raw);
+  }
+
+  Future<void> _procesarQR(String qrValue) async {
+    var reservaId = qrValue.contains('|') ? qrValue.split('|').first.trim() : qrValue.trim();
+    if (reservaId.startsWith('res_')) {
+      reservaId = reservaId.substring(4);
+    }
+
+    if (!_uuidRegex.hasMatch(reservaId)) {
+      setState(() => _resultado = '❌ QR inválido — formato incorrecto');
+      await _reactivarEscanner();
+      return;
+    }
+
     try {
       final reserva = await Supabase.instance.client
           .from('reservations')
           .select('''
-            id, status, seats, pickup_point, trip_id, passenger_profile_id,
-            profiles:passenger_profile_id(name, first_name, last_name, dni, phone)
+            id, status, seats, pickup_point, passenger_profile_id, trip_id,
+            profiles:passenger_profile_id(name, first_name, last_name)
           ''')
-          .eq('id', qrValue)
+          .eq('id', reservaId)
           .maybeSingle();
+
+      if (reserva == null) {
+        setState(() => _resultado = 'QR invalido — reserva no encontrada');
+        await _reactivarEscanner();
+        return;
+      }
+
+      if (reserva['status']?.toString() != 'activa') {
+        setState(() => _resultado = 'Esta reserva ya fue usada o cancelada');
+        await _reactivarEscanner();
+        return;
+      }
 
       final user = Supabase.instance.client.auth.currentUser;
       if (user == null) {
-        await _setErrorResult('No hay una sesión activa');
+        setState(() => _resultado = 'No hay una sesion activa');
+        await _reactivarEscanner();
         return;
       }
 
@@ -100,42 +129,29 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
           .eq('profile_id', user.id)
           .single();
 
-      final tripActivo = await Supabase.instance.client
+      final trip = await Supabase.instance.client
           .from('trips')
           .select('id')
           .eq('driver_id', driver['id'])
           .inFilter('status', ['esperando', 'en_ruta'])
           .maybeSingle();
 
-      if (reserva == null) {
-        await _setErrorResult('QR inválido');
-        return;
-      }
-
-      if (tripActivo == null) {
-        await _setErrorResult('No tienes un viaje activo');
-        return;
-      }
-
-      if (reserva['trip_id']?.toString() != tripActivo['id']?.toString()) {
-        await _setErrorResult('Este pasajero no pertenece a tu viaje');
-        return;
-      }
-
-      if (reserva['status']?.toString() != 'activa') {
-        await _setErrorResult('Esta reserva ya fue usada o cancelada');
+      if (trip == null || reserva['trip_id']?.toString() != trip['id']?.toString()) {
+        setState(() => _resultado = 'Este pasajero no pertenece a tu viaje');
+        await _reactivarEscanner();
         return;
       }
 
       final manifest = await Supabase.instance.client
           .from('manifests')
           .select('id')
-          .eq('trip_id', tripActivo['id'])
+          .eq('trip_id', trip['id'])
           .single();
 
       final passengerProfileId = reserva['passenger_profile_id']?.toString();
       if (passengerProfileId == null || passengerProfileId.isEmpty) {
-        await _setErrorResult('QR inválido');
+        setState(() => _resultado = 'QR invalido');
+        await _reactivarEscanner();
         return;
       }
 
@@ -150,53 +166,42 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
       );
 
       if (alreadyBoarded) {
-        await _setErrorResult('Este pasajero ya abordó');
+        setState(() => _resultado = 'Este pasajero ya abordo');
+        await _reactivarEscanner();
         return;
       }
 
       await Supabase.instance.client
           .from('manifest_entries')
-          .update({'boarding_status': 'abordo'})
+          .update({
+            'boarding_status': 'abordo',
+            'reservation_id': reservaId,
+          })
           .eq('manifest_id', manifest['id'])
           .eq('passenger_profile_id', passengerProfileId);
 
       ref.invalidate(conductorManifiestoProvider);
       HapticFeedback.mediumImpact();
 
-      final profile = _asMap(reserva['profiles']);
-      final seats = _parseSeats(reserva['seats']);
-      final outcome = _ScanOutcome.success(
-        passengerName: _passengerName(profile),
-        seatsLabel: seats.isEmpty ? '—' : seats.map((seat) => '#$seat').join(', '),
-        pickupPoint: reserva['pickup_point']?.toString() ?? '—',
-      );
+      final perfil = _asMap(reserva['profiles']);
+      final nombre = _passengerName(perfil);
+      final asientos = _parseSeats(reserva['seats']).map((s) => '#$s').join(', ');
 
-      await _pauseScannerForCooldown();
-      if (!mounted) return;
       setState(() {
-        _result = outcome;
+        _resultado =
+            'Abordaje confirmado\n$nombre\nAsientos: ${asientos.isEmpty ? '—' : asientos}\nRecojo: ${reserva['pickup_point'] ?? '—'}';
       });
+
+      await _reactivarEscanner(delay: const Duration(seconds: 3));
     } catch (e) {
-      await _setErrorResult('No se pudo validar el QR: $e');
-    } finally {
-      _processing = false;
+      if (!mounted) return;
+      setState(() => _resultado = 'Error: $e');
+      await _reactivarEscanner();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final overlayColor = switch (_result?.type) {
-      _ScanResultType.success => const Color(0xFF16A34A),
-      _ScanResultType.error => const Color(0xFFDC2626),
-      _ => Colors.transparent,
-    };
-
-    final overlayIcon = switch (_result?.type) {
-      _ScanResultType.success => Icons.check_circle_rounded,
-      _ScanResultType.error => Icons.cancel_rounded,
-      _ => null,
-    };
-
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -213,217 +218,127 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
             onPressed: () => _controller.toggleTorch(),
           ),
           IconButton(
-            icon: const Icon(Icons.cameraswitch_rounded),
+            icon: const Icon(Icons.flip_camera_android_rounded),
             onPressed: () => _controller.switchCamera(),
           ),
         ],
       ),
       body: Stack(
+        fit: StackFit.expand,
         children: [
           MobileScanner(
             controller: _controller,
+            fit: BoxFit.cover,
             onDetect: _onDetect,
+            errorBuilder: (context, error, child) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.p20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.videocam_off_rounded, color: Colors.white, size: 48),
+                      const SizedBox(height: AppSpacing.md),
+                      const Text(
+                        'No se pudo abrir la camara.\nConcede el permiso de camara en ajustes del telefono.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white, fontSize: 15),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        error.errorDetails?.message ?? error.toString(),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white.withAlpha(180), fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
-          Positioned.fill(
+          // Oscurece bordes sin BlendMode.clear (evita pantalla negra en Android).
+          IgnorePointer(
             child: CustomPaint(
-              painter: _ScannerOverlayPainter(),
+              painter: _ScannerDimOverlayPainter(),
+              child: const SizedBox.expand(),
             ),
           ),
-          if (overlayIcon != null)
-            Positioned.fill(
-              child: IgnorePointer(
+          Center(
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 3),
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          if (_resultado == null)
+            const Positioned(
+              bottom: 80,
+              left: 0,
+              right: 0,
+              child: Text(
+                'Apunta al QR del pasajero',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  shadows: [Shadow(blurRadius: 6, color: Colors.black54)],
+                ),
+              ),
+            ),
+          if (_resultado != null)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
                 child: Container(
-                  color: overlayColor.withAlpha(28),
-                  child: Center(
-                    child: Icon(
-                      overlayIcon,
-                      color: overlayColor,
-                      size: 92,
-                    ),
+                  padding: const EdgeInsets.all(16),
+                  color: Colors.black87,
+                  child: Text(
+                    _resultado!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.35),
                   ),
                 ),
               ),
             ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.p20),
-                child: _result == null
-                    ? const _ScannerInstructionsCard()
-                    : _ScanResultCard(
-                        result: _result!,
-                        canScanNext: _cooldownFinished,
-                        onScanNext: _resetScanner,
-                      ),
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
-class _ScanOutcome {
-  const _ScanOutcome({
-    required this.type,
-    required this.message,
-    this.passengerName,
-    this.seatsLabel,
-    this.pickupPoint,
-  });
-
-  const _ScanOutcome.success({
-    required String passengerName,
-    required String seatsLabel,
-    required String pickupPoint,
-  }) : this(
-          type: _ScanResultType.success,
-          message: 'Abordaje confirmado',
-          passengerName: passengerName,
-          seatsLabel: seatsLabel,
-          pickupPoint: pickupPoint,
-        );
-
-  const _ScanOutcome.error({
-    required String message,
-  }) : this(
-          type: _ScanResultType.error,
-          message: message,
-        );
-
-  final _ScanResultType type;
-  final String message;
-  final String? passengerName;
-  final String? seatsLabel;
-  final String? pickupPoint;
-}
-
-class _ScannerInstructionsCard extends StatelessWidget {
-  const _ScannerInstructionsCard();
-
+/// Oscurece el area fuera del marco sin usar BlendMode.clear.
+class _ScannerDimOverlayPainter extends CustomPainter {
   @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(AppRadius.r16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Escanea el QR del pasajero',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: AppColors.textPrimary,
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'El sistema validará la reserva en Supabase y confirmará el abordaje solo si pertenece a tu viaje activo.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: AppColors.textSecondary,
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          ],
+  void paint(Canvas canvas, Size size) {
+    const holeSize = 250.0;
+    final holeLeft = (size.width - holeSize) / 2;
+    final holeTop = (size.height - holeSize) / 2;
+
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(holeLeft, holeTop, holeSize, holeSize),
+          const Radius.circular(12),
         ),
-      ),
+      )
+      ..fillType = PathFillType.evenOdd;
+
+    canvas.drawPath(
+      path,
+      Paint()..color = Colors.black.withAlpha(140),
     );
   }
-}
-
-class _ScanResultCard extends StatelessWidget {
-  const _ScanResultCard({
-    required this.result,
-    required this.canScanNext,
-    required this.onScanNext,
-  });
-
-  final _ScanOutcome result;
-  final bool canScanNext;
-  final Future<void> Function() onScanNext;
 
   @override
-  Widget build(BuildContext context) {
-    final isSuccess = result.type == _ScanResultType.success;
-    final color = isSuccess ? const Color(0xFF16A34A) : const Color(0xFFDC2626);
-    final icon = isSuccess ? Icons.check_circle_rounded : Icons.cancel_rounded;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(AppRadius.r16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Icon(icon, color: color, size: 88),
-            const SizedBox(height: AppSpacing.md),
-            if (result.passengerName != null)
-              Text(
-                result.passengerName!,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-            if (result.passengerName != null) const SizedBox(height: AppSpacing.sm),
-            if (result.seatsLabel != null)
-              Text(
-                'Asientos: ${result.seatsLabel}',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-            if (result.pickupPoint != null) const SizedBox(height: AppSpacing.xs),
-            if (result.pickupPoint != null)
-              Text(
-                result.pickupPoint!,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              result.message,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: canScanNext ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1),
-                foregroundColor: AppColors.white,
-                minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-              ),
-              onPressed: canScanNext ? onScanNext : null,
-              child: Text(canScanNext ? 'Escanear siguiente' : 'Espera 3 segundos...'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 Map<String, dynamic>? _asMap(dynamic value) {
@@ -455,69 +370,4 @@ String _passengerName(Map<String, dynamic>? profile) {
   final last = profile['last_name']?.toString().trim() ?? '';
   final full = '$first $last'.trim();
   return full.isEmpty ? 'Pasajero' : full;
-}
-
-class _ScannerOverlayPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final overlayPaint = Paint()..color = Colors.black.withAlpha(120);
-    canvas.drawRect(Offset.zero & size, overlayPaint);
-
-    final rectSize = Size(min(size.width * 0.72, 320), min(size.width * 0.72, 320));
-    final rectLeft = (size.width - rectSize.width) / 2;
-    final rectTop = (size.height - rectSize.height) / 2.4;
-    final rect = Rect.fromLTWH(rectLeft, rectTop, rectSize.width, rectSize.height);
-
-    final clearPaint = Paint()..blendMode = BlendMode.clear;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, const Radius.circular(16)),
-      clearPaint,
-    );
-
-    final cornerPaint = Paint()
-      ..color = Colors.white.withAlpha(220)
-      ..strokeWidth = 4
-      ..style = PaintingStyle.stroke;
-
-    const corner = 26.0;
-    final r = rect;
-    canvas.drawPath(
-      Path()
-        ..moveTo(r.left, r.top + corner)
-        ..lineTo(r.left, r.top)
-        ..lineTo(r.left + corner, r.top),
-      cornerPaint,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(r.right - corner, r.top)
-        ..lineTo(r.right, r.top)
-        ..lineTo(r.right, r.top + corner),
-      cornerPaint,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(r.left, r.bottom - corner)
-        ..lineTo(r.left, r.bottom)
-        ..lineTo(r.left + corner, r.bottom),
-      cornerPaint,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(r.right - corner, r.bottom)
-        ..lineTo(r.right, r.bottom)
-        ..lineTo(r.right, r.bottom - corner),
-      cornerPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-String _initials(String first, String last) {
-  final a = first.trim().isNotEmpty ? first.trim()[0].toUpperCase() : '';
-  final b = last.trim().isNotEmpty ? last.trim()[0].toUpperCase() : '';
-  final out = '$a$b';
-  return out.isEmpty ? 'P' : out;
 }

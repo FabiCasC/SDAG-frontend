@@ -100,11 +100,8 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
   bool _alive = true;
 
   Future<void> _initialize() async {
-    print('[Chat] _initialize start');
     final user = Supabase.instance.client.auth.currentUser;
-    print('[Chat] user: ${user?.email}');
     if (user == null) {
-      print('[Chat] no user');
       state = state.copyWith(
         isLoading: false,
         errorMessage: 'No hay una sesión activa.',
@@ -113,13 +110,11 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
     }
 
     try {
-      print('[Chat] loading profile...');
       final profile = await Supabase.instance.client
           .from('profiles')
           .select('id, name, role, first_name, last_name')
           .eq('id', user.id)
           .maybeSingle();
-      print('[Chat] profile: $profile');
 
       final driver = await Supabase.instance.client
           .from('drivers')
@@ -141,7 +136,6 @@ class ConductorChatGrupalController extends StateNotifier<ConductorChatGrupalSta
       await _loadMessages();
       _subscribe();
     } catch (error) {
-      print('[Chat] ERROR: $error');
       if (!_alive) return;
       state = state.copyWith(
         isLoading: false,
@@ -280,10 +274,9 @@ String _profileName(
   return fallbackName.isEmpty ? 'Usuario' : fallbackName;
 }
 
-/// Acceso al chat grupal: admin siempre; conductor con `cuenta_activa`; otros no.
+/// Acceso al chat grupal: admin y conductores autenticados (sin restricción de horario).
 final conductorChatGrupalAccesoProvider = FutureProvider<bool>((ref) async {
   final user = Supabase.instance.client.auth.currentUser;
-  print('[Acceso] user: ${user?.email}');
   if (user == null) return false;
 
   try {
@@ -293,23 +286,9 @@ final conductorChatGrupalAccesoProvider = FutureProvider<bool>((ref) async {
         .eq('id', user.id)
         .single();
 
-    print('[Acceso] role: ${profile['role']}');
-
-    if (profile['role'] == 'admin') return true;
-
-    if (profile['role'] == 'driver') {
-      final driver = await Supabase.instance.client
-          .from('drivers')
-          .select('id, cuenta_activa')
-          .eq('profile_id', user.id)
-          .maybeSingle();
-      print('[Acceso] driver: $driver');
-      return (driver?['cuenta_activa'] as bool? ?? false);
-    }
-
-    return false;
-  } catch (e) {
-    print('[Acceso] ERROR: $e');
+    final role = profile['role']?.toString();
+    return role == 'admin' || role == 'driver';
+  } catch (_) {
     return false;
   }
 });

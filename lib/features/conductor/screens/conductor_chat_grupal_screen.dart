@@ -219,16 +219,20 @@ class _ConductorChatGrupalScreenState extends ConsumerState<ConductorChatGrupalS
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFF97316),
-                      foregroundColor: AppColors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.r12),
+                  SizedBox(
+                    width: 52,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        backgroundColor: const Color(0xFFF97316),
+                        foregroundColor: AppColors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.r12),
+                        ),
                       ),
+                      onPressed: _send,
+                      child: const Icon(Icons.send_rounded),
                     ),
-                    onPressed: _send,
-                    child: const Icon(Icons.send_rounded),
                   ),
                 ],
               ),

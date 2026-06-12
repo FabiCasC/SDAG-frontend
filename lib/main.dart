@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app/router/app_routes.dart';
 import 'app/sdag_app.dart';
 import 'app/router/app_router.dart';
 
@@ -25,7 +26,7 @@ Future<void> main() async {
       if (data.event == AuthChangeEvent.passwordRecovery && !didNavigateToReset) {
         didNavigateToReset = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          rootNavigatorKey.currentContext?.go('/reset-password');
+          rootNavigatorKey.currentContext?.go(AppRoutes.resetPassword);
         });
       }
       if (data.event == AuthChangeEvent.signedOut) {

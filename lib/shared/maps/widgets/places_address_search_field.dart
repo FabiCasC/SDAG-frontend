@@ -11,15 +11,19 @@ class PlacesAddressSearchField extends StatefulWidget {
     required this.controller,
     this.label = 'Buscar dirección',
     this.hint = 'Escribe calle, distrito…',
+    this.prefixIcon,
     this.onAddressResolved,
     this.onPlaceChosen,
+    this.onTextEdited,
   });
 
   final TextEditingController controller;
   final String label;
   final String hint;
+  final IconData? prefixIcon;
   final void Function(String formattedAddress)? onAddressResolved;
   final void Function(PlacePrediction prediction, String displayText)? onPlaceChosen;
+  final VoidCallback? onTextEdited;
 
   @override
   State<PlacesAddressSearchField> createState() => _PlacesAddressSearchFieldState();
@@ -65,6 +69,7 @@ class _PlacesAddressSearchFieldState extends State<PlacesAddressSearchField> {
           decoration: InputDecoration(
             labelText: widget.label,
             hintText: widget.hint,
+            prefixIcon: widget.prefixIcon == null ? null : Icon(widget.prefixIcon),
             suffixIcon: _loading
                 ? const Padding(
                     padding: EdgeInsets.all(12),
@@ -77,6 +82,7 @@ class _PlacesAddressSearchFieldState extends State<PlacesAddressSearchField> {
                 : null,
           ),
           onChanged: (value) {
+            widget.onTextEdited?.call();
             _debounce?.cancel();
             _debounce = Timer(const Duration(milliseconds: 350), () {
               if (value.trim().length < 2) {
@@ -104,6 +110,7 @@ class _PlacesAddressSearchFieldState extends State<PlacesAddressSearchField> {
                   final p = _suggestions[i];
                   return ListTile(
                     dense: true,
+                    leading: const Icon(Icons.location_on_rounded),
                     title: Text(p.description, maxLines: 2, overflow: TextOverflow.ellipsis),
                     onTap: () async {
                       final formatted = await GooglePlacesService.formattedAddressForPlaceId(p.placeId);

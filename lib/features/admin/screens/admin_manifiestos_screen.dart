@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../shared/design/app_colors.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../app/router/app_routes.dart';
@@ -164,11 +165,7 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
         title: const Text('Manifiestos'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.go(AppRoutes.adminHome),
-          tooltip: 'Volver al Inicio',
-        ),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         actions: [
           IconButton(
             onPressed: () => ref.refresh(adminManifiestosProvider),
@@ -212,9 +209,15 @@ class _AdminManifiestosScreenState extends ConsumerState<AdminManifiestosScreen>
               _SummaryBanner(total: filtered.length),
               const SizedBox(height: AppSpacing.md),
               if (filtered.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(AppSpacing.p20),
-                  child: Center(child: Text('No hay manifiestos con esos filtros.')),
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.p20),
+                  child: Center(
+                    child: Text(
+                      items.isEmpty
+                          ? 'No hay manifiestos registrados'
+                          : 'No hay manifiestos con esos filtros.',
+                    ),
+                  ),
                 ),
               ...filtered.map(
                 (item) => Padding(

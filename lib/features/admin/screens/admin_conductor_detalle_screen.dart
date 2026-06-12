@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../app/router/app_routes.dart';
 
 import '../../../shared/design/app_colors.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_conductores_provider.dart';
@@ -240,7 +241,10 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     if (conductor == null) {
       return Scaffold(
         backgroundColor: pageBg,
-        appBar: AppBar(title: const Text('Conductor')),
+        appBar: AppBar(
+          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
+          title: const Text('Conductor'),
+        ),
         body: const Center(child: Text('No se encontró el conductor.')),
       );
     }
@@ -274,6 +278,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     return Scaffold(
       backgroundColor: pageBg,
       appBar: AppBar(
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         title: Text(nombreCompleto),
         actions: [
           PopupMenuButton<_DetalleAction>(

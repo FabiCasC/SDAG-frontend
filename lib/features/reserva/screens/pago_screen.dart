@@ -575,6 +575,21 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       throw const AuthException('No se encontró el viaje del conductor');
     }
 
+    final existente = await Supabase.instance.client
+        .from('reservations')
+        .select('id')
+        .eq('trip_id', tripId)
+        .eq('passenger_profile_id', userId)
+        .eq('status', 'activa')
+        .maybeSingle();
+
+    if (existente != null) {
+      final existingId = existente['id']?.toString();
+      if (existingId != null && existingId.isNotEmpty) {
+        return existingId;
+      }
+    }
+
     final row = await Supabase.instance.client.from('reservations').insert({
       'trip_id': tripId,
       'passenger_profile_id': userId,
@@ -601,6 +616,23 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     try {
       await Supabase.instance.client.from('profiles').update({'has_active_reservation': true}).eq('id', userId);
     } catch (_) {}
+
+    if (pickup != null && pickup.isNotEmpty) {
+      try {
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('preferred_pickup')
+            .eq('id', userId)
+            .maybeSingle();
+        final existing = profile?['preferred_pickup']?.toString().trim();
+        if (existing == null || existing.isEmpty) {
+          await Supabase.instance.client
+              .from('profiles')
+              .update({'preferred_pickup': pickup})
+              .eq('id', userId);
+        }
+      } catch (_) {}
+    }
 
     return reservaId;
   }

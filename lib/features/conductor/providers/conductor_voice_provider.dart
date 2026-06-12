@@ -67,20 +67,6 @@ class ConductorVoiceController extends StateNotifier<ConductorVoiceState> {
   void onViajeChanged(ConductorViajeState? prev, ConductorViajeState next) {
     if (!state.enabled) return;
 
-    final prevSeats = prev?.asientosOcupados ?? const <int>[];
-    final nextSeats = next.asientosOcupados;
-    if (nextSeats.length > prevSeats.length) {
-      final added = nextSeats.where((s) => !prevSeats.contains(s)).toList();
-      if (added.isNotEmpty) {
-        _emit('Nuevo pasajero reservó el asiento ${added.first}');
-      }
-    } else if (nextSeats.length < prevSeats.length) {
-      final removed = prevSeats.where((s) => !nextSeats.contains(s)).toList();
-      if (removed.isNotEmpty) {
-        _emit('Pasajero canceló el asiento ${removed.first}');
-      }
-    }
-
     final nowEnRuta = next.estadoViaje == ConductorEstadoViaje.enRuta;
     final wasEnRuta = prev?.estadoViaje == ConductorEstadoViaje.enRuta;
     if (nowEnRuta && !wasEnRuta) {

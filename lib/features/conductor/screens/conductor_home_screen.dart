@@ -169,6 +169,9 @@ class _ConductorInicioTab extends ConsumerStatefulWidget {
 
 class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
   StreamSubscription<List<Map<String, dynamic>>>? _reservasSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _mensajesSubscription;
+  String? _lastEsperameMessageId;
+  bool _mensajesInitialized = false;
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -188,6 +191,7 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
 
   Future<void> _loadHomeData() async {
     _cancelReservasSubscription();
+    _cancelMensajesSubscription();
     if (mounted) {
       setState(() {
         _isLoading = true;
@@ -226,7 +230,7 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
             routes(id, name, from_label, to_label)
           ''')
           .eq('driver_id', driverId)
-          .inFilter('status', ['esperando', 'en_ruta'])
+          .inFilter('status', ['esperando', 'lleno', 'en_ruta'])
           .order('created_at', ascending: false)
           .limit(1)
           .maybeSingle();
@@ -246,20 +250,9 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
       });
 
       if (tripData != null) {
-        final tripId = tripData['id'];
-        final reservasIniciales = await Supabase.instance.client
-            .from('reservations')
-            .select('''
-              id, passenger_profile_id, seats, pickup_point, status, amount,
-              profiles:passenger_profile_id(id, name, first_name, last_name, phone, dni)
-            ''')
-            .eq('trip_id', tripId)
-            .eq('status', 'activa');
-
-        await _applyReservations(
-          (reservasIniciales as List).cast<Map<String, dynamic>>(),
-        );
-        _subscribeReservas(tripId);
+        final tripId = tripData['id'].toString();
+        await _cargarPasajeros(tripId);
+        _suscribirMensajes(tripId);
       }
 
       if (!mounted) return;
@@ -318,32 +311,38 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
     );
   }
 
-  void _subscribeReservas(dynamic tripId) {
+  Future<void> _cargarPasajeros(String tripId) async {
+    await _fetchPasajeros(tripId);
+
     _cancelReservasSubscription();
-    final tid = tripId.toString();
     _reservasSubscription = Supabase.instance.client
         .from('reservations')
         .stream(primaryKey: ['id'])
-        .eq('trip_id', tid)
+        .eq('trip_id', tripId)
         .listen((_) async {
-      try {
-        final reservasIniciales = await Supabase.instance.client
-            .from('reservations')
-            .select('''
-              id, passenger_profile_id, seats, pickup_point, status, amount,
-              profiles:passenger_profile_id(id, name, first_name, last_name, phone, dni)
-            ''')
-            .eq('trip_id', tid)
-            .eq('status', 'activa');
-
-        await _applyReservations((reservasIniciales as List).cast<Map<String, dynamic>>());
-      } catch (e) {
-        if (!mounted) return;
-        setState(() {
-          _errorMessage = 'No se pudo actualizar las reservas: $e';
-        });
-      }
+      await _fetchPasajeros(tripId);
     });
+  }
+
+  Future<void> _fetchPasajeros(String tripId) async {
+    try {
+      final data = await Supabase.instance.client
+          .from('reservations')
+          .select('''
+            id, passenger_profile_id, seats, pickup_point, status, amount,
+            profiles:passenger_profile_id(name, first_name, last_name, phone, dni),
+            reservation_companions(full_name, seat_number)
+          ''')
+          .eq('trip_id', tripId)
+          .eq('status', 'activa');
+
+      await _applyReservations((data as List).cast<Map<String, dynamic>>());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'No se pudo actualizar las reservas: $e';
+      });
+    }
   }
 
   Future<void> _applyReservations(List<Map<String, dynamic>> data) async {
@@ -365,23 +364,30 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
       }
 
       final seats = _parseSeats(reserva['seats']);
+      final companions = _parseCompanions(reserva['reservation_companions']);
       pasajerosConPerfil.add(
         _PassengerReservation(
           id: reserva['id']?.toString() ?? '',
           passengerProfileId: passengerId ?? '',
-          fullName: _fullNameFromProfile(perfil),
+          fullName: _titularNameFromProfile(perfil),
           phone: perfil?['phone']?.toString() ?? '—',
           dni: perfil?['dni']?.toString() ?? '—',
           seats: seats,
+          companions: companions,
           pickupPoint: reserva['pickup_point']?.toString() ?? '—',
         ),
       );
     }
 
+    final uniqueSeats = <int>{};
+    for (final r in pasajerosConPerfil) {
+      uniqueSeats.addAll(r.seats);
+    }
+
     if (!mounted) return;
     setState(() {
       _reservas = pasajerosConPerfil;
-      _asientosOcupados = pasajerosConPerfil.expand((r) => r.seats).length;
+      _asientosOcupados = uniqueSeats.length;
     });
   }
 
@@ -390,9 +396,63 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
     _reservasSubscription = null;
   }
 
+  void _cancelMensajesSubscription() {
+    _mensajesSubscription?.cancel();
+    _mensajesSubscription = null;
+    _mensajesInitialized = false;
+    _lastEsperameMessageId = null;
+  }
+
+  void _suscribirMensajes(String tripId) {
+    _cancelMensajesSubscription();
+
+    _mensajesSubscription = Supabase.instance.client
+        .from('trip_messages')
+        .stream(primaryKey: ['id'])
+        .eq('trip_id', tripId)
+        .listen((data) {
+      final esperame = data
+          .where(
+            (m) =>
+                m['message_type']?.toString() == 'esperame' &&
+                m['sender_role']?.toString() == 'passenger',
+          )
+          .toList();
+
+      if (esperame.isEmpty || !mounted) return;
+
+      if (!_mensajesInitialized) {
+        _mensajesInitialized = true;
+        _lastEsperameMessageId = esperame.last['id']?.toString();
+        return;
+      }
+
+      final last = esperame.last;
+      final id = last['id']?.toString();
+      if (id == null || id == _lastEsperameMessageId) return;
+      _lastEsperameMessageId = id;
+
+      final msg = last['body']?.toString() ?? last['message']?.toString() ?? '';
+      showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('⏳ Aviso del pasajero'),
+          content: Text(msg),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
   @override
   void dispose() {
     _reservasSubscription?.cancel();
+    _mensajesSubscription?.cancel();
     super.dispose();
   }
 
@@ -513,9 +573,6 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
                     case ConductorDisponibilidadResult.ok:
                       await _loadHomeData();
                       AppSnackbars.success(context, 'Ahora eres visible para los pasajeros');
-                      return;
-                    case ConductorDisponibilidadResult.fueraDeHorario:
-                      AppSnackbars.warning(context, 'Fuera del horario operativo');
                       return;
                     case ConductorDisponibilidadResult.accesoBloqueado:
                       AppSnackbars.error(context, 'Acceso operativo bloqueado');
@@ -732,6 +789,7 @@ class _PassengerReservation {
     required this.phone,
     required this.dni,
     required this.seats,
+    required this.companions,
     required this.pickupPoint,
   });
 
@@ -741,6 +799,7 @@ class _PassengerReservation {
   final String phone;
   final String dni;
   final List<int> seats;
+  final List<String> companions;
   final String pickupPoint;
 }
 
@@ -750,15 +809,30 @@ Map<String, dynamic>? _asMap(dynamic value) {
   return null;
 }
 
+String _titularNameFromProfile(Map<String, dynamic>? profile) {
+  if (profile == null) return 'Pasajero';
+  final name = profile['name']?.toString().trim();
+  if (name != null && name.isNotEmpty) return name;
+  final first = profile['first_name']?.toString().trim() ?? '';
+  final last = profile['last_name']?.toString().trim() ?? '';
+  final full = '$first $last'.trim();
+  return full.isNotEmpty ? full : 'Pasajero';
+}
+
 String _fullNameFromProfile(Map<String, dynamic>? profile) {
-  if (profile == null) return 'Conductor';
-  final name = profile['name']?.toString().trim() ?? '';
-  if (name.isNotEmpty) return name;
-  final firstName = profile['first_name']?.toString().trim() ?? '';
-  final lastName = profile['last_name']?.toString().trim() ?? '';
-  final fullName = '$firstName $lastName'.trim();
-  if (fullName.isNotEmpty) return fullName;
-  return 'Conductor';
+  final titular = _titularNameFromProfile(profile);
+  return titular == 'Pasajero' ? 'Conductor' : titular;
+}
+
+List<String> _parseCompanions(dynamic raw) {
+  if (raw is! List) return const [];
+  final out = <String>[];
+  for (final item in raw) {
+    if (item is! Map) continue;
+    final name = item['full_name']?.toString().trim();
+    if (name != null && name.isNotEmpty) out.add(name);
+  }
+  return out;
 }
 
 String _normalizeDriverEstado(String? raw) {
@@ -801,17 +875,12 @@ String _routeLabel(Map<String, dynamic>? tripData) {
 
 List<int> _parseSeats(dynamic rawSeats) {
   if (rawSeats is! List) return const [];
-  final out = <int>[];
+  final unique = <int>{};
   for (final seat in rawSeats) {
-    if (seat is int) out.add(seat);
-    if (seat is num) out.add(seat.toInt());
-    if (seat is String) {
-      final parsed = int.tryParse(seat);
-      if (parsed != null) out.add(parsed);
-    }
+    final parsed = seat is int ? seat : int.tryParse(seat.toString());
+    if (parsed != null) unique.add(parsed);
   }
-  out.sort();
-  return out;
+  return unique.toList()..sort();
 }
 
 class _DisponibilidadCard extends StatelessWidget {
@@ -1180,6 +1249,9 @@ class _PassengerTile extends StatelessWidget {
     final seatsLabel = passenger.seats.isEmpty
         ? '—'
         : passenger.seats.map((seat) => '#$seat').join(', ');
+    final companionsLabel = passenger.companions.isEmpty
+        ? null
+        : passenger.companions.join(', ');
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFFF8FAFC),
@@ -1221,6 +1293,16 @@ class _PassengerTile extends StatelessWidget {
                               fontWeight: FontWeight.w800,
                             ),
                       ),
+                      if (companionsLabel != null) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Acompañantes: $companionsLabel',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: AppColors.textSecondary,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ],
                       const SizedBox(height: AppSpacing.xs),
                       Text(
                         'Punto de recojo: ${passenger.pickupPoint}',

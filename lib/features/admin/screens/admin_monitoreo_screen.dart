@@ -45,7 +45,7 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
 
   Future<void> _loadIcons() async {
     final disponible = await _combiMarker(const Color(0xFF16A34A));
-    final enRuta = await _combiMarker(const Color(0xFFEA580C));
+    final enRuta = await _combiMarker(const Color(0xFF16A34A));
     if (!mounted) return;
     setState(() {
       _iconDisponible = disponible;
@@ -57,7 +57,7 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
     if (!_iconsLoaded) {
       return switch (estado) {
         AdminVehiculoEstado.disponible => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        AdminVehiculoEstado.enRuta => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+        AdminVehiculoEstado.enRuta => BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
       };
     }
     return switch (estado) {
@@ -186,7 +186,7 @@ class _AdminMonitoreoScreenState extends ConsumerState<AdminMonitoreoScreen> {
           markerId: MarkerId(v.conductorId),
           position: v.posicion!,
           icon: _iconFor(v.estado),
-          infoWindow: InfoWindow(title: v.placa),
+          infoWindow: InfoWindow(title: v.conductorNombre, snippet: v.placa),
           onTap: () => _onMarkerTap(v),
         ),
       );

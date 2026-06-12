@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -173,6 +174,8 @@ class _ManifestLoadResult {
     required this.passengers,
     required this.tripStatus,
     required this.errorMessage,
+    this.tripId,
+    this.manifestId,
   });
 
   final ConductorManifiestoLoadStatus status;
@@ -180,48 +183,96 @@ class _ManifestLoadResult {
   final List<ManifiestoItem> passengers;
   final String? tripStatus;
   final String? errorMessage;
+  final String? tripId;
+  final String? manifestId;
 }
 
 class ConductorManifiestoController extends StateNotifier<ConductorManifiestoState> {
   ConductorManifiestoController() : super(ConductorManifiestoState.initial()) {
-    _load();
+    reload();
   }
 
   static const _prefsKey = 'sdag_conductor_manifiesto_cache';
   static const _prefsDateKey = 'sdag_conductor_manifiesto_generated_at';
 
-  Future<void> _load() async {
-    state = state.copyWith(status: ConductorManifiestoLoadStatus.loading, errorMessage: null);
-    final prefs = await SharedPreferences.getInstance();
-    final cached = prefs.getString(_prefsKey);
-    final cachedDate = prefs.getString(_prefsDateKey);
+  StreamSubscription<List<Map<String, dynamic>>>? _entriesSub;
+  StreamSubscription<List<Map<String, dynamic>>>? _reservationsSub;
+  String? _subscribedManifestId;
+  String? _subscribedTripId;
 
-    if (cached != null) {
-      final list = _decodeList(cached);
+  Future<void> reload() => _cargarManifiesto();
+
+  Future<void> _cargarManifiesto({bool silent = false}) async {
+    if (!silent) {
+      state = state.copyWith(
+        status: ConductorManifiestoLoadStatus.loading,
+        errorMessage: null,
+        offlineCached: false,
+      );
+    }
+
+    try {
+      final result = await _loadFromSupabase();
+      state = state.copyWith(
+        status: result.status,
+        listaPasajeros: result.passengers,
+        generadoAt: result.generadoAt,
+        offlineCached: false,
+        tripStatus: result.tripStatus,
+        errorMessage: result.errorMessage,
+      );
+      _setupRealtime(tripId: result.tripId, manifestId: result.manifestId);
+      if (result.status == ConductorManifiestoLoadStatus.ready && result.passengers.isNotEmpty) {
+        await cachearManifiesto();
+      }
+    } catch (e) {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_prefsKey);
+      final cachedDate = prefs.getString(_prefsDateKey);
+      final list = cached == null ? const <ManifiestoItem>[] : _decodeList(cached);
       if (list.isNotEmpty) {
         final date = DateTime.tryParse(cachedDate ?? '');
         state = state.copyWith(
           status: ConductorManifiestoLoadStatus.ready,
           listaPasajeros: list,
-          generadoAt: date ?? state.generadoAt,
+          generadoAt: date ?? DateTime.now(),
           offlineCached: true,
           errorMessage: null,
         );
-        return;
+      } else {
+        state = state.copyWith(
+          status: ConductorManifiestoLoadStatus.error,
+          errorMessage: 'No se pudo cargar el manifiesto: $e',
+        );
       }
     }
+  }
 
-    final result = await _loadFromSupabase();
-    state = state.copyWith(
-      status: result.status,
-      listaPasajeros: result.passengers,
-      generadoAt: result.generadoAt,
-      offlineCached: false,
-      tripStatus: result.tripStatus,
-      errorMessage: result.errorMessage,
-    );
-    if (result.status == ConductorManifiestoLoadStatus.ready && result.passengers.isNotEmpty) {
-      await cachearManifiesto();
+  void _setupRealtime({String? tripId, String? manifestId}) {
+    if (manifestId != null && manifestId != _subscribedManifestId) {
+      _entriesSub?.cancel();
+      _subscribedManifestId = manifestId;
+      _entriesSub = Supabase.instance.client
+          .from('manifest_entries')
+          .stream(primaryKey: ['id'])
+          .eq('manifest_id', manifestId)
+          .listen((_) => _cargarManifiesto(silent: true));
+    } else if (manifestId == null) {
+      _entriesSub?.cancel();
+      _subscribedManifestId = null;
+    }
+
+    if (tripId != null && tripId != _subscribedTripId) {
+      _reservationsSub?.cancel();
+      _subscribedTripId = tripId;
+      _reservationsSub = Supabase.instance.client
+          .from('reservations')
+          .stream(primaryKey: ['id'])
+          .eq('trip_id', tripId)
+          .listen((_) => _cargarManifiesto(silent: true));
+    } else if (tripId == null) {
+      _reservationsSub?.cancel();
+      _subscribedTripId = null;
     }
   }
 
@@ -259,6 +310,8 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
           .select('id, status')
           .eq('driver_id', driverId)
           .inFilter('status', ['esperando', 'en_ruta'])
+          .order('created_at', ascending: false)
+          .limit(1)
           .maybeSingle();
       final tripId = trip?['id']?.toString();
       final tripStatus = trip?['status']?.toString();
@@ -273,84 +326,112 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
         );
       }
 
-      final manifest = await Supabase.instance.client
-          .from('manifests')
-          .select('*, manifest_entries(*, profiles(name, dni, phone))')
+      final reservasRaw = await Supabase.instance.client
+          .from('reservations')
+          .select('''
+            id, seats, pickup_point, status,
+            profiles:passenger_profile_id(name, first_name, last_name, dni, phone)
+          ''')
           .eq('trip_id', tripId)
-          .maybeSingle();
+          .eq('status', 'activa')
+          .order('created_at');
 
-      if (manifest == null) {
+      final reservas = (reservasRaw as List).cast<Map<String, dynamic>>();
+      if (reservas.isEmpty) {
         return _ManifestLoadResult(
           status: ConductorManifiestoLoadStatus.noPassengersYet,
           generadoAt: DateTime.now(),
           passengers: const [],
           tripStatus: tripStatus,
           errorMessage: null,
+          tripId: tripId,
         );
       }
 
-      final generatedAt = DateTime.tryParse(manifest['created_at']?.toString() ?? '') ?? DateTime.now();
-      final entriesRaw = manifest['manifest_entries'];
-      if (entriesRaw is! List || entriesRaw.isEmpty) {
-        return _ManifestLoadResult(
-          status: ConductorManifiestoLoadStatus.noPassengersYet,
-          generadoAt: generatedAt,
-          passengers: const [],
-          tripStatus: tripStatus,
-          errorMessage: null,
-        );
-      }
+      final manifest = await Supabase.instance.client
+          .from('manifests')
+          .select('id, created_at')
+          .eq('trip_id', tripId)
+          .maybeSingle();
+
+      final manifestId = manifest?['id']?.toString();
+      final generatedAt =
+          DateTime.tryParse(manifest?['created_at']?.toString() ?? '') ?? DateTime.now();
+
+      final manifestEntries = manifestId == null
+          ? const <Map<String, dynamic>>[]
+          : ((await Supabase.instance.client
+                  .from('manifest_entries')
+                  .select('reservation_id, seat_number, boarding')
+                  .eq('manifest_id', manifestId)) as List)
+              .cast<Map<String, dynamic>>();
 
       final out = <ManifiestoItem>[];
-      for (var i = 0; i < entriesRaw.length; i++) {
-        final e = entriesRaw[i];
-        if (e is! Map) continue;
-        final entry = e.cast<String, dynamic>();
-        final profileRaw = entry['profiles'];
-        final profile = (profileRaw is Map<String, dynamic>)
+      for (var i = 0; i < reservas.length; i++) {
+        final reserva = reservas[i];
+        final reservationId = reserva['id']?.toString() ?? '';
+        final profileRaw = reserva['profiles'];
+        final profile = profileRaw is Map<String, dynamic>
             ? profileRaw
-            : (profileRaw is Map ? profileRaw.cast<String, dynamic>() : <String, dynamic>{});
+            : profileRaw is Map
+                ? profileRaw.cast<String, dynamic>()
+                : <String, dynamic>{};
 
-        final fullName = profile['name']?.toString() ?? '';
-        final dni = profile['dni']?.toString() ?? '—';
-        final phone = profile['phone']?.toString() ?? '—';
+        final name = profile['name']?.toString().trim() ?? '';
+        final firstName = profile['first_name']?.toString().trim() ?? '';
+        final lastName = profile['last_name']?.toString().trim() ?? '';
+        final nombres = firstName.isNotEmpty ? firstName : name;
+        final apellidos = lastName;
+        final dni = profile['dni']?.toString().trim();
+        final phone = profile['phone']?.toString().trim();
+        final pickup = reserva['pickup_point']?.toString().trim() ?? '—';
+        final passengerId = profile['id']?.toString() ??
+            reserva['passenger_profile_id']?.toString() ??
+            reservationId;
 
-        final passengerId =
-            entry['profile_id']?.toString() ?? entry['passenger_profile_id']?.toString() ?? '';
+        final seats = _parseSeats(reserva['seats']);
+        final seatList = seats.isEmpty ? [i + 1] : seats;
 
-        final seatRaw = entry['seat_number'] ?? entry['seat'] ?? entry['asiento'];
-        final seat = seatRaw is int ? seatRaw : int.tryParse(seatRaw?.toString() ?? '') ?? (i + 1);
+        for (final seat in seatList) {
+          Map<String, dynamic>? entry;
+          for (final e in manifestEntries) {
+            if (e['reservation_id']?.toString() != reservationId) continue;
+            final entrySeat = e['seat_number'];
+            final seatNum =
+                entrySeat is int ? entrySeat : int.tryParse(entrySeat?.toString() ?? '');
+            if (seatNum == null || seatNum == seat) {
+              entry = e;
+              break;
+            }
+          }
 
-        final pickup = entry['pickup_text']?.toString() ?? entry['pickup_point']?.toString() ?? '—';
+          final boarding = entry?['boarding'] ?? entry?['boarding_status'] ?? 'pendiente';
 
-        final boarding = entry['boarding'];
-        final estado = switch (boarding) {
-          true => ManifiestoEstadoPasajero.subio,
-          false => ManifiestoEstadoPasajero.noSubio,
-          _ => ManifiestoEstadoPasajero.pendiente,
-        };
-
-        out.add(
-          ManifiestoItem(
-            id: passengerId.isEmpty ? 'p_$i' : passengerId,
-            nombres: fullName,
-            apellidos: '',
-            dni: dni,
-            telefono: phone,
-            asiento: seat,
-            puntoRecojo: pickup,
-            estado: estado,
-          ),
-        );
+          out.add(
+            ManifiestoItem(
+              id: passengerId.isEmpty ? 'p_${reservationId}_$seat' : passengerId,
+              nombres: nombres.isEmpty ? 'Pasajero' : nombres,
+              apellidos: apellidos,
+              dni: (dni == null || dni.isEmpty) ? '—' : dni,
+              telefono: (phone == null || phone.isEmpty) ? '—' : phone,
+              asiento: seat,
+              puntoRecojo: pickup,
+              estado: _boardingEstado(boarding),
+            ),
+          );
+        }
       }
 
       out.sort((a, b) => a.asiento.compareTo(b.asiento));
+
       return _ManifestLoadResult(
         status: ConductorManifiestoLoadStatus.ready,
         generadoAt: generatedAt,
         passengers: out,
         tripStatus: tripStatus,
         errorMessage: null,
+        tripId: tripId,
+        manifestId: manifestId,
       );
     } catch (e) {
       return _ManifestLoadResult(
@@ -361,6 +442,32 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
         errorMessage: 'No se pudo cargar el manifiesto: $e',
       );
     }
+  }
+
+  List<int> _parseSeats(dynamic rawSeats) {
+    if (rawSeats is! List) return const [];
+    final out = <int>[];
+    for (final seat in rawSeats) {
+      if (seat is int) {
+        out.add(seat);
+      } else if (seat is num) {
+        out.add(seat.toInt());
+      } else {
+        final parsed = int.tryParse(seat.toString());
+        if (parsed != null) out.add(parsed);
+      }
+    }
+    out.sort();
+    return out;
+  }
+
+  ManifiestoEstadoPasajero _boardingEstado(dynamic boarding) {
+    final value = boarding?.toString() ?? '';
+    return switch (value) {
+      'abordo' => ManifiestoEstadoPasajero.subio,
+      'no_abordo' => ManifiestoEstadoPasajero.noSubio,
+      _ => ManifiestoEstadoPasajero.pendiente,
+    };
   }
 
   List<ManifiestoItem> _decodeList(String jsonStr) {
@@ -418,6 +525,13 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
     final jsonStr = jsonEncode(state.listaPasajeros.map((e) => e.toJson()).toList());
     await prefs.setString(_prefsKey, jsonStr);
     await prefs.setString(_prefsDateKey, state.generadoAt.toIso8601String());
+  }
+
+  @override
+  void dispose() {
+    _entriesSub?.cancel();
+    _reservationsSub?.cancel();
+    super.dispose();
   }
 }
 

@@ -21,6 +21,7 @@ class ConductorViajeDiaItem {
     required this.rutaLabel,
     required this.ocupados,
     required this.capacidad,
+    this.montoRecaudado,
   });
 
   final String id;
@@ -28,8 +29,9 @@ class ConductorViajeDiaItem {
   final String rutaLabel;
   final int ocupados;
   final int capacidad;
+  final double? montoRecaudado;
 
-  double get totalRecaudado => ocupados * 15.0;
+  double get totalRecaudado => montoRecaudado ?? (ocupados * 15.0);
 }
 
 class ConductorComisionesState {
@@ -40,6 +42,9 @@ class ConductorComisionesState {
     required this.estadoSolicitud,
     required this.historialPagos,
     required this.solicitudAt,
+    this.recaudadoHoy = 0,
+    this.comisionHoy = 0,
+    this.gananciaHoy = 0,
   });
 
   final DateTime hoy;
@@ -48,9 +53,12 @@ class ConductorComisionesState {
   final ConductorEstadoSolicitudPago estadoSolicitud;
   final List<Comision> historialPagos;
   final DateTime? solicitudAt;
+  final double recaudadoHoy;
+  final double comisionHoy;
+  final double gananciaHoy;
 
-  double get totalDia => viajesHoy.fold(0.0, (sum, v) => sum + v.totalRecaudado);
-  double get comisionDia => totalDia * porcentajeComision;
+  double get totalDia => recaudadoHoy;
+  double get comisionDia => comisionHoy;
   int get viajesCompletadosHoy => viajesHoy.length;
 
   double get totalMes {
@@ -66,6 +74,9 @@ class ConductorComisionesState {
     ConductorEstadoSolicitudPago? estadoSolicitud,
     List<Comision>? historialPagos,
     DateTime? solicitudAt,
+    double? recaudadoHoy,
+    double? comisionHoy,
+    double? gananciaHoy,
     bool clearSolicitudAt = false,
   }) {
     return ConductorComisionesState(
@@ -75,6 +86,9 @@ class ConductorComisionesState {
       estadoSolicitud: estadoSolicitud ?? this.estadoSolicitud,
       historialPagos: historialPagos ?? this.historialPagos,
       solicitudAt: clearSolicitudAt ? null : (solicitudAt ?? this.solicitudAt),
+      recaudadoHoy: recaudadoHoy ?? this.recaudadoHoy,
+      comisionHoy: comisionHoy ?? this.comisionHoy,
+      gananciaHoy: gananciaHoy ?? this.gananciaHoy,
     );
   }
 }
@@ -134,6 +148,134 @@ class ConductorComisionesController extends StateNotifier<ConductorComisionesSta
     await _persistEstado();
 
     await _syncFromSupabase();
+    await calcularComisionDelDia();
+  }
+
+  /// Calcula recaudación, comisión y ganancia del día según viajes completados.
+  Future<void> calcularComisionDelDia() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final driver = await Supabase.instance.client
+          .from('drivers')
+          .select('id, commission_pct, capacity')
+          .eq('profile_id', user.id)
+          .maybeSingle();
+      if (driver == null) return;
+
+      final driverId = driver['id']?.toString();
+      if (driverId == null) return;
+
+      final capacity = (driver['capacity'] as int?) ?? 8;
+      final pct = (driver['commission_pct'] as num?)?.toDouble() ?? 15.0;
+      final porcentaje = pct / 100.0;
+
+      final hoy = DateTime.now();
+      final inicioDia = DateTime(hoy.year, hoy.month, hoy.day).toIso8601String();
+      final finDia = DateTime(hoy.year, hoy.month, hoy.day, 23, 59, 59).toIso8601String();
+
+      final viajesRaw = await Supabase.instance.client
+          .from('trips')
+          .select('id, amount_total, finished_at, route_id, routes(name)')
+          .eq('driver_id', driverId)
+          .eq('status', 'completado')
+          .gte('finished_at', inicioDia)
+          .lte('finished_at', finDia)
+          .order('finished_at', ascending: true);
+
+      final viajesLista = <ConductorViajeDiaItem>[];
+      var totalRecaudado = 0.0;
+
+      for (final v in (viajesRaw as List).cast<Map<String, dynamic>>()) {
+        final tripId = v['id']?.toString();
+        final finishedAt = DateTime.tryParse(v['finished_at']?.toString() ?? '');
+        final amount = (v['amount_total'] as num?)?.toDouble() ?? 0.0;
+        if (tripId == null || finishedAt == null) continue;
+
+        totalRecaudado += amount;
+
+        final routes = v['routes'] is Map ? Map<String, dynamic>.from(v['routes'] as Map) : <String, dynamic>{};
+        final rutaLabel = routes['name']?.toString() ?? 'Ruta';
+
+        final reservations = await Supabase.instance.client
+            .from('reservations')
+            .select('seats')
+            .eq('trip_id', tripId);
+        final uniqueSeats = <int>{};
+        for (final rm in (reservations as List).cast<Map<String, dynamic>>()) {
+          final seats = rm['seats'];
+          if (seats is List) {
+            for (final s in seats) {
+              final parsed = s is int ? s : int.tryParse(s.toString());
+              if (parsed != null) uniqueSeats.add(parsed);
+            }
+          }
+        }
+
+        final hh = finishedAt.hour;
+        final mm = finishedAt.minute.toString().padLeft(2, '0');
+        final suffix = hh >= 12 ? 'PM' : 'AM';
+        final hh12 = ((hh + 11) % 12) + 1;
+
+        viajesLista.add(
+          ConductorViajeDiaItem(
+            id: tripId,
+            horaLabel: '$hh12:$mm $suffix',
+            rutaLabel: rutaLabel,
+            ocupados: uniqueSeats.length,
+            capacidad: capacity,
+            montoRecaudado: amount,
+          ),
+        );
+      }
+
+      final comisionNegocio = totalRecaudado * porcentaje;
+      final gananciaConductor = totalRecaudado - comisionNegocio;
+      final dayKey = hoy.toIso8601String().substring(0, 10);
+
+      try {
+        final existing = await Supabase.instance.client
+            .from('driver_commissions')
+            .select('id')
+            .eq('driver_id', driverId)
+            .eq('day', dayKey)
+            .maybeSingle();
+
+        if (existing != null) {
+          await Supabase.instance.client.from('driver_commissions').update({
+            'recaudado': totalRecaudado,
+            'comision': comisionNegocio,
+          }).eq('id', existing['id']);
+        } else if (totalRecaudado > 0) {
+          await Supabase.instance.client.from('driver_commissions').insert({
+            'driver_id': driverId,
+            'day': dayKey,
+            'recaudado': totalRecaudado,
+            'comision': comisionNegocio,
+            'estado': 'Pendiente',
+          });
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
+      state = state.copyWith(
+        hoy: hoy,
+        porcentajeComision: porcentaje,
+        viajesHoy: viajesLista,
+        recaudadoHoy: totalRecaudado,
+        comisionHoy: comisionNegocio,
+        gananciaHoy: gananciaConductor,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      state = state.copyWith(
+        recaudadoHoy: 0,
+        comisionHoy: 0,
+        gananciaHoy: 0,
+        viajesHoy: const [],
+      );
+    }
   }
 
   Future<void> _syncFromSupabase() async {
@@ -141,65 +283,8 @@ class ConductorComisionesController extends StateNotifier<ConductorComisionesSta
     if (user == null) return;
 
     try {
-      final driver = await Supabase.instance.client.from('drivers').select('id, commission_pct, capacity').eq('profile_id', user.id).maybeSingle();
+      final driver = await Supabase.instance.client.from('drivers').select('id, commission_pct').eq('profile_id', user.id).maybeSingle();
       final commissionPct = (driver?['commission_pct'] as num?)?.toDouble();
-      final capacity = (driver?['capacity'] as int?) ?? 8;
-      final driverId = driver?['id']?.toString();
-
-      final today = DateTime.now();
-      final start = DateTime(today.year, today.month, today.day);
-      final end = start.add(const Duration(days: 1));
-
-      final viajes = <ConductorViajeDiaItem>[];
-      if (driverId != null) {
-        final trips = await Supabase.instance.client
-            .from('trips')
-            .select('id, created_at, route_id')
-            .eq('driver_id', driverId)
-            .gte('created_at', start.toIso8601String())
-            .lt('created_at', end.toIso8601String())
-            .order('created_at', ascending: true);
-
-        for (final m in (trips as List).cast<Map<String, dynamic>>()) {
-          final tripId = m['id']?.toString();
-          final createdAt = DateTime.tryParse(m['created_at']?.toString() ?? '');
-            if (tripId == null || createdAt == null) continue;
-
-            final reservations = await Supabase.instance.client
-                .from('reservations')
-                .select('seats')
-                .eq('trip_id', tripId)
-                .eq('status', 'activa');
-            var ocupados = 0;
-            for (final rm in (reservations as List).cast<Map<String, dynamic>>()) {
-              final seats = rm['seats'];
-              if (seats is List) ocupados += seats.length;
-            }
-
-            final routeId = m['route_id']?.toString();
-            String rutaLabel = 'Ruta';
-            if (routeId != null) {
-              final route = await Supabase.instance.client.from('routes').select('name').eq('id', routeId).maybeSingle();
-              rutaLabel = route?['name']?.toString() ?? rutaLabel;
-            }
-
-            final hh = createdAt.hour;
-            final mm = createdAt.minute.toString().padLeft(2, '0');
-            final suffix = hh >= 12 ? 'PM' : 'AM';
-            final hh12 = ((hh + 11) % 12) + 1;
-            final horaLabel = '$hh12:$mm $suffix';
-
-            viajes.add(
-              ConductorViajeDiaItem(
-                id: tripId,
-                horaLabel: horaLabel,
-                rutaLabel: rutaLabel,
-                ocupados: ocupados,
-                capacidad: capacity,
-              ),
-            );
-        }
-      }
 
       final payouts = await Supabase.instance.client
           .from('driver_payouts')
@@ -243,7 +328,6 @@ class ConductorComisionesController extends StateNotifier<ConductorComisionesSta
 
       state = state.copyWith(
         porcentajeComision: (commissionPct ?? 15.0) / 100.0,
-        viajesHoy: viajes,
         historialPagos: historial,
         estadoSolicitud: estadoSolicitud,
         solicitudAt: reqAt,

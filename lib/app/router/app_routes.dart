@@ -4,6 +4,7 @@ class AppRoutes {
   static const login = '/login';
   static const register = '/register';
   static const forgotPassword = '/forgot-password';
+  static const resetPassword = '/reset-password';
 
   static const roleSelect = '/role';
 
@@ -25,6 +26,7 @@ class AppRoutes {
   static const passengerForzarSalida = '/passenger/forzar-salida';
   static const passengerCancelarReserva = '/passenger/cancelar-reserva';
   static const passengerMapaViaje = '/passenger/mapa-viaje';
+  static const passengerViajeEnCurso = '/passenger/viaje-en-curso';
   static const passengerChat = '/passenger/chat';
   static const passengerCalificacion = '/passenger/calificacion';
   static const passengerTripDetail = '/passenger/viaje';

@@ -1,21 +1,21 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_spacing.dart';
-import '../../../shared/maps/widgets/map_pick_address_sheet.dart';
+import '../../../shared/maps/google_places_service.dart';
 import '../../../shared/maps/widgets/places_address_search_field.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
-import '../providers/favorite_pickups_provider.dart';
 import '../providers/reserva_provider.dart';
-
-/// Origen del último cambio de texto (no programático).
-enum _PickupEditSource { none, places, pickup }
 
 class PickupReservaScreen extends ConsumerStatefulWidget {
   const PickupReservaScreen({super.key});
@@ -25,75 +25,151 @@ class PickupReservaScreen extends ConsumerStatefulWidget {
 }
 
 class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
-  late final TextEditingController _placesCtrl;
-  late final TextEditingController _pickupCtrl;
-  bool _saveAsFavorite = false;
+  static const _lima = LatLng(-12.1092, -77.0365);
+
+  late final TextEditingController _addressController;
+
+  GoogleMapController? _mapController;
+  bool _loadingContext = true;
+  bool _resolvingGeo = false;
+  bool _ignoreAddressEvents = false;
+
+  String? _puntoSeleccionado;
+  LatLng? _coordenadasSeleccionadas;
 
   String _preferredFromProfile = '';
   List<String> _routePickupAddresses = const [];
-  bool _loadingContext = true;
   String? _contextError;
   String? _contextLoadTripId;
-
-  bool _ignoreControllerEvents = false;
-  _PickupEditSource _lastEdit = _PickupEditSource.none;
-
-  void _onPlacesTextChanged() {
-    if (_ignoreControllerEvents) return;
-    _lastEdit = _PickupEditSource.places;
-    if (mounted) setState(() {});
-  }
-
-  void _onPickupTextChanged() {
-    if (_ignoreControllerEvents) return;
-    _lastEdit = _PickupEditSource.pickup;
-    if (mounted) setState(() {});
-  }
 
   @override
   void initState() {
     super.initState();
-    _placesCtrl = TextEditingController();
-    _pickupCtrl = TextEditingController();
-    _placesCtrl.addListener(_onPlacesTextChanged);
-    _pickupCtrl.addListener(_onPickupTextChanged);
+    _addressController = TextEditingController();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _requestLocationPermission());
+  }
+
+  Future<void> _requestLocationPermission() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _placesCtrl.removeListener(_onPlacesTextChanged);
-    _pickupCtrl.removeListener(_onPickupTextChanged);
-    _placesCtrl.dispose();
-    _pickupCtrl.dispose();
+    _addressController.dispose();
+    _mapController?.dispose();
     super.dispose();
   }
 
-  void _setBothFields(String value) {
-    _ignoreControllerEvents = true;
-    _pickupCtrl.text = value;
-    _placesCtrl.text = value;
-    _ignoreControllerEvents = false;
-    _lastEdit = _PickupEditSource.none;
-    if (mounted) setState(() {});
+  bool get _canContinue =>
+      !_loadingContext &&
+      !_resolvingGeo &&
+      _puntoSeleccionado != null &&
+      _puntoSeleccionado!.trim().length >= 3 &&
+      _coordenadasSeleccionadas != null;
+
+  Set<Marker> get _markers {
+    final coords = _coordenadasSeleccionadas;
+    if (coords == null) return const {};
+    return {
+      Marker(
+        markerId: const MarkerId('pickup'),
+        position: coords,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+      ),
+    };
   }
 
-  void _selectAddress(String value) {
-    _setBothFields(value);
+  void _clearSelection() {
+    setState(() {
+      _puntoSeleccionado = null;
+      _coordenadasSeleccionadas = null;
+    });
   }
 
-  /// Texto al continuar según si el usuario escribió en Places o en el campo final
-  /// (dos TextField con un solo controller falla en varias plataformas).
-  String _effectivePickupTrimmed() {
-    final p = _pickupCtrl.text.trim();
-    final q = _placesCtrl.text.trim();
-    if (_lastEdit == _PickupEditSource.places && q.length >= 3) return q;
-    if (_lastEdit == _PickupEditSource.pickup && p.length >= 3) return p;
-    if (p.length >= 3) return p;
-    if (q.length >= 3) return q;
-    return p.isNotEmpty ? p : q;
+  void _onAddressEdited() {
+    if (_ignoreAddressEvents) return;
+    _clearSelection();
   }
 
-  bool _isValidEffective() => _effectivePickupTrimmed().length >= 3;
+  Future<void> _applyMapSelection({
+    required String address,
+    required LatLng coords,
+  }) async {
+    _ignoreAddressEvents = true;
+    _addressController.text = address;
+    _ignoreAddressEvents = false;
+
+    setState(() {
+      _puntoSeleccionado = address;
+      _coordenadasSeleccionadas = coords;
+      _resolvingGeo = false;
+    });
+
+    final controller = _mapController;
+    if (controller != null) {
+      await controller.animateCamera(CameraUpdate.newLatLngZoom(coords, 15));
+    }
+  }
+
+  Future<void> _confirmAddress(String address, {LatLng? coords}) async {
+    final trimmed = address.trim();
+    if (trimmed.length < 3) return;
+
+    setState(() {
+      _resolvingGeo = true;
+      _puntoSeleccionado = null;
+      _coordenadasSeleccionadas = null;
+    });
+
+    var position = coords ?? await GooglePlacesService.geocodeAddress(trimmed);
+    if (!mounted) return;
+
+    if (position == null) {
+      setState(() => _resolvingGeo = false);
+      AppSnackbars.warning(
+        context,
+        'No se pudo ubicar la dirección en el mapa. Elige una sugerencia o toca el mapa.',
+      );
+      return;
+    }
+
+    await _applyMapSelection(address: trimmed, coords: position);
+  }
+
+  Future<void> _onPlaceChosen(PlacePrediction prediction, String displayText) async {
+    final address = displayText.trim();
+    final coords = await GooglePlacesService.latLngForPlaceId(prediction.placeId);
+    if (!mounted) return;
+    if (coords == null) {
+      await _confirmAddress(address);
+      return;
+    }
+    await _applyMapSelection(address: address, coords: coords);
+  }
+
+  Future<void> _onMapTap(LatLng coords) async {
+    setState(() {
+      _resolvingGeo = true;
+      _puntoSeleccionado = null;
+      _coordenadasSeleccionadas = null;
+    });
+
+    final address = await GooglePlacesService.reverseGeocode(coords.latitude, coords.longitude);
+    if (!mounted) return;
+
+    final resolved = (address != null && address.trim().isNotEmpty)
+        ? address.trim()
+        : '${coords.latitude.toStringAsFixed(5)}, ${coords.longitude.toStringAsFixed(5)}';
+
+    await _applyMapSelection(address: resolved, coords: coords);
+  }
 
   Future<void> _loadContextForTrip(String tripId) async {
     if (!mounted) return;
@@ -143,7 +219,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
         _preferredFromProfile = preferred;
         _routePickupAddresses = routePoints;
       });
-      _syncInitialPickup();
+      await _syncInitialPickup();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -158,50 +234,44 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     }
   }
 
-  void _syncInitialPickup() {
+  Future<void> _syncInitialPickup() async {
     final reserva = ref.read(reservaProvider);
     final current = reserva.puntoRecojo?.trim();
+    final lat = reserva.pickupLat;
+    final lng = reserva.pickupLng;
+
     if (current != null && current.isNotEmpty) {
-      _setBothFields(current);
+      if (lat != null && lng != null) {
+        await _applyMapSelection(address: current, coords: LatLng(lat, lng));
+        return;
+      }
+      await _confirmAddress(current);
       return;
     }
     if (_preferredFromProfile.isNotEmpty) {
-      _setBothFields(_preferredFromProfile);
+      await _confirmAddress(_preferredFromProfile);
       return;
     }
     if (_routePickupAddresses.isNotEmpty) {
-      _setBothFields(_routePickupAddresses.first);
+      await _confirmAddress(_routePickupAddresses.first);
     }
-  }
-
-  Future<void> _openMapPicker() async {
-    final addr = await showMapPickAddressSheet(context);
-    if (!mounted || addr == null || addr.trim().isEmpty) return;
-    _selectAddress(addr.trim());
   }
 
   Future<void> _onContinue() async {
-    if (_loadingContext) return;
-    final text = _effectivePickupTrimmed();
-    if (text.length < 3) {
+    if (!_canContinue) {
       if (!mounted) return;
-      AppSnackbars.warning(context, 'Indica un punto de recojo (mínimo 3 caracteres).');
+      AppSnackbars.error(context, 'Por favor selecciona un punto de recojo en el mapa o en las sugerencias.');
       return;
     }
 
-    final reservaNotifier = ref.read(reservaProvider.notifier);
-    final favorites = ref.read(favoritePickupsProvider.notifier);
+    final text = _puntoSeleccionado!.trim();
+    final coords = _coordenadasSeleccionadas!;
+    ref.read(reservaProvider.notifier).setPickupWithCoords(
+      text,
+      lat: coords.latitude,
+      lng: coords.longitude,
+    );
 
-    reservaNotifier.setPickup(text);
-    if (_saveAsFavorite) {
-      favorites.add(text);
-      final uid = Supabase.instance.client.auth.currentUser?.id;
-      if (uid != null) {
-        try {
-          await Supabase.instance.client.from('profiles').update({'preferred_pickup': text}).eq('id', uid);
-        } catch (_) {}
-      }
-    }
     if (mounted) context.push(AppRoutes.passengerReservaResumen);
   }
 
@@ -228,14 +298,13 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     if (_contextLoadTripId == tripId) return;
     _contextLoadTripId = tripId;
     scheduleMicrotask(() {
-      if (mounted) _loadContextForTrip(tripId);
+      if (mounted) unawaited(_loadContextForTrip(tripId));
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final driver = ref.watch(reservaProvider).conductorSeleccionado;
-    final favoritePickups = ref.watch(favoritePickupsProvider);
 
     if (driver == null) {
       return const AppScaffold(
@@ -247,8 +316,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
       );
     }
 
-    final value = _effectivePickupTrimmed();
-    final valid = _isValidEffective();
+    final selected = _puntoSeleccionado?.trim() ?? '';
 
     return AppScaffold(
       title: 'Punto de recojo',
@@ -287,6 +355,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   if (_loadingContext) const LinearProgressIndicator(),
+                  if (_resolvingGeo) const LinearProgressIndicator(),
                   if (_contextError != null)
                     Padding(
                       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -295,11 +364,65 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                         style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12),
                       ),
                     ),
-                  Text(
-                    '¿Dónde te recogemos?',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(color: AppColors.textPrimary),
+                  PlacesAddressSearchField(
+                    controller: _addressController,
+                    label: '¿Dónde te recogemos?',
+                    hint: 'Escribe tu dirección...',
+                    prefixIcon: Icons.location_on_rounded,
+                    onTextEdited: _onAddressEdited,
+                    onAddressResolved: (formatted) => unawaited(_confirmAddress(formatted)),
+                    onPlaceChosen: (p, text) => unawaited(_onPlaceChosen(p, text)),
                   ),
                   const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Toca el mapa para elegir el punto exacto',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  SizedBox(
+                    height: 220,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: GoogleMap(
+                        initialCameraPosition: const CameraPosition(target: _lima, zoom: 13),
+                        scrollGesturesEnabled: true,
+                        zoomGesturesEnabled: true,
+                        tiltGesturesEnabled: false,
+                        rotateGesturesEnabled: false,
+                        myLocationEnabled: true,
+                        myLocationButtonEnabled: true,
+                        markers: _markers,
+                        gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                          Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+                        },
+                        onMapCreated: (c) {
+                          _mapController = c;
+                          Geolocator.getCurrentPosition().then((pos) {
+                            if (!mounted) return;
+                            _mapController?.animateCamera(
+                              CameraUpdate.newLatLngZoom(
+                                LatLng(pos.latitude, pos.longitude),
+                                15,
+                              ),
+                            );
+                          }).catchError((_) {});
+                        },
+                        onTap: (coords) => unawaited(_onMapTap(coords)),
+                        zoomControlsEnabled: true,
+                      ),
+                    ),
+                  ),
+                  if (selected.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Punto seleccionado: $selected',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.md),
                   if (_preferredFromProfile.isNotEmpty) ...[
                     Text(
                       'Tu punto favorito',
@@ -313,8 +436,8 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                       alignment: Alignment.centerLeft,
                       child: ChoiceChip(
                         label: Text(_preferredFromProfile, overflow: TextOverflow.ellipsis),
-                        selected: value == _preferredFromProfile,
-                        onSelected: (_) => _selectAddress(_preferredFromProfile),
+                        selected: selected == _preferredFromProfile,
+                        onSelected: (_) => unawaited(_confirmAddress(_preferredFromProfile)),
                       ),
                     ),
                     const SizedBox(height: AppSpacing.md),
@@ -334,75 +457,13 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                       children: _routePickupAddresses.map((p) {
                         return ChoiceChip(
                           label: Text(p, overflow: TextOverflow.ellipsis),
-                          selected: value == p,
-                          onSelected: (_) => _selectAddress(p),
+                          selected: selected == p,
+                          onSelected: (_) => unawaited(_confirmAddress(p)),
                         );
                       }).toList(),
                     ),
                     const SizedBox(height: AppSpacing.md),
                   ],
-                  Text(
-                    'Buscar otra dirección (Google Places)',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  PlacesAddressSearchField(
-                    controller: _placesCtrl,
-                    label: 'Dirección en Perú',
-                    hint: 'Ej: Av. Javier Prado, San Isidro',
-                    onAddressResolved: (formatted) => _selectAddress(formatted),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  OutlinedButton.icon(
-                    onPressed: _openMapPicker,
-                    icon: const Icon(Icons.map_rounded),
-                    label: const Text('Elegir en el mapa'),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  TextField(
-                    controller: _pickupCtrl,
-                    maxLines: 2,
-                    decoration: InputDecoration(
-                      labelText: 'Punto de recojo final',
-                      hintText: 'Se rellena al elegir arriba; puedes editarlo',
-                      errorText: value.isEmpty || valid ? null : 'Mínimo 3 caracteres',
-                    ),
-                  ),
-                  if (favoritePickups.isNotEmpty) ...[
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      'Puntos guardados (local)',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.sm,
-                      children: favoritePickups
-                          .map(
-                            (p) => ActionChip(
-                              label: Text(p, overflow: TextOverflow.ellipsis),
-                              onPressed: () => _selectAddress(p),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.md),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: _saveAsFavorite,
-                    onChanged: (v) => setState(() => _saveAsFavorite = v ?? false),
-                    title: const Text('Guardar como punto favorito en mi perfil'),
-                    controlAffinity: ListTileControlAffinity.leading,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
                 ],
               ),
             ),
@@ -410,11 +471,11 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
           const SizedBox(height: AppSpacing.sm),
           AppPrimaryButton(
             label: 'Continuar',
-            onPressed: _loadingContext
-                ? null
-                : () {
+            onPressed: _canContinue
+                ? () {
                     unawaited(_onContinue());
-                  },
+                  }
+                : null,
           ),
         ],
       ),

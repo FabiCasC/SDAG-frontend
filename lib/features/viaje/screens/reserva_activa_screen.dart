@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
@@ -9,6 +13,7 @@ import '../../../features/reserva/providers/reserva_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/maps/google_eta_service.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/viaje_provider.dart';
 import 'punto_alternativo_screen.dart';
@@ -24,11 +29,23 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
   bool _started = false;
   bool _sheetOpen = false;
   bool _extraPaidSnackShown = false;
+  bool _boardingListenerReady = false;
+  bool _etaInicializado = false;
   late final ProviderSubscription<ViajeState> _viajeSub;
+  StreamSubscription<List<Map<String, dynamic>>>? _boardingSubscription;
+  Timer? _etaTimer;
+  int? _etaMinutos;
+  bool _etaLoading = true;
+  LatLng? _lastConductorPos;
+  static const double _minDistanciaMetros = 300;
 
   @override
   void initState() {
     super.initState();
+
+    _etaTimer = Timer.periodic(const Duration(seconds: 40), (_) {
+      _actualizarEtaSiMovio();
+    });
 
     _viajeSub = ref.listenManual<ViajeState>(viajeProvider, (previous, next) {
       if (!mounted) return;
@@ -53,8 +70,113 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
     });
   }
 
+  void _subscribeBoarding(String reservaId) {
+    _boardingSubscription?.cancel();
+    _boardingSubscription = Supabase.instance.client
+        .from('manifest_entries')
+        .stream(primaryKey: ['id'])
+        .eq('reservation_id', reservaId)
+        .listen((rows) {
+      if (!mounted || rows.isEmpty) return;
+      final status = rows.first['boarding_status']?.toString();
+      if (status == 'abordo') {
+        context.go('${AppRoutes.passengerViajeEnCurso}?reservaId=$reservaId');
+      }
+    });
+  }
+
+  Future<void> _calcularEtaInicial() async {
+    final reserva = ref.read(reservaProvider);
+    final driver = reserva.conductorSeleccionado;
+    final pickup = reserva.puntoRecojo?.trim();
+
+    if (driver == null || pickup == null || pickup.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _etaLoading = false;
+        _etaMinutos = null;
+      });
+      return;
+    }
+
+    final loc = await Supabase.instance.client
+        .from('driver_locations')
+        .select('lat, lng')
+        .eq('driver_id', driver.driverId)
+        .maybeSingle();
+
+    if (loc != null) {
+      final lat = (loc['lat'] as num?)?.toDouble();
+      final lng = (loc['lng'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        _lastConductorPos = LatLng(lat, lng);
+      }
+    }
+
+    final eta = await GoogleEtaService.calcularEtaConductorAlPickup(
+      driverId: driver.driverId,
+      pickupAddress: pickup,
+      pickupLat: reserva.pickupLat,
+      pickupLng: reserva.pickupLng,
+      conductorPos: _lastConductorPos,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _etaMinutos = eta;
+      _etaLoading = false;
+    });
+    ref.read(viajeProvider.notifier).updateEtaMinutes(eta);
+  }
+
+  Future<void> _actualizarEtaSiMovio() async {
+    final reserva = ref.read(reservaProvider);
+    final driver = reserva.conductorSeleccionado;
+    final pickup = reserva.puntoRecojo?.trim();
+    if (driver == null || pickup == null || pickup.isEmpty) return;
+
+    final loc = await Supabase.instance.client
+        .from('driver_locations')
+        .select('lat, lng')
+        .eq('driver_id', driver.driverId)
+        .maybeSingle();
+    if (loc == null) return;
+
+    final lat = (loc['lat'] as num?)?.toDouble();
+    final lng = (loc['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null) return;
+
+    final nuevaPos = LatLng(lat, lng);
+
+    if (_lastConductorPos != null) {
+      final distancia = GoogleEtaService.haversineMeters(
+        _lastConductorPos!.latitude,
+        _lastConductorPos!.longitude,
+        nuevaPos.latitude,
+        nuevaPos.longitude,
+      );
+      if (distancia < _minDistanciaMetros) return;
+    }
+
+    _lastConductorPos = nuevaPos;
+
+    final eta = await GoogleEtaService.calcularEtaConductorAlPickup(
+      driverId: driver.driverId,
+      pickupAddress: pickup,
+      pickupLat: reserva.pickupLat,
+      pickupLng: reserva.pickupLng,
+      conductorPos: nuevaPos,
+    );
+
+    if (!mounted) return;
+    setState(() => _etaMinutos = eta);
+    ref.read(viajeProvider.notifier).updateEtaMinutes(eta);
+  }
+
   @override
   void dispose() {
+    _etaTimer?.cancel();
+    _boardingSubscription?.cancel();
     _viajeSub.close();
     super.dispose();
   }
@@ -95,6 +217,21 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
         if (driverId != null && driverId.isNotEmpty) {
           controller.start(driverId);
         }
+      });
+    }
+
+    if (!_etaInicializado) {
+      _etaInicializado = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _calcularEtaInicial();
+      });
+    }
+
+    final reservaId = reserva.reservaId;
+    if (!_boardingListenerReady && reservaId != null && reservaId.isNotEmpty) {
+      _boardingListenerReady = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _subscribeBoarding(reservaId);
       });
     }
 
@@ -165,20 +302,26 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   Text(
-                    'El conductor llega en aproximadamente',
+                    _etaLoading
+                        ? 'Calculando ETA...'
+                        : _etaMinutos != null
+                            ? 'El conductor llegará en aproximadamente'
+                            : 'ETA no disponible',
                     style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                           color: AppColors.textSecondary,
                         ),
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    '${viaje.etaMinutes} min',
-                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                          color: AppColors.primaryBlue,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 32,
-                        ),
-                  ),
+                  if (_etaMinutos != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      '≈ $_etaMinutos min',
+                      style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            color: AppColors.primaryBlue,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 32,
+                          ),
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
                   Wrap(
                     spacing: AppSpacing.sm,
@@ -223,7 +366,7 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
                             final ok = await _confirmWait(context);
                             if (!context.mounted) return;
                             if (!ok) return;
-                            AppSnackbars.warning(context, 'Señal enviada al conductor');
+                            await _enviarEsperame();
                           },
                         ),
                       ),
@@ -233,6 +376,14 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
                           label: 'Forzar salida',
                           icon: Icons.rocket_launch_rounded,
                           onTap: () => context.push(AppRoutes.passengerForzarSalida),
+                        ),
+                      ),
+                      SizedBox(
+                        width: MediaQuery.of(context).size.width - (AppSpacing.p20 * 2),
+                        child: _ActionButton(
+                          label: 'Bajarme aquí',
+                          icon: Icons.pin_drop_rounded,
+                          onTap: _bajarmAqui,
                         ),
                       ),
                     ],
@@ -265,6 +416,120 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
     if (!mounted) return;
     _sheetOpen = false;
     ref.read(viajeProvider.notifier).dismissAlternativePickup();
+  }
+
+  Future<void> _bajarmAqui() async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¿Confirmar bajada?'),
+        content: const Text('¿Confirmas que ya llegaste a tu destino?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sí, me bajo aquí'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmado != true) return;
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    final reserva = ref.read(reservaProvider);
+    final reservaId = reserva.reservaId;
+    final driverId = reserva.conductorSeleccionado?.driverId;
+
+    if (reservaId == null || reservaId.isEmpty) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se encontró la reserva activa');
+      return;
+    }
+
+    try {
+      await Supabase.instance.client
+          .from('reservations')
+          .update({'status': 'completada'})
+          .eq('id', reservaId);
+
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'has_active_reservation': false})
+          .eq('id', userId);
+
+      final manifestEntries = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('id, boarding')
+          .eq('reservation_id', reservaId);
+
+      for (final raw in (manifestEntries as List).cast<Map<String, dynamic>>()) {
+        final boarding = raw['boarding']?.toString() ?? raw['boarding_status']?.toString();
+        if (boarding == 'abordo') continue;
+        await Supabase.instance.client
+            .from('manifest_entries')
+            .update({'boarding': 'no_abordo'})
+            .eq('id', raw['id']);
+      }
+
+      ref.read(reservaProvider.notifier).reset();
+      ref.invalidate(viajeProvider);
+
+      if (!mounted) return;
+      final ratingDriverId = driverId ?? '';
+      context.go('${AppRoutes.passengerCalificacion}?tripId=$reservaId&driverId=$ratingDriverId');
+    } catch (_) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se pudo completar el viaje');
+    }
+  }
+
+  Future<void> _enviarEsperame() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    final reserva = ref.read(reservaProvider);
+    final tripId = reserva.conductorSeleccionado?.tripId;
+    if (tripId == null || tripId.isEmpty) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se encontró el viaje activo');
+      return;
+    }
+
+    try {
+      final profile = await Supabase.instance.client
+          .from('profiles')
+          .select('name, first_name')
+          .eq('id', user.id)
+          .single();
+
+      final nombre = profile['name']?.toString().trim().isNotEmpty == true
+          ? profile['name'].toString().trim()
+          : (profile['first_name']?.toString().trim().isNotEmpty == true
+              ? profile['first_name'].toString().trim()
+              : 'El pasajero');
+
+      final texto = '⏳ $nombre necesita que lo esperes en el punto de recojo.';
+
+      await Supabase.instance.client.from('trip_messages').insert({
+        'trip_id': tripId,
+        'sender_profile_id': user.id,
+        'sender_role': 'passenger',
+        'body': texto,
+        'message_type': 'esperame',
+      });
+
+      if (!mounted) return;
+      AppSnackbars.success(context, 'Notificación enviada al conductor ✓');
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se pudo enviar la notificación');
+    }
   }
 
   Future<bool> _confirmWait(BuildContext context) async {
@@ -352,7 +617,6 @@ Future<void> _openQrSheet(
                   itemCount: passengers.length,
                   itemBuilder: (context, index) {
                     final p = passengers[index];
-                    final qrData = '$reservaId|${p.passengerId}|${p.seatNumber}';
                     return Padding(
                       padding: const EdgeInsets.only(bottom: AppSpacing.md),
                       child: DecoratedBox(
@@ -375,7 +639,8 @@ Future<void> _openQrSheet(
                             children: [
                               Center(
                                 child: QrImageView(
-                                  data: qrData,
+                                  data: reservaId,
+                                  version: QrVersions.auto,
                                   size: 160,
                                   backgroundColor: AppColors.white,
                                 ),

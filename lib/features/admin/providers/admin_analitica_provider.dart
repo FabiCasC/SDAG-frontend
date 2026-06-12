@@ -136,7 +136,7 @@ class AdminAnaliticaController extends StateNotifier<AdminAnaliticaState> {
     try {
       final trips = await Supabase.instance.client
           .from('trips')
-          .select('id, driver_id, amount, created_at, status')
+          .select('id, driver_id, amount_total, created_at, status')
           .gte('created_at', fromIso)
           .lt('created_at', toIso);
 
@@ -149,10 +149,21 @@ class AdminAnaliticaController extends StateNotifier<AdminAnaliticaState> {
       final tripIds = completed.map((e) => e['id']?.toString()).whereType<String>().toList();
       final driverIds = completed.map((e) => e['driver_id']?.toString()).whereType<String>().toSet().toList();
 
-      final ingresosTotales = completed.fold<double>(
-        0,
-        (sum, t) => sum + (((t['amount'] as num?)?.toDouble()) ?? 0.0),
-      );
+      final pagos = await Supabase.instance.client
+          .from('payments')
+          .select('amount, created_at, reservations(trip_id, trips(status))')
+          .eq('status', 'confirmado')
+          .gte('created_at', fromIso)
+          .lt('created_at', toIso);
+
+      var ingresosTotales = 0.0;
+      for (final p in (pagos as List).cast<Map<String, dynamic>>()) {
+        final reservation = p['reservations'];
+        final trip = reservation is Map ? reservation['trips'] : null;
+        final tripStatus = trip is Map ? trip['status']?.toString() : null;
+        if (tripStatus != 'completado') continue;
+        ingresosTotales += (p['amount'] as num?)?.toDouble() ?? 0.0;
+      }
 
       final payouts = await Supabase.instance.client
           .from('driver_payouts')
@@ -165,11 +176,15 @@ class AdminAnaliticaController extends StateNotifier<AdminAnaliticaState> {
       }
 
       final ingresosPorDia = <String, double>{};
-      for (final t in completed) {
-        final createdAt = DateTime.tryParse(t['created_at']?.toString() ?? '');
+      for (final p in (pagos as List).cast<Map<String, dynamic>>()) {
+        final reservation = p['reservations'];
+        final trip = reservation is Map ? reservation['trips'] : null;
+        final tripStatus = trip is Map ? trip['status']?.toString() : null;
+        if (tripStatus != 'completado') continue;
+        final createdAt = DateTime.tryParse(p['created_at']?.toString() ?? '');
         if (createdAt == null) continue;
         final key = '${createdAt.day}/${createdAt.month}';
-        ingresosPorDia[key] = (ingresosPorDia[key] ?? 0.0) + (((t['amount'] as num?)?.toDouble()) ?? 0.0);
+        ingresosPorDia[key] = (ingresosPorDia[key] ?? 0.0) + ((p['amount'] as num?)?.toDouble() ?? 0.0);
       }
       final ingresosDiarios = ingresosPorDia.entries
           .map((e) => AdminIngresoDiario(label: e.key, monto: e.value))
@@ -217,7 +232,7 @@ class AdminAnaliticaController extends StateNotifier<AdminAnaliticaState> {
         final driverId = t['driver_id']?.toString();
         final tripId = t['id']?.toString();
         if (driverId == null || tripId == null) continue;
-        final amount = ((t['amount'] as num?)?.toDouble()) ?? 0.0;
+        final amount = ((t['amount_total'] as num?)?.toDouble()) ?? 0.0;
         final seats = seatsByTrip[tripId] ?? 0;
         rankingAgg.putIfAbsent(driverId, () => _DriverAgg()).add(amount: amount, seats: seats);
       }

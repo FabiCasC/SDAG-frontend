@@ -105,7 +105,7 @@ class _QrScreenState extends ConsumerState<QrScreen> {
 
           final firstSeat = trip.seats.isEmpty ? 0 : trip.seats.first;
           final cacheKey = 'qr_cache_${trip.id}_$firstSeat';
-          final qrData = 'res_${trip.id}|trip_${trip.tripId}|seats_${trip.seats.join(',')}';
+          final qrData = trip.id;
 
           if (!online && _cachedQrData == null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -164,6 +164,7 @@ class _QrScreenState extends ConsumerState<QrScreen> {
                             ),
                             child: QrImageView(
                               data: effectiveQr,
+                              version: QrVersions.auto,
                               size: 200,
                               backgroundColor: AppColors.white,
                             ),

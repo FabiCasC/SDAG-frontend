@@ -164,8 +164,16 @@ final passengerTripHistoryProvider =
 
   final reservas = await Supabase.instance.client
       .from('reservations')
-      .select('*, trips(*, routes(*), drivers(*, profiles(*)))')
+      .select('''
+        id, seats, pickup_point, status, amount, created_at,
+        trips(
+          id, status, started_at, finished_at,
+          routes(name, from_label, to_label),
+          drivers(plate, profiles(name, first_name, last_name))
+        )
+      ''')
       .eq('passenger_profile_id', userId)
+      .inFilter('status', ['completada', 'cancelada'])
       .order('created_at', ascending: false);
 
   return (reservas as List)
@@ -222,8 +230,10 @@ class _PassengerTripHistoryItem {
     final routeName = route['name']?.toString().trim();
     final fromLabel = route['from_label']?.toString().trim() ?? '';
     final toLabel = route['to_label']?.toString().trim() ?? '';
-    final createdAtRaw =
-        trip['scheduled_departure_at']?.toString() ?? map['created_at']?.toString() ?? '';
+    final createdAtRaw = trip['finished_at']?.toString() ??
+        trip['started_at']?.toString() ??
+        map['created_at']?.toString() ??
+        '';
 
     return _PassengerTripHistoryItem(
       id: map['id'].toString(),
@@ -233,13 +243,28 @@ class _PassengerTripHistoryItem {
           ? profile['name'].toString().trim()
           : (fullName.isNotEmpty ? fullName : 'Conductor sin nombre'),
       plate: driver['plate']?.toString() ?? 'Sin placa',
-      seats: ((map['seats'] as List?) ?? const <dynamic>[])
-          .whereType<int>()
-          .toList(),
+      seats: _parseSeats(map['seats']),
       amount: (map['amount'] as num?)?.toDouble() ?? 0,
       status: map['status']?.toString() ?? '',
     );
   }
+}
+
+List<int> _parseSeats(dynamic rawSeats) {
+  if (rawSeats is! List) return const [];
+  final out = <int>[];
+  for (final seat in rawSeats) {
+    if (seat is int) {
+      out.add(seat);
+    } else if (seat is num) {
+      out.add(seat.toInt());
+    } else {
+      final parsed = int.tryParse(seat.toString());
+      if (parsed != null) out.add(parsed);
+    }
+  }
+  out.sort();
+  return out;
 }
 
 String _formatDate(String raw) {
@@ -279,20 +304,14 @@ class _EmptyHistory extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.history_rounded, size: 56, color: AppColors.textSecondary),
-            const SizedBox(height: AppSpacing.md),
+            const Icon(Icons.directions_bus_rounded, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
             Text(
-              'Aún no tienes viajes',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w700,
+              'Aún no tienes viajes registrados',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: Colors.grey,
+                fontSize: 16,
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Cuando completes tu primer viaje, aparecerá aquí.',
-              style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
               textAlign: TextAlign.center,
             ),
           ],

@@ -51,6 +51,8 @@ class ReservaState {
     required this.asientosSeleccionados,
     required this.acompanantes,
     required this.puntoRecojo,
+    this.pickupLat,
+    this.pickupLng,
     required this.vehiculoPartio,
     required this.additionalChargePending,
     required this.additionalChargeAmount,
@@ -61,6 +63,8 @@ class ReservaState {
   final List<int> asientosSeleccionados;
   final Map<int, ReservaAcompanante> acompanantes;
   final String? puntoRecojo;
+  final double? pickupLat;
+  final double? pickupLng;
   final bool vehiculoPartio;
   final bool additionalChargePending;
   final double additionalChargeAmount;
@@ -74,7 +78,10 @@ class ReservaState {
     List<int>? asientosSeleccionados,
     Map<int, ReservaAcompanante>? acompanantes,
     String? puntoRecojo,
+    double? pickupLat,
+    double? pickupLng,
     bool clearPickup = false,
+    bool clearPickupCoords = false,
     bool? vehiculoPartio,
     bool? additionalChargePending,
     double? additionalChargeAmount,
@@ -86,6 +93,8 @@ class ReservaState {
       asientosSeleccionados: asientosSeleccionados ?? this.asientosSeleccionados,
       acompanantes: acompanantes ?? this.acompanantes,
       puntoRecojo: clearPickup ? null : (puntoRecojo ?? this.puntoRecojo),
+      pickupLat: clearPickupCoords || clearPickup ? null : (pickupLat ?? this.pickupLat),
+      pickupLng: clearPickupCoords || clearPickup ? null : (pickupLng ?? this.pickupLng),
       vehiculoPartio: vehiculoPartio ?? this.vehiculoPartio,
       additionalChargePending: clearAdditionalCharge
           ? false
@@ -101,6 +110,8 @@ class ReservaState {
     asientosSeleccionados: <int>[],
     acompanantes: <int, ReservaAcompanante>{},
     puntoRecojo: null,
+    pickupLat: null,
+    pickupLng: null,
     vehiculoPartio: false,
     additionalChargePending: false,
     additionalChargeAmount: 0.0,
@@ -120,6 +131,8 @@ class ReservaController extends StateNotifier<ReservaState> {
       asientosSeleccionados: const <int>[],
       acompanantes: const <int, ReservaAcompanante>{},
       puntoRecojo: null,
+      pickupLat: null,
+      pickupLng: null,
       vehiculoPartio: false,
       additionalChargePending: false,
       additionalChargeAmount: 0.0,
@@ -149,8 +162,86 @@ class ReservaController extends StateNotifier<ReservaState> {
     state = state.copyWith(puntoRecojo: pickup.trim());
   }
 
+  void setPickupCoords(double lat, double lng) {
+    state = state.copyWith(pickupLat: lat, pickupLng: lng);
+  }
+
+  void setPickupWithCoords(String pickup, {required double lat, required double lng}) {
+    state = state.copyWith(
+      puntoRecojo: pickup.trim(),
+      pickupLat: lat,
+      pickupLng: lng,
+    );
+  }
+
   void markPaid({required String reservaId}) {
     state = state.copyWith(reservaId: reservaId);
+  }
+
+  /// Restaura el estado local desde una reserva activa en Supabase (home / realtime).
+  void hydrateFromActiveReservation(Map<String, dynamic> row) {
+    final tripRaw = row['trips'];
+    final trip = tripRaw is Map<String, dynamic>
+        ? tripRaw
+        : tripRaw is Map
+            ? tripRaw.cast<String, dynamic>()
+            : null;
+    if (trip == null) return;
+
+    final driverRaw = trip['drivers'];
+    final driverMap = driverRaw is Map<String, dynamic>
+        ? driverRaw
+        : driverRaw is Map
+            ? driverRaw.cast<String, dynamic>()
+            : null;
+    if (driverMap == null) return;
+
+    final profileRaw = driverMap['profiles'];
+    final profile = profileRaw is Map<String, dynamic>
+        ? profileRaw
+        : profileRaw is Map
+            ? profileRaw.cast<String, dynamic>()
+            : null;
+
+    final routeRaw = trip['routes'];
+    final route = routeRaw is Map<String, dynamic>
+        ? routeRaw
+        : routeRaw is Map
+            ? routeRaw.cast<String, dynamic>()
+            : null;
+
+    final from = route?['from_label']?.toString().trim() ?? '';
+    final to = route?['to_label']?.toString().trim() ?? '';
+    final routeLabel = (from.isNotEmpty && to.isNotEmpty) ? '$from → $to' : (route?['name']?.toString() ?? 'Ruta');
+
+    final driverName = profile?['name']?.toString().trim();
+    final seats = <int>[];
+    final seatsRaw = row['seats'];
+    if (seatsRaw is List) {
+      for (final s in seatsRaw) {
+        final parsed = s is int ? s : int.tryParse(s.toString());
+        if (parsed != null) seats.add(parsed);
+      }
+    }
+    seats.sort();
+
+    state = state.copyWith(
+      reservaId: row['id']?.toString(),
+      conductorSeleccionado: ReservaDriverInfo(
+        tripId: trip['id']?.toString() ?? '',
+        driverId: driverMap['id']?.toString() ?? '',
+        name: (driverName != null && driverName.isNotEmpty) ? driverName : 'Conductor',
+        plate: driverMap['plate']?.toString() ?? '—',
+        vehicleType: '',
+        totalSeats: 0,
+        routeLabel: routeLabel,
+        rating: 0,
+        ratingCount: 0,
+        status: trip['status']?.toString() ?? 'esperando',
+      ),
+      asientosSeleccionados: seats,
+      puntoRecojo: row['pickup_point']?.toString(),
+    );
   }
 
   void requestAdditionalCharge(double amount) {

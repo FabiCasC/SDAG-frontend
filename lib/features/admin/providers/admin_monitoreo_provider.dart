@@ -109,17 +109,36 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
           .select('''
             id, profile_id, plate, vehicle_type, capacity, estado, rating_avg,
             profiles(name, phone),
-            driver_locations(lat, lng, eta_minutes, occupied_seats, trip_id),
             trips(id, status, route_id, started_at,
               routes(name, from_label, to_label))
           ''')
           .eq('cuenta_activa', true)
           .neq('estado', 'inactivo');
 
+      final driverRows = (drivers as List).cast<Map<String, dynamic>>();
+      final enRutaIds = driverRows
+          .where((d) => _isEnRuta(d['estado']?.toString()))
+          .map((d) => d['id']?.toString())
+          .whereType<String>()
+          .toList(growable: false);
+
+      final locationsByDriver = <String, Map<String, dynamic>>{};
+      if (enRutaIds.isNotEmpty) {
+        final locations = await Supabase.instance.client
+            .from('driver_locations')
+            .select('lat, lng, driver_id, occupied_seats, trip_id, drivers(profiles(name), plate)')
+            .inFilter('driver_id', enRutaIds);
+
+        for (final loc in (locations as List).cast<Map<String, dynamic>>()) {
+          final driverId = loc['driver_id']?.toString();
+          if (driverId != null && driverId.isNotEmpty) {
+            locationsByDriver[driverId] = loc;
+          }
+        }
+      }
+
       final items = await Future.wait(
-        (drivers as List)
-            .cast<Map<String, dynamic>>()
-            .map(_mapDriverRow),
+        driverRows.map((row) => _mapDriverRow(row, locationsByDriver: locationsByDriver)),
       );
 
       items.sort((a, b) => a.conductorNombre.toLowerCase().compareTo(b.conductorNombre.toLowerCase()));
@@ -137,7 +156,10 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
     }
   }
 
-  Future<AdminVehiculoActivo> _mapDriverRow(Map<String, dynamic> row) async {
+  Future<AdminVehiculoActivo> _mapDriverRow(
+    Map<String, dynamic> row, {
+    Map<String, Map<String, dynamic>> locationsByDriver = const {},
+  }) async {
     final driverId = row['id']?.toString() ?? '';
     final conductorId = row['profile_id']?.toString() ?? driverId;
     final profile = _asMap(row['profiles']);
@@ -145,7 +167,7 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
         ? profile!['name'].toString().trim()
         : 'Conductor';
 
-    final location = _firstMap(row['driver_locations']);
+    final location = locationsByDriver[driverId];
     final lat = (location?['lat'] as num?)?.toDouble();
     final lng = (location?['lng'] as num?)?.toDouble();
     final posicion = (lat != null && lng != null) ? LatLng(lat, lng) : null;
@@ -172,8 +194,10 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
     );
   }
 
+  bool _isEnRuta(String? estado) => estado == 'en_ruta' || estado == 'enRuta';
+
   AdminVehiculoEstado _mapEstado(String? estado) {
-    return estado == 'en_ruta' ? AdminVehiculoEstado.enRuta : AdminVehiculoEstado.disponible;
+    return _isEnRuta(estado) ? AdminVehiculoEstado.enRuta : AdminVehiculoEstado.disponible;
   }
 
   Map<String, dynamic>? _pickActiveTrip(dynamic rawTrips, {String? preferredTripId}) {
@@ -266,12 +290,6 @@ class AdminMonitoreoController extends StateNotifier<AdminMonitoreoState> {
     return [value];
   }
 
-  Map<String, dynamic>? _firstMap(dynamic value) {
-    final list = _asList(value);
-    if (list.isEmpty) return null;
-    final first = list.first;
-    return first is Map<String, dynamic> ? first : null;
-  }
 }
 
 final adminMonitoreoProvider = StateNotifierProvider<AdminMonitoreoController, AdminMonitoreoState>(

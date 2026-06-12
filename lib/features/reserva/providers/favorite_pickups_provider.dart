@@ -8,42 +8,27 @@ class FavoritePickupsController extends StateNotifier<List<String>> {
 
   static const _prefsKey = 'sdag_favorite_pickups';
 
-  static const _defaults = <String>[
-    'Cruce con Av. Javier Prado, frente al grifo',
-    'Paradero principal, costado del parque',
-  ];
-
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getStringList(_prefsKey) ?? const <String>[];
-    state = _merge(_defaults, stored);
+    state = stored.map((e) => e.trim()).where((e) => e.length >= 3).toList();
   }
 
   Future<void> add(String value) async {
     final v = value.trim();
     if (v.length < 3) return;
-    final next = _merge(state, [v]);
+    final next = [...state];
+    if (!next.contains(v)) next.add(v);
     state = next;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_prefsKey, next.where((e) => !_defaults.contains(e)).toList());
+    await prefs.setStringList(_prefsKey, next);
   }
 
   Future<void> remove(String value) async {
     final next = state.where((e) => e != value).toList();
     state = next;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_prefsKey, next.where((e) => !_defaults.contains(e)).toList());
-  }
-
-  static List<String> _merge(List<String> a, List<String> b) {
-    final seen = <String>{};
-    final out = <String>[];
-    for (final item in [...a, ...b]) {
-      final v = item.trim();
-      if (v.isEmpty) continue;
-      if (seen.add(v)) out.add(v);
-    }
-    return out;
+    await prefs.setStringList(_prefsKey, next);
   }
 }
 
@@ -51,4 +36,3 @@ final favoritePickupsProvider =
     StateNotifierProvider<FavoritePickupsController, List<String>>(
   (ref) => FavoritePickupsController(),
 );
-

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/router/app_routes.dart';
 import '../../shared/design/app_colors.dart';
 import '../../shared/design/app_spacing.dart';
+import '../../shared/widgets/app_navigation_back.dart';
 
 class AdminShellScreen extends StatelessWidget {
   const AdminShellScreen({
@@ -68,6 +69,7 @@ class AdminShellScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         title: Text(title),
         actions: actions,
         bottom: appBarBottom,

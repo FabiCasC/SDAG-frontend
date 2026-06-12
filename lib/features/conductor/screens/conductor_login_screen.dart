@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../core/mock/mock_data.dart';
@@ -21,12 +24,45 @@ class _ConductorLoginScreenState extends ConsumerState<ConductorLoginScreen> {
   late final TextEditingController _emailController;
   late final TextEditingController _passwordController;
   bool _submitting = false;
+  bool _passwordVisible = false;
+  bool _rememberMe = false;
 
   @override
   void initState() {
     super.initState();
     _emailController = TextEditingController();
     _passwordController = TextEditingController();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadSavedCredentials());
+    });
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('saved_email');
+    final savedPassword = prefs.getString('saved_password');
+    final rememberMe = prefs.getBool('remember_me') ?? false;
+
+    if (!rememberMe || savedEmail == null || savedPassword == null) return;
+    if (!mounted) return;
+    setState(() {
+      _rememberMe = true;
+      _emailController.text = savedEmail;
+      _passwordController.text = savedPassword;
+    });
+  }
+
+  Future<void> _saveCredentials(String email, String password) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_rememberMe) {
+      await prefs.setString('saved_email', email);
+      await prefs.setString('saved_password', password);
+      await prefs.setBool('remember_me', true);
+    } else {
+      await prefs.remove('saved_email');
+      await prefs.remove('saved_password');
+      await prefs.setBool('remember_me', false);
+    }
   }
 
   @override
@@ -57,6 +93,8 @@ class _ConductorLoginScreenState extends ConsumerState<ConductorLoginScreen> {
         AppSnackbars.warning(context, 'Tu cuenta está desactivada. Contacta al administrador');
         return;
       case ConductorLoginResult.ok:
+        await _saveCredentials(_emailController.text.trim(), _passwordController.text);
+        if (!mounted) return;
         context.go(AppRoutes.driverHome);
         return;
     }
@@ -149,8 +187,32 @@ class _ConductorLoginScreenState extends ConsumerState<ConductorLoginScreen> {
                         const SizedBox(height: AppSpacing.md),
                         AppTextField(
                           controller: _passwordController,
-                          obscureText: true,
+                          obscureText: !_passwordVisible,
                           label: 'Contraseña',
+                          suffixIcon: IconButton(
+                            onPressed: _submitting
+                                ? null
+                                : () => setState(() => _passwordVisible = !_passwordVisible),
+                            icon: Icon(
+                              _passwordVisible ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        CheckboxListTile(
+                          value: _rememberMe,
+                          onChanged: _submitting
+                              ? null
+                              : (value) => setState(() => _rememberMe = value ?? false),
+                          title: const Text(
+                            'Recordar mis datos',
+                            style: TextStyle(color: AppColors.white),
+                          ),
+                          checkColor: top,
+                          fillColor: WidgetStateProperty.all(AppColors.white),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          contentPadding: EdgeInsets.zero,
                         ),
                         const SizedBox(height: AppSpacing.lg),
                         FilledButton(

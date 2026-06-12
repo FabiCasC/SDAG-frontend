@@ -7,6 +7,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/admin_conductores_provider.dart';
 import 'admin_vehiculo_crear_screen.dart';
@@ -268,6 +269,7 @@ class _AdminConductorCrearScreenState extends ConsumerState<AdminConductorCrearS
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         title: const Text('Nuevo conductor'),
       ),
       body: availableVehiclesAsync.when(

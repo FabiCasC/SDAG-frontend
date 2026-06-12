@@ -11,12 +11,15 @@ import '../../../shared/design/app_spacing.dart';
 final adminAnaliticaResumenProvider = FutureProvider<AdminAnaliticaResumen>((ref) async {
   final pagos = await Supabase.instance.client
       .from('payments')
-      .select('amount')
+      .select('amount, reservations(trip_id, trips(status))')
       .eq('status', 'confirmado');
-  final totalIngresos = (pagos as List).cast<Map<String, dynamic>>().fold<double>(
-        0.0,
-        (sum, p) => sum + ((p['amount'] as num?)?.toDouble() ?? 0.0),
-      );
+  final totalIngresos = (pagos as List).cast<Map<String, dynamic>>().fold<double>(0.0, (sum, p) {
+    final reservation = p['reservations'];
+    final trip = reservation is Map ? reservation['trips'] : null;
+    final tripStatus = trip is Map ? trip['status']?.toString() : null;
+    if (tripStatus != 'completado') return sum;
+    return sum + ((p['amount'] as num?)?.toDouble() ?? 0.0);
+  });
 
   final totalViajes = await Supabase.instance.client
       .from('trips')

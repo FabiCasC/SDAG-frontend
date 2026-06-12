@@ -225,25 +225,6 @@ class AdminConfiguracionController extends StateNotifier<AdminConfiguracionState
     state = state.copyWith(draft: state.draft.copyWith(supportEmail: v));
   }
 
-  bool isWithinOperationalHours(DateTime now) {
-    final weekday = now.weekday;
-    final allowedDay = switch (weekday) {
-      DateTime.saturday => state.saved.runSat,
-      DateTime.sunday => state.saved.runSun,
-      _ => state.saved.runMonFri,
-    };
-    if (!allowedDay) return false;
-
-    final min = now.hour * 60 + now.minute;
-    final start = state.saved.operatingStartMin;
-    final end = state.saved.operatingEndMin;
-    if (start == end) return false;
-    if (start < end) {
-      return min >= start && min <= end;
-    }
-    return min >= start || min <= end;
-  }
-
   Future<void> save() async {
     final next = state.draft;
     if (next.basePrice <= 0) return;
@@ -533,7 +514,7 @@ class _AdminConfiguracionScreenState extends ConsumerState<AdminConfiguracionScr
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
-                        'Fuera del horario operativo los conductores no pueden activar disponibilidad.',
+                        'El sistema opera 24/7. Esta configuración es solo informativa.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: AppColors.textSecondary,
                               fontWeight: FontWeight.w700,

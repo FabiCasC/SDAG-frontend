@@ -8,6 +8,7 @@ import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
+import '../../../shared/maps/google_eta_service.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
 
@@ -20,6 +21,8 @@ class ConfirmacionScreen extends ConsumerStatefulWidget {
 
 class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
   bool _showCheck = false;
+  int? _etaMinutos;
+  bool _etaLoading = true;
 
   @override
   void initState() {
@@ -27,6 +30,35 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() => _showCheck = true);
+      _calcularEtaInicial();
+    });
+  }
+
+  Future<void> _calcularEtaInicial() async {
+    final reserva = ref.read(reservaProvider);
+    final driver = reserva.conductorSeleccionado;
+    final pickup = reserva.puntoRecojo?.trim();
+
+    if (driver == null || pickup == null || pickup.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _etaLoading = false;
+        _etaMinutos = null;
+      });
+      return;
+    }
+
+    final eta = await GoogleEtaService.calcularEtaConductorAlPickup(
+      driverId: driver.driverId,
+      pickupAddress: pickup,
+      pickupLat: reserva.pickupLat,
+      pickupLng: reserva.pickupLng,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _etaMinutos = eta;
+      _etaLoading = false;
     });
   }
 
@@ -151,6 +183,31 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (_etaLoading)
+                      Text(
+                        'Calculando ETA...',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    else if (_etaMinutos != null)
+                      Text(
+                        'El conductor llegará en aproximadamente ≈ $_etaMinutos min',
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: AppColors.primaryBlue,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      )
+                    else
+                      Text(
+                        'ETA no disponible',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -208,8 +265,6 @@ class _QrCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final qrData = '$reservaId|${passenger.passengerId}|${passenger.seatNumber}';
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AppColors.white,
@@ -230,7 +285,8 @@ class _QrCard extends StatelessWidget {
           children: [
             Center(
               child: QrImageView(
-                data: qrData,
+                data: reservaId,
+                version: QrVersions.auto,
                 size: 180,
                 backgroundColor: AppColors.white,
               ),

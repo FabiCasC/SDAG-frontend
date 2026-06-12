@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../router/app_routes.dart';
+import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 
@@ -17,6 +18,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   late final TextEditingController _passwordController;
   late final TextEditingController _confirmController;
   bool _isLoading = false;
+  bool _passwordVisible = false;
+  bool _confirmPasswordVisible = false;
 
   @override
   void initState() {
@@ -51,9 +54,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(password: pw),
       );
+      await Supabase.instance.client.auth.signOut();
       if (!mounted) return;
-      AppSnackbars.success(context, 'Contraseña actualizada');
-      context.go(AppRoutes.login);
+      context.go('${AppRoutes.login}?passwordUpdated=1');
     } on AuthException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, e.message);
@@ -85,15 +88,30 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             const SizedBox(height: AppSpacing.md),
             AppTextField(
               controller: _passwordController,
-              obscureText: true,
+              obscureText: !_passwordVisible,
               label: 'Nueva contraseña',
               hint: 'Mínimo 8 caracteres',
+              suffixIcon: IconButton(
+                onPressed: _isLoading ? null : () => setState(() => _passwordVisible = !_passwordVisible),
+                icon: Icon(
+                  _passwordVisible ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             AppTextField(
               controller: _confirmController,
-              obscureText: true,
+              obscureText: !_confirmPasswordVisible,
               label: 'Confirmar contraseña',
+              suffixIcon: IconButton(
+                onPressed:
+                    _isLoading ? null : () => setState(() => _confirmPasswordVisible = !_confirmPasswordVisible),
+                icon: Icon(
+                  _confirmPasswordVisible ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  color: AppColors.textSecondary,
+                ),
+              ),
             ),
             const SizedBox(height: AppSpacing.lg),
             AppPrimaryButton(

@@ -11,6 +11,8 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
+import '../../../shared/maps/google_directions_service.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -34,6 +36,8 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
   bool _loading = true;
   String? _errorMessage;
   List<_PickupMarkerData> _pickupMarkers = const <_PickupMarkerData>[];
+  List<LatLng> _routePolyline = const <LatLng>[];
+  bool _routeLoaded = false;
 
   @override
   void initState() {
@@ -67,7 +71,7 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
           markerId: const MarkerId('driver'),
           position: _driverPosition!,
           infoWindow: const InfoWindow(title: 'Tu ubicación'),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
         ),
       ..._pickupMarkers.map(
         (pickup) => Marker(
@@ -93,13 +97,26 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
                 target: _driverPosition ?? const LatLng(-12.0464, -76.9156),
                 zoom: 13,
               ),
+              scrollGesturesEnabled: true,
+              zoomGesturesEnabled: true,
+              tiltGesturesEnabled: true,
+              rotateGesturesEnabled: true,
               onMapCreated: (controller) {
                 _mapController = controller;
                 _fitBounds();
               },
               myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
+              zoomControlsEnabled: true,
               markers: markers,
+              polylines: {
+                if (_routePolyline.length >= 2)
+                  Polyline(
+                    polylineId: const PolylineId('ruta_san_isidro_chosica'),
+                    points: _routePolyline,
+                    color: const Color(0xFF2563EB),
+                    width: 4,
+                  ),
+              },
             ),
           if (_loading && !kIsWeb)
             const Positioned.fill(
@@ -110,7 +127,7 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
             left: AppSpacing.lg,
             child: SafeArea(
               child: InkWell(
-                onTap: () => context.pop(),
+                onTap: () => popOrGo(context, AppRoutes.driverHome),
                 borderRadius: BorderRadius.circular(AppRadius.pill),
                 child: Ink(
                   width: 40,
@@ -345,6 +362,14 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
 
       final pickups = tripId == null ? const <_PickupMarkerData>[] : await _loadPickupMarkers(tripId);
 
+      if (!_routeLoaded) {
+        _routePolyline = await fetchRoutePolyline(
+          origin: driverPosition,
+          destination: const LatLng(-11.9375, -76.6934),
+        );
+        _routeLoaded = true;
+      }
+
       if (!mounted) return;
       setState(() {
         _tripId = tripId;
@@ -371,7 +396,7 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
           pickup_point,
           pickup_point_id,
           seats,
-          profiles(name),
+          profiles:passenger_profile_id(name, first_name, last_name),
           pickup_points(address, lat, lng)
         ''')
         .eq('trip_id', tripId)
@@ -397,10 +422,8 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
 
       if (position == null) continue;
 
-      final seats = ((row['seats'] as List?) ?? const <dynamic>[]).whereType<int>().toList()..sort();
-      final passengerName = profile['name']?.toString().trim().isNotEmpty == true
-          ? profile['name'].toString().trim()
-          : 'Pasajero';
+      final seats = _parseSeats(row['seats']);
+      final passengerName = _passengerNameFromProfile(profile);
 
       markers.add(
         _PickupMarkerData(
@@ -442,7 +465,11 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
     final driver = _driverPosition;
     if (controller == null || driver == null) return;
 
-    final points = <LatLng>[driver, ..._pickupMarkers.map((e) => e.position)];
+    final points = <LatLng>[
+      driver,
+      ..._pickupMarkers.map((e) => e.position),
+      ..._routePolyline,
+    ];
     if (points.length == 1) {
       await controller.animateCamera(CameraUpdate.newCameraPosition(
         CameraPosition(target: driver, zoom: 14),
@@ -560,6 +587,25 @@ class _WebMapFallback extends StatelessWidget {
       ),
     );
   }
+}
+
+List<int> _parseSeats(dynamic rawSeats) {
+  if (rawSeats is! List) return const [];
+  final unique = <int>{};
+  for (final seat in rawSeats) {
+    final parsed = seat is int ? seat : int.tryParse(seat.toString());
+    if (parsed != null) unique.add(parsed);
+  }
+  return unique.toList()..sort();
+}
+
+String _passengerNameFromProfile(Map<String, dynamic> profile) {
+  final name = profile['name']?.toString().trim();
+  if (name != null && name.isNotEmpty) return name;
+  final first = profile['first_name']?.toString().trim() ?? '';
+  final last = profile['last_name']?.toString().trim() ?? '';
+  final full = '$first $last'.trim();
+  return full.isNotEmpty ? full : 'Pasajero';
 }
 
 Future<void> _ensureDriverLocationPermission() async {

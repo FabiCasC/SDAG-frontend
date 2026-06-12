@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../../app/providers/passenger/controllers/connectivity_controller.dart';
+import '../../../app/router/app_routes.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
@@ -12,11 +13,24 @@ import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_manifiesto_provider.dart';
 import '../providers/perfil_conductor_provider.dart';
 
-class ConductorManifiestoScreen extends ConsumerWidget {
+class ConductorManifiestoScreen extends ConsumerStatefulWidget {
   const ConductorManifiestoScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ConductorManifiestoScreen> createState() => _ConductorManifiestoScreenState();
+}
+
+class _ConductorManifiestoScreenState extends ConsumerState<ConductorManifiestoScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(conductorManifiestoProvider.notifier).reload();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final connected = ref.watch(connectivityProvider);
     final state = ref.watch(conductorManifiestoProvider);
     final perfil = ref.watch(perfilConductorProvider);
@@ -69,10 +83,7 @@ class ConductorManifiestoScreen extends ConsumerWidget {
       backgroundColor: AppColors.backgroundLight,
       appBar: AppBar(
         title: const Text('Manifiesto electrónico'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.driverHome),
         actions: [
           TextButton(
             onPressed: exportPdf,
@@ -97,7 +108,7 @@ class ConductorManifiestoScreen extends ConsumerWidget {
             if (state.status == ConductorManifiestoLoadStatus.noPassengersYet) {
               return const Center(
                 child: Text(
-                  'No hay pasajeros registrados aún',
+                  'No hay pasajeros en este viaje',
                   style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.w800),
                 ),
               );

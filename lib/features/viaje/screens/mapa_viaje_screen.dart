@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -74,7 +73,6 @@ class MapaViajeScreen extends ConsumerStatefulWidget {
 
 class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
   GoogleMapController? _mapController;
-  Timer? _refreshTimer;
   List<LatLng> _routePoints = const <LatLng>[];
   LatLng? _passengerPosition;
   LatLng? _driverPosition;
@@ -82,6 +80,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
   String? _errorMessage;
   bool _loadingRoute = true;
   bool _initialized = false;
+  bool _routeFetched = false;
 
   @override
   void initState() {
@@ -90,7 +89,6 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -98,10 +96,20 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
   @override
   Widget build(BuildContext context) {
     final reserva = ref.watch(reservaProvider);
-    final viaje = ref.watch(viajeProvider);
     ref.listen<ViajeState>(viajeProvider, (previous, next) {
       if (next.finished && previous?.finished != true) {
         context.go(AppRoutes.passengerCalificacion);
+      }
+      final pos = next.driverPosition;
+      if (pos != null) {
+        final nextDriver = LatLng(pos.lat, pos.lng);
+        if (_driverPosition?.latitude != nextDriver.latitude ||
+            _driverPosition?.longitude != nextDriver.longitude) {
+          setState(() {
+            _driverPosition = nextDriver;
+            if (next.etaMinutes > 0) _driverEta = next.etaMinutes;
+          });
+        }
       }
     });
 
@@ -121,11 +129,6 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _loadMapData(driver.driverId);
         ref.read(viajeProvider.notifier).start(driver.driverId);
-        _refreshTimer?.cancel();
-        _refreshTimer = Timer.periodic(
-          const Duration(seconds: 15),
-          (_) => _loadMapData(driver.driverId, silent: true),
-        );
       });
     }
 
@@ -147,6 +150,10 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                 target: _cameraTarget(),
                 zoom: 13,
               ),
+              scrollGesturesEnabled: true,
+              zoomGesturesEnabled: true,
+              tiltGesturesEnabled: true,
+              rotateGesturesEnabled: true,
               onMapCreated: (controller) {
                 _mapController = controller;
                 _fitBounds();
@@ -169,7 +176,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                   ),
               },
               myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
+              zoomControlsEnabled: true,
             ),
           if (_loadingRoute && !kIsWeb)
             const Positioned.fill(
@@ -246,7 +253,9 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                         ] else ...[
                           const SizedBox(height: AppSpacing.sm),
                           Text(
-                            'ETA estimado: ${_driverEta ?? viaje.etaMinutes} min',
+                            _driverEta != null && _driverEta! > 0
+                                ? '≈ $_driverEta min'
+                                : 'ETA no disponible',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                   color: AppColors.textSecondary,
                                   fontWeight: FontWeight.w600,
@@ -263,13 +272,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                               borderRadius: BorderRadius.circular(AppRadius.r12),
                             ),
                           ),
-                          onPressed: () async {
-                            final ok = await _confirmDrop(context);
-                            if (!context.mounted) return;
-                            if (!ok) return;
-                            AppSnackbars.success(context, 'Bajada registrada');
-                            context.pop();
-                          },
+                          onPressed: _bajarmAqui,
                           child: const Text('Bajarme aquí'),
                         ),
                       ],
@@ -284,27 +287,75 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
     );
   }
 
-  Future<bool> _confirmDrop(BuildContext context) async {
-    final result = await showDialog<bool>(
+  Future<void> _bajarmAqui() async {
+    final confirmado = await showDialog<bool>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Bajarme aquí'),
-          content: const Text('¿Confirmas que bajas aquí?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Confirmar'),
-            ),
-          ],
-        );
-      },
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¿Confirmar bajada?'),
+        content: const Text('¿Confirmas que ya llegaste a tu destino?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sí, me bajo aquí'),
+          ),
+        ],
+      ),
     );
-    return result ?? false;
+
+    if (confirmado != true) return;
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    final reserva = ref.read(reservaProvider);
+    final reservaId = reserva.reservaId;
+    final driverId = reserva.conductorSeleccionado?.driverId;
+
+    if (reservaId == null || reservaId.isEmpty) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se encontró la reserva activa');
+      return;
+    }
+
+    try {
+      await Supabase.instance.client
+          .from('reservations')
+          .update({'status': 'completada'})
+          .eq('id', reservaId);
+
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'has_active_reservation': false})
+          .eq('id', userId);
+
+      final manifestEntries = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('id, boarding')
+          .eq('reservation_id', reservaId);
+
+      for (final raw in (manifestEntries as List).cast<Map<String, dynamic>>()) {
+        final boarding = raw['boarding']?.toString() ?? raw['boarding_status']?.toString();
+        if (boarding == 'abordo') continue;
+        await Supabase.instance.client
+            .from('manifest_entries')
+            .update({'boarding': 'no_abordo'})
+            .eq('id', raw['id']);
+      }
+
+      ref.read(reservaProvider.notifier).reset();
+      ref.invalidate(viajeProvider);
+
+      if (!mounted) return;
+      final ratingDriverId = driverId ?? '';
+      context.go('${AppRoutes.passengerCalificacion}?tripId=$reservaId&driverId=$ratingDriverId');
+    } catch (_) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se pudo completar el viaje');
+    }
   }
 
   Future<void> _loadMapData(String driverId, {bool silent = false}) async {
@@ -323,9 +374,13 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
 
       final driverLocation = await Supabase.instance.client
           .from('driver_locations')
-          .select('lat, lng, eta_minutes')
+          .select('lat, lng')
           .eq('driver_id', driverId)
-          .single();
+          .maybeSingle();
+
+      if (driverLocation == null) {
+        throw Exception('La ubicación del conductor aún no está disponible.');
+      }
 
       final driverLat = (driverLocation['lat'] as num?)?.toDouble();
       final driverLng = (driverLocation['lng'] as num?)?.toDouble();
@@ -334,14 +389,18 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
       }
 
       final driverLatLng = LatLng(driverLat, driverLng);
-      final directions = await _fetchDirections(passengerLatLng, driverLatLng);
+
+      if (!_routeFetched) {
+        _routePoints = await _fetchDirections(passengerLatLng, driverLatLng);
+        _routeFetched = true;
+      }
 
       if (!mounted) return;
       setState(() {
         _passengerPosition = passengerLatLng;
         _driverPosition = driverLatLng;
-        _driverEta = driverLocation['eta_minutes'] as int?;
-        _routePoints = directions;
+        final eta = ref.read(viajeProvider).etaMinutes;
+        _driverEta = eta > 0 ? eta : null;
         _errorMessage = null;
         _loadingRoute = false;
       });

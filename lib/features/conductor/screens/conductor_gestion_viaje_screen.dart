@@ -8,7 +8,9 @@ import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_auth_provider.dart';
+import '../providers/conductor_comisiones_provider.dart';
 import '../providers/conductor_viaje_provider.dart';
+import '../widgets/conductor_gestion_map_card.dart';
 
 class ConductorGestionViajeScreen extends ConsumerStatefulWidget {
   const ConductorGestionViajeScreen({super.key});
@@ -103,6 +105,7 @@ class _ConductorGestionViajeScreenState
     );
     if (ok == true) {
       await ref.read(conductorViajeProvider.notifier).completarRuta();
+      await ref.read(conductorComisionesProvider.notifier).calcularComisionDelDia();
     }
   }
 
@@ -144,6 +147,10 @@ class _ConductorGestionViajeScreenState
       child: ListView(
         padding: const EdgeInsets.all(AppSpacing.p20),
         children: [
+          if (state.tripId != null) ...[
+            ConductorGestionMapCard(tripId: state.tripId!),
+            const SizedBox(height: AppSpacing.md),
+          ],
           _TripHeaderCard(state: state),
           const SizedBox(height: AppSpacing.md),
           _OccupancyCard(state: state, progress: progress),

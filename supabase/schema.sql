@@ -38,7 +38,7 @@ begin
     create type public.commission_request_status as enum ('sin_solicitud','pendiente','confirmado_admin','recibido_conductor');
   end if;
   if not exists (select 1 from pg_type where typname = 'chat_message_type') then
-    create type public.chat_message_type as enum ('normal','alternative_pickup');
+    create type public.chat_message_type as enum ('normal','alternative_pickup','esperame');
   end if;
 end $$;
 
@@ -817,7 +817,13 @@ drop policy if exists "locations_select" on public.driver_locations;
 create policy "locations_select" on public.driver_locations for select to authenticated
 using (public.is_admin() or (public.is_driver() and exists (
   select 1 from public.drivers d where d.id = driver_locations.driver_id and d.profile_id = auth.uid()
-)));
+)) or exists (
+  select 1 from public.reservations r
+  join public.trips t on t.id = r.trip_id
+  where t.driver_id = driver_locations.driver_id
+    and r.passenger_profile_id = auth.uid()
+    and r.status = 'activa'
+));
 drop policy if exists "locations_insert" on public.driver_locations;
 drop policy if exists "locations_update" on public.driver_locations;
 create policy "locations_insert" on public.driver_locations for insert to authenticated

@@ -20,6 +20,7 @@ import '../../features/viaje/screens/reserva_activa_screen.dart';
 import '../../features/reserva/screens/forzar_salida_screen.dart';
 import '../../features/reserva/screens/cancelar_reserva_screen.dart';
 import '../../features/viaje/screens/mapa_viaje_screen.dart';
+import '../../features/viaje/screens/viaje_en_curso_screen.dart';
 import '../../features/viaje/screens/chat_screen.dart';
 import '../../features/viaje/screens/calificacion_screen.dart';
 import '../../features/viaje/screens/viaje_detalle_screen.dart';
@@ -93,7 +94,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ForgotPasswordScreen(),
       ),
       GoRoute(
-        path: '/reset-password',
+        path: AppRoutes.resetPassword,
         builder: (context, state) => const ResetPasswordScreen(),
       ),
       GoRoute(
@@ -181,6 +182,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.passengerMapaViaje,
         builder: (context, state) => const MapaViajeScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.passengerViajeEnCurso,
+        builder: (context, state) => const ViajeEnCursoScreen(),
       ),
       GoRoute(
         path: AppRoutes.passengerChat,
@@ -395,7 +400,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final location = state.uri.path;
 
-      if (location == '/reset-password') return null;
+      if (location == AppRoutes.resetPassword) return null;
 
       final isPassengerArea = location.startsWith('/passenger');
       final isDriverArea = location.startsWith('/conductor');
@@ -408,7 +413,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final isAuthRoute = location == AppRoutes.login ||
           location == AppRoutes.register ||
           location == AppRoutes.forgotPassword ||
-          location == '/reset-password' ||
+          location == AppRoutes.resetPassword ||
           location == AppRoutes.driverLogin ||
           location == AppRoutes.driverForgotPassword ||
           location == AppRoutes.adminLogin ||

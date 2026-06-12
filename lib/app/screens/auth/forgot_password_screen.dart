@@ -44,10 +44,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
         redirectTo: 'io.supabase.sdag://reset-password',
       );
       if (!mounted) return;
-      AppSnackbars.info(
-        context,
-        'Te enviamos un enlace a tu correo. Haz clic en él para crear tu nueva contraseña.',
-      );
+      AppSnackbars.info(context, 'Te enviamos un correo. Revisa tu bandeja de entrada.');
     } on AuthException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, e.message);

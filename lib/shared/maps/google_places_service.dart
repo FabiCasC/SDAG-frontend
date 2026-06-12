@@ -26,6 +26,8 @@ class GooglePlacesService {
       '?input=${Uri.encodeComponent(q)}'
       '&key=$key'
       '&components=country:pe'
+      '&location=-12.1092,-77.0365'
+      '&radius=50000'
       '&language=es',
     );
     final res = await http.get(uri);
@@ -96,6 +98,38 @@ class GooglePlacesService {
     if (formatted != null && formatted.isNotEmpty) return formatted;
     final name = result['name']?.toString().trim();
     return (name != null && name.isNotEmpty) ? name : null;
+  }
+
+  static Future<LatLng?> geocodeAddress(String address) async {
+    final q = address.trim();
+    if (q.isEmpty) return null;
+
+    final key = googleMapsRestApiKey();
+    final uri = Uri.parse(
+      'https://maps.googleapis.com/maps/api/geocode/json'
+      '?address=${Uri.encodeComponent(q)}'
+      '&components=country:PE'
+      '&key=$key'
+      '&language=es',
+    );
+    final res = await http.get(uri);
+    if (res.statusCode != 200) return null;
+
+    final map = jsonDecode(res.body);
+    if (map is! Map<String, dynamic>) return null;
+    final results = map['results'];
+    if (results is! List || results.isEmpty) return null;
+
+    final first = results.first;
+    if (first is! Map<String, dynamic>) return null;
+    final geom = first['geometry'];
+    if (geom is! Map<String, dynamic>) return null;
+    final loc = geom['location'];
+    if (loc is! Map<String, dynamic>) return null;
+    final lat = (loc['lat'] as num?)?.toDouble();
+    final lng = (loc['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null) return null;
+    return LatLng(lat, lng);
   }
 
   static Future<String?> reverseGeocode(double lat, double lng) async {

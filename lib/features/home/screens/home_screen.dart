@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -61,11 +63,6 @@ class HomeScreen extends ConsumerWidget {
         : fullName.isNotEmpty
             ? fullName
             : 'Pasajero';
-    final reserva = ref.watch(reservaProvider);
-    final hasActiveReservation = reserva.conductorSeleccionado != null &&
-        reserva.reservaId != null &&
-        reserva.asientosSeleccionados.isNotEmpty;
-
     Widget currentTab() {
       switch (index) {
         case 1:
@@ -85,7 +82,6 @@ class HomeScreen extends ConsumerWidget {
             ),
             data: (homeData) => _PassengerHomeTab(
               name: name,
-              hasActiveReservation: hasActiveReservation,
               routes: homeData.routes,
               preferredPickup: homeData.preferredPickup,
               latestNews: homeData.latestNews,
@@ -167,10 +163,9 @@ class _PassengerBottomNav extends StatelessWidget {
   }
 }
 
-class _PassengerHomeTab extends StatelessWidget {
+class _PassengerHomeTab extends ConsumerStatefulWidget {
   const _PassengerHomeTab({
     required this.name,
-    required this.hasActiveReservation,
     required this.routes,
     required this.preferredPickup,
     required this.latestNews,
@@ -181,7 +176,6 @@ class _PassengerHomeTab extends StatelessWidget {
   });
 
   final String name;
-  final bool hasActiveReservation;
   final List<_HomeRouteItem> routes;
   final String? preferredPickup;
   final List<_HomeNewsItem> latestNews;
@@ -191,8 +185,160 @@ class _PassengerHomeTab extends StatelessWidget {
   final VoidCallback onOpenReservationDetail;
 
   @override
+  ConsumerState<_PassengerHomeTab> createState() => _PassengerHomeTabState();
+}
+
+class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
+  StreamSubscription<List<Map<String, dynamic>>>? _reservaSub;
+  Map<String, dynamic>? _reservaActiva;
+  bool _loadingReserva = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarReservaActiva();
+    _suscribirReservaActiva();
+  }
+
+  Future<void> _cargarReservaActiva() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) {
+      if (mounted) setState(() => _loadingReserva = false);
+      return;
+    }
+
+    try {
+      final reserva = await Supabase.instance.client
+          .from('reservations')
+          .select('''
+            id, seats, pickup_point, status, amount,
+            trips(
+              id, status, scheduled_departure_at,
+              routes(name, from_label, to_label),
+              drivers(id, plate, profiles(name))
+            )
+          ''')
+          .eq('passenger_profile_id', userId)
+          .eq('status', 'activa')
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (!mounted) return;
+      setState(() {
+        _reservaActiva = reserva;
+        _loadingReserva = false;
+      });
+      if (reserva != null) {
+        ref.read(reservaProvider.notifier).hydrateFromActiveReservation(reserva);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingReserva = false);
+    }
+  }
+
+  void _suscribirReservaActiva() {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    _reservaSub?.cancel();
+    _reservaSub = Supabase.instance.client
+        .from('reservations')
+        .stream(primaryKey: ['id'])
+        .eq('passenger_profile_id', userId)
+        .listen((data) async {
+      final activas = data.where((r) => r['status']?.toString() == 'activa').toList();
+      if (!mounted) return;
+
+      if (activas.isEmpty) {
+        setState(() => _reservaActiva = null);
+        return;
+      }
+
+      activas.sort((a, b) {
+        final aDate = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bDate = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bDate.compareTo(aDate);
+      });
+
+      final id = activas.first['id']?.toString();
+      if (id == null || id.isEmpty) return;
+
+      try {
+        final full = await Supabase.instance.client
+            .from('reservations')
+            .select('''
+              id, seats, pickup_point, status, amount,
+              trips(
+                id, status, scheduled_departure_at,
+                routes(name, from_label, to_label),
+                drivers(id, plate, profiles(name))
+              )
+            ''')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (!mounted) return;
+        setState(() => _reservaActiva = full);
+        if (full != null) {
+          ref.read(reservaProvider.notifier).hydrateFromActiveReservation(full);
+        }
+      } catch (_) {}
+    });
+  }
+
+  @override
+  void dispose() {
+    _reservaSub?.cancel();
+    super.dispose();
+  }
+
+  _ActiveReservationView? _parseReservaActiva() {
+    final row = _reservaActiva;
+    if (row == null) return null;
+
+    final tripRaw = row['trips'];
+    final trip = tripRaw is Map<String, dynamic>
+        ? tripRaw
+        : tripRaw is Map
+            ? tripRaw.cast<String, dynamic>()
+            : null;
+    final driverRaw = trip?['drivers'];
+    final driver = driverRaw is Map<String, dynamic>
+        ? driverRaw
+        : driverRaw is Map
+            ? driverRaw.cast<String, dynamic>()
+            : null;
+    final profileRaw = driver?['profiles'];
+    final profile = profileRaw is Map<String, dynamic>
+        ? profileRaw
+        : profileRaw is Map
+            ? profileRaw.cast<String, dynamic>()
+            : null;
+
+    final seats = <int>[];
+    final seatsRaw = row['seats'];
+    if (seatsRaw is List) {
+      for (final s in seatsRaw) {
+        final parsed = s is int ? s : int.tryParse(s.toString());
+        if (parsed != null) seats.add(parsed);
+      }
+    }
+    seats.sort();
+
+    return _ActiveReservationView(
+      driverName: profile?['name']?.toString() ?? 'Conductor',
+      plate: driver?['plate']?.toString() ?? '—',
+      seats: seats,
+      pickup: row['pickup_point']?.toString() ?? '—',
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final active = _parseReservaActiva();
 
     return Column(
       children: [
@@ -210,7 +356,7 @@ class _PassengerHomeTab extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 Text(
-                  'Hola, $name',
+                  'Hola, ${widget.name}',
                   style: theme.textTheme.headlineSmall?.copyWith(
                     color: AppColors.white,
                   ),
@@ -237,40 +383,35 @@ class _PassengerHomeTab extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.md),
-              if (routes.isEmpty)
+              if (widget.routes.isEmpty)
                 Text(
                   'No hay rutas disponibles por el momento.',
                   style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
                 )
               else
-                ...routes.map(
+                ...widget.routes.map(
                   (route) => Padding(
                     padding: const EdgeInsets.only(bottom: AppSpacing.md),
                     child: _RouteCard(
                       title: route.title,
                       subtitle: route.subtitle,
                       icon: Icons.route_rounded,
-                      onTap: () => onSelectRoute(route.direction),
+                      onTap: () => widget.onSelectRoute(route.direction),
                     ),
                   ),
                 ),
-              const SizedBox(height: AppSpacing.lg),
-              Text(
-                'Destinos favoritos',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              if (preferredPickup == null || preferredPickup!.trim().isEmpty)
+              if (widget.preferredPickup != null && widget.preferredPickup!.trim().isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.lg),
                 Text(
-                  'No tienes un punto de recojo preferido. Configuralo en tu perfil.',
-                  style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
-                )
-              else
+                  'Destinos favoritos',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
                 InkWell(
                   borderRadius: BorderRadius.circular(AppRadius.r16),
-                  onTap: () => onSelectFavoritePickup(preferredPickup!.trim()),
+                  onTap: () => widget.onSelectFavoritePickup(widget.preferredPickup!.trim()),
                   child: AppCard(
                     child: Padding(
                       padding: const EdgeInsets.all(AppSpacing.md),
@@ -280,7 +421,7 @@ class _PassengerHomeTab extends StatelessWidget {
                           const SizedBox(width: AppSpacing.md),
                           Expanded(
                             child: Text(
-                              preferredPickup!.trim(),
+                              widget.preferredPickup!.trim(),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyLarge?.copyWith(
@@ -295,9 +436,21 @@ class _PassengerHomeTab extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (hasActiveReservation) ...[
+              ],
+              if (_loadingReserva)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+                  child: LinearProgressIndicator(),
+                )
+              else if (active != null) ...[
                 const SizedBox(height: AppSpacing.lg),
-                _ActiveReservationCard(onViewDetails: onOpenReservationDetail),
+                _ActiveReservationCard(
+                  driverName: active.driverName,
+                  plate: active.plate,
+                  seats: active.seats,
+                  pickup: active.pickup,
+                  onViewDetails: widget.onOpenReservationDetail,
+                ),
               ],
               const SizedBox(height: AppSpacing.lg),
               Row(
@@ -310,25 +463,25 @@ class _PassengerHomeTab extends StatelessWidget {
                     ),
                   ),
                   TextButton(
-                    onPressed: onOpenNews,
+                    onPressed: widget.onOpenNews,
                     child: const Text('Ver todo'),
                   ),
                 ],
               ),
               const SizedBox(height: AppSpacing.md),
-              if (latestNews.isEmpty)
+              if (widget.latestNews.isEmpty)
                 Text(
                   'No hay noticias publicadas todavía.',
                   style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
                 )
               else
-                ...latestNews.map(
+                ...widget.latestNews.map(
                   (n) => Padding(
                     padding: const EdgeInsets.only(bottom: AppSpacing.md),
                     child: _NewsCard(
                       title: n.title,
                       subtitle: n.subtitle,
-                      onTap: onOpenNews,
+                      onTap: widget.onOpenNews,
                     ),
                   ),
                 ),
@@ -362,8 +515,11 @@ final passengerHomeDataProvider = FutureProvider.autoDispose<_PassengerHomeData>
         .from('profiles')
         .select('preferred_pickup')
         .eq('id', userId)
-        .single();
-    preferredPickup = profileResponse['preferred_pickup']?.toString();
+        .maybeSingle();
+    final raw = profileResponse?['preferred_pickup']?.toString().trim();
+    if (raw != null && raw.isNotEmpty) {
+      preferredPickup = raw;
+    }
   }
 
   final routes = (routesResponse as List)
@@ -543,9 +699,33 @@ class _RouteCard extends StatelessWidget {
   }
 }
 
-class _ActiveReservationCard extends StatelessWidget {
-  const _ActiveReservationCard({required this.onViewDetails});
+class _ActiveReservationView {
+  const _ActiveReservationView({
+    required this.driverName,
+    required this.plate,
+    required this.seats,
+    required this.pickup,
+  });
 
+  final String driverName;
+  final String plate;
+  final List<int> seats;
+  final String pickup;
+}
+
+class _ActiveReservationCard extends StatelessWidget {
+  const _ActiveReservationCard({
+    required this.driverName,
+    required this.plate,
+    required this.seats,
+    required this.pickup,
+    required this.onViewDetails,
+  });
+
+  final String driverName;
+  final String plate;
+  final List<int> seats;
+  final String pickup;
   final VoidCallback onViewDetails;
 
   @override
@@ -564,30 +744,33 @@ class _ActiveReservationCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Tienes un viaje en curso',
+              'Reserva activa',
               style: theme.textTheme.bodyLarge?.copyWith(
                 color: AppColors.primaryBlue,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            Row(
-              children: [
-                const AppStatusChip(type: AppStatusChipType.onRoute, label: 'En curso'),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    'Conductor: Conductor Demo',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
+            Text(
+              '$driverName · $plate',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Asientos: ${seats.isEmpty ? '—' : seats.map((s) => '#$s').join(', ')}',
+              style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Punto de recojo: $pickup',
+              style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: AppSpacing.md),
             AppSecondaryButton(
-              label: 'Ver detalles',
+              label: 'Ver mi reserva',
               onPressed: onViewDetails,
             ),
           ],

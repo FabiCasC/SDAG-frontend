@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 
@@ -10,24 +12,15 @@ final adminManifestEntriesProvider =
     FutureProvider.family<List<AdminManifestEntry>, String>((ref, manifestId) async {
   final entries = await Supabase.instance.client
       .from('manifest_entries')
-      .select('''
-        id, seat_number, pickup_text, boarding, first_name, last_name, dni, phone,
-        reservations(seats, amount, status)
-      ''')
+      .select('seat_number, first_name, last_name, dni, phone, pickup_text, boarding')
       .eq('manifest_id', manifestId)
       .order('seat_number');
 
   final list = <AdminManifestEntry>[];
   for (final raw in (entries as List).cast<Map<String, dynamic>>()) {
-    final reservation = raw['reservations'];
-    final reservationMap = reservation is Map<String, dynamic> ? reservation : null;
-    final reservationStatus = reservationMap?['status']?.toString();
-    if (reservationMap == null) continue;
-    if (reservationStatus == 'cancelada') continue;
-
     list.add(
       AdminManifestEntry(
-        id: raw['id']?.toString() ?? '',
+        id: raw['seat_number']?.toString() ?? '',
         seatNumber: int.tryParse(raw['seat_number']?.toString() ?? '') ?? 0,
         pickupText: raw['pickup_text']?.toString() ?? '',
         boarding: raw['boarding']?.toString() ?? 'pendiente',
@@ -81,6 +74,7 @@ class AdminManifiestosDetalleScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: const Color(0xFF0F172A),
         foregroundColor: AppColors.white,
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         title: const Text('Manifiesto'),
         actions: [
           IconButton(

@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 
+import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
+import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_conductores_provider.dart';
@@ -156,7 +158,10 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
     if (current == null) {
       return Scaffold(
         backgroundColor: pageBg,
-        appBar: AppBar(title: const Text('Editar')),
+        appBar: AppBar(
+          leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
+          title: const Text('Editar'),
+        ),
         body: const Center(child: Text('No se encontró el conductor.')),
       );
     }
@@ -200,6 +205,7 @@ class _AdminConductorEditarScreenState extends ConsumerState<AdminConductorEdita
       appBar: AppBar(
         backgroundColor: appBarBg,
         foregroundColor: AppColors.white,
+        leading: AppBarLeadingBack(fallbackRoute: AppRoutes.adminHome),
         title: Text('Editar ${current['placa']?.toString() ?? ''}'),
       ),
       body: ListView(

@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'conductor_viaje_provider.dart';
@@ -52,12 +51,6 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
     _load();
   }
 
-  static const _systemStartMinKey = 'sdag_system_operating_start_min';
-  static const _systemEndMinKey = 'sdag_system_operating_end_min';
-  static const _systemRunMonFriKey = 'sdag_system_operating_monfri';
-  static const _systemRunSatKey = 'sdag_system_operating_sat';
-  static const _systemRunSunKey = 'sdag_system_operating_sun';
-
   Future<void> _load() async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) {
@@ -85,7 +78,7 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
 
     final cuentaActiva = (driver['cuenta_activa'] as bool?) ?? true;
 
-    final estado = _estadoFromString(driver['estado']?.toString()) ?? ConductorEstadoActual.disponible;
+    final estado = _estadoFromDb(driver['estado']?.toString()) ?? ConductorEstadoActual.disponible;
 
     state = state.copyWith(
       conductorLogueado: cuentaActiva,
@@ -95,12 +88,23 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
 
   }
 
-  ConductorEstadoActual? _estadoFromString(String? value) {
+  ConductorEstadoActual? _estadoFromDb(String? value) {
     if (value == null) return null;
+    final normalized = switch (value) {
+      'en_ruta' => 'enRuta',
+      _ => value,
+    };
     for (final e in ConductorEstadoActual.values) {
-      if (e.name == value) return e;
+      if (e.name == normalized) return e;
     }
     return null;
+  }
+
+  String _estadoToDb(ConductorEstadoActual estado) {
+    return switch (estado) {
+      ConductorEstadoActual.enRuta => 'en_ruta',
+      _ => estado.name,
+    };
   }
 
   Future<ConductorLoginResult> login({
@@ -123,7 +127,7 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
       final cuentaActiva = (driver?['cuenta_activa'] as bool?) ?? true;
       if (!cuentaActiva) return ConductorLoginResult.inactiveAccount;
 
-      final estado = _estadoFromString(driver?['estado']?.toString()) ?? ConductorEstadoActual.disponible;
+      final estado = _estadoFromDb(driver?['estado']?.toString()) ?? ConductorEstadoActual.disponible;
 
       if (!mounted) return ConductorLoginResult.ok;
       state = state.copyWith(
@@ -143,14 +147,10 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
   }
 
   Future<ConductorDisponibilidadResult> activarDisponibilidad() async {
-    // Verificar primero si el chofer tiene permiso operativo
     if (!state.accesoOperativo) {
       return ConductorDisponibilidadResult.accesoBloqueado;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final okHorario = _isWithinOperationalHours(DateTime.now(), prefs);
-    if (!okHorario) return ConductorDisponibilidadResult.fueraDeHorario;
     await _updateDriverEstado(ConductorEstadoActual.disponible);
     if (!mounted) return ConductorDisponibilidadResult.ok;
     state = state.copyWith(estadoActual: ConductorEstadoActual.disponible);
@@ -172,9 +172,7 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
     } else if (viaje.isActive && viaje.occupiedSeats > 0) {
       target = ConductorEstadoActual.activo;
     } else if (viaje.estadoViaje == ConductorEstadoViaje.completado) {
-      final prefs = await SharedPreferences.getInstance();
-      final okHorario = _isWithinOperationalHours(DateTime.now(), prefs);
-      target = okHorario ? ConductorEstadoActual.disponible : ConductorEstadoActual.finalizado;
+      target = ConductorEstadoActual.disponible;
     }
 
     if (target == null) return;
@@ -183,29 +181,6 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
     await _updateDriverEstado(target);
     if (!mounted) return;
     state = state.copyWith(estadoActual: target);
-  }
-
-  bool _isWithinOperationalHours(DateTime now, SharedPreferences prefs) {
-    final weekday = now.weekday;
-    final runMonFri = prefs.getBool(_systemRunMonFriKey) ?? true;
-    final runSat = prefs.getBool(_systemRunSatKey) ?? true;
-    final runSun = prefs.getBool(_systemRunSunKey) ?? true;
-    final allowedDay = switch (weekday) {
-      DateTime.saturday => runSat,
-      DateTime.sunday => runSun,
-      _ => runMonFri,
-    };
-    if (!allowedDay) return false;
-
-    final start = prefs.getInt(_systemStartMinKey) ?? (5 * 60);
-    final end = prefs.getInt(_systemEndMinKey) ?? (22 * 60);
-    if (start == end) return false;
-
-    final min = now.hour * 60 + now.minute;
-    if (start < end) {
-      return min >= start && min <= end;
-    }
-    return min >= start || min <= end;
   }
 
   Future<String?> _roleForUser(String userId) async {
@@ -221,11 +196,14 @@ class ConductorAuthController extends StateNotifier<ConductorAuthState> {
   Future<void> _updateDriverEstado(ConductorEstadoActual estado) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
-    await Supabase.instance.client.from('drivers').update({'estado': estado.name}).eq('profile_id', user.id);
+    await Supabase.instance.client
+        .from('drivers')
+        .update({'estado': _estadoToDb(estado)})
+        .eq('profile_id', user.id);
   }
 }
 
-enum ConductorDisponibilidadResult { ok, accesoBloqueado, fueraDeHorario }
+enum ConductorDisponibilidadResult { ok, accesoBloqueado }
 
 final conductorAuthProvider = StateNotifierProvider<ConductorAuthController, ConductorAuthState>(
   (ref) {

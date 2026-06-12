@@ -124,78 +124,84 @@ class ViajeState {
 class ViajeController extends StateNotifier<ViajeState> {
   ViajeController() : super(ViajeState.initial());
 
-  Timer? _etaTimer;
-  Timer? _locationTimer;
+  StreamSubscription<List<Map<String, dynamic>>>? _locationSubscription;
   bool _started = false;
   String? _currentDriverId;
 
-  /// Iniciar el ciclo de polling. Llamar con el driver_id de la reserva activa.
+  /// Suscripción Realtime a driver_locations (solo posición, sin Google).
   void start(String driverId) {
     if (_started && _currentDriverId == driverId) return;
     _started = true;
     _currentDriverId = driverId;
 
-    // Primera carga inmediata
-    refreshFromSupabase(driverId);
-
-    // Poll de ubicación cada 15 s
-    _locationTimer?.cancel();
-    _locationTimer = Timer.periodic(
-      const Duration(seconds: 15),
-          (_) => refreshFromSupabase(driverId, silent: true),
+    _locationSubscription?.cancel();
+    _locationSubscription = Supabase.instance.client
+        .from('driver_locations')
+        .stream(primaryKey: ['driver_id'])
+        .eq('driver_id', driverId)
+        .listen(
+      (rows) => _applyLocationRow(rows.isEmpty ? null : rows.first),
+      onError: (_) {},
     );
 
-    // Decremento local de ETA cada 60 s (suaviza la UI entre polls)
-    _etaTimer?.cancel();
-    _etaTimer = Timer.periodic(const Duration(seconds: 60), (_) {
-      if (state.finished) return;
-      final next = (state.etaMinutes - 1).clamp(0, 999);
-      final banner = next <= 2 && next > 0;
-      state = state.copyWith(etaMinutes: next, showArrivalBanner: banner);
-    });
+    refreshFromSupabase(driverId);
   }
 
-  /// Lee driver_locations desde Supabase y actualiza el estado.
+  void _applyLocationRow(Map<String, dynamic>? row) {
+    if (state.finished || row == null) return;
+
+    final lat = (row['lat'] as num?)?.toDouble();
+    final lng = (row['lng'] as num?)?.toDouble();
+    final estado = row['estado']?.toString() ?? '';
+
+    if (lat == null || lng == null) {
+      state = state.copyWith(
+        locationError: 'La ubicación del conductor aún no está disponible.',
+      );
+      return;
+    }
+
+    state = state.copyWith(
+      driverPosition: GeoPoint(lat, lng),
+      status: _resolveStatus(estado),
+      clearLocationError: true,
+    );
+  }
+
+  /// Lectura puntual de driver_locations (sin Distance Matrix).
   Future<void> refreshFromSupabase(String driverId, {bool silent = false}) async {
     if (state.finished) return;
     try {
       final row = await Supabase.instance.client
           .from('driver_locations')
-          .select('lat, lng, eta_minutes, estado')
+          .select('lat, lng, estado')
           .eq('driver_id', driverId)
-          .single();
+          .maybeSingle();
 
-      final lat = (row['lat'] as num?)?.toDouble();
-      final lng = (row['lng'] as num?)?.toDouble();
-      final etaRaw = row['eta_minutes'] as int?;
-      final estado = row['estado']?.toString() ?? '';
-
-      if (lat == null || lng == null) {
-        state = state.copyWith(
-          locationError: 'La ubicación del conductor aún no está disponible.',
-        );
+      if (row == null) {
+        if (!silent) {
+          state = state.copyWith(
+            locationError: 'La ubicación del conductor aún no está disponible.',
+          );
+        }
         return;
       }
 
-      final newStatus = _resolveStatus(estado);
-      final eta = etaRaw ?? state.etaMinutes;
-      final banner = eta <= 2 && eta > 0;
-
-      state = state.copyWith(
-        driverPosition: GeoPoint(lat, lng),
-        etaMinutes: eta,
-        showArrivalBanner: banner,
-        status: newStatus,
-        clearLocationError: true,
-      );
+      _applyLocationRow(row);
     } catch (e) {
       if (!silent) {
         state = state.copyWith(
           locationError:
-          'No se pudo obtener la ubicación: ${e.toString().replaceFirst('Exception: ', '')}',
+              'No se pudo obtener la ubicación: ${e.toString().replaceFirst('Exception: ', '')}',
         );
       }
     }
+  }
+
+  void updateEtaMinutes(int? minutes) {
+    if (state.finished || minutes == null) return;
+    final banner = minutes <= 2 && minutes > 0;
+    state = state.copyWith(etaMinutes: minutes, showArrivalBanner: banner);
   }
 
   ViajeStatus _resolveStatus(String estado) {
@@ -238,10 +244,8 @@ class ViajeController extends StateNotifier<ViajeState> {
   }
 
   void _cancelTimers() {
-    _etaTimer?.cancel();
-    _locationTimer?.cancel();
-    _etaTimer = null;
-    _locationTimer = null;
+    _locationSubscription?.cancel();
+    _locationSubscription = null;
   }
 
   @override
