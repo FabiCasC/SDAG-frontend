@@ -120,7 +120,7 @@ class _ConductorGestionViajeScreenState
         ? 0.0
         : (state.occupiedSeats / state.totalSeats).clamp(0.0, 1.0);
 
-    return RefreshIndicator(
+   return RefreshIndicator(
       onRefresh: controller.refresh,
       child: ListView(
         padding: const EdgeInsets.all(AppSpacing.p20),
@@ -138,6 +138,20 @@ class _ConductorGestionViajeScreenState
             tripId: state.tripId,
           ),
           const SizedBox(height: AppSpacing.lg),
+          if (state.estadoViaje == ConductorEstadoViaje.esperando)
+            FilledButton(
+              onPressed: state.canStartTrip
+                  ? () => ref.read(conductorViajeProvider.notifier).iniciarRuta()
+                  : null,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
+                backgroundColor: const Color(0xFF2563EB),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.r12),
+                ),
+              ),
+              child: const Text('Salir a recoger pasajeros'),
+            ),
           if (state.estadoViaje == ConductorEstadoViaje.enRuta)
             FilledButton(
               onPressed: state.canCompleteTrip ? _confirmCompleteRoute : null,
@@ -416,13 +430,12 @@ Future<void> _notificarLlegando({
 
   try {
     await Supabase.instance.client.from('trip_messages').insert({
-      'trip_id': tripId,
-      'passenger_id': passengerProfileId,
-      'sender_profile_id': user.id,
-      'sender_role': 'driver',
-      'message_type': 'llegando',
-      'body': texto,
-    });
+  'trip_id': tripId,
+  'passenger_id': passengerProfileId,
+  'sender_id': user.id,
+  'sender_role': 'driver',
+  'message': texto,
+});
     if (context.mounted) {
       AppSnackbars.success(context, 'Notificacion enviada');
     }
