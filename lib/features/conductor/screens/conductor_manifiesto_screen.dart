@@ -61,9 +61,10 @@ class _ConductorManifiestoScreenState extends ConsumerState<ConductorManifiestoS
                       e.telefono,
                       e.puntoRecojo,
                       switch (e.estado) {
-                        ManifiestoEstadoPasajero.subio => 'Subió',
+                        ManifiestoEstadoPasajero.subio => 'Ya abordó',
                         ManifiestoEstadoPasajero.noSubio => 'No subió',
                         ManifiestoEstadoPasajero.pendiente => 'Pendiente',
+                        ManifiestoEstadoPasajero.cancelado => 'Canceló',
                       },
                     ],
                   )
@@ -296,13 +297,19 @@ class _TableCard extends StatelessWidget {
           rows: [
             for (var i = 0; i < passengers.length; i++)
               DataRow(
+                color: WidgetStateProperty.all(_rowColor(passengers[i].reservationStatus)),
                 cells: [
                   DataCell(Text('${i + 1}')),
                   DataCell(Text(passengers[i].nombreCompleto)),
                   DataCell(Text(passengers[i].dni)),
                   DataCell(Text(passengers[i].telefono)),
                   DataCell(Text('${passengers[i].asiento}')),
-                  DataCell(_EstadoChip(estado: passengers[i].estado)),
+                  DataCell(
+                    _EstadoChip(
+                      estado: passengers[i].estado,
+                      reservationStatus: passengers[i].reservationStatus,
+                    ),
+                  ),
                 ],
               ),
           ],
@@ -312,17 +319,64 @@ class _TableCard extends StatelessWidget {
   }
 }
 
+Color? _rowColor(String reservationStatus) {
+  return switch (reservationStatus) {
+    'completada' => const Color(0xFFF0FDF4),
+    'cancelada' => const Color(0xFFFEF2F2),
+    _ => AppColors.white,
+  };
+}
+
 class _EstadoChip extends StatelessWidget {
-  const _EstadoChip({required this.estado});
+  const _EstadoChip({
+    required this.estado,
+    required this.reservationStatus,
+  });
 
   final ManifiestoEstadoPasajero estado;
+  final String reservationStatus;
 
   @override
   Widget build(BuildContext context) {
-    final (bg, fg, label) = switch (estado) {
-      ManifiestoEstadoPasajero.subio => (const Color(0xFFDCFCE7), const Color(0xFF16A34A), 'Subió'),
-      ManifiestoEstadoPasajero.noSubio => (const Color(0xFFFEE2E2), const Color(0xFFDC2626), 'No subió'),
-      ManifiestoEstadoPasajero.pendiente => (const Color(0xFFFEF9C3), const Color(0xFFD97706), 'Pendiente'),
+    final (bg, fg, label, icon) = switch (reservationStatus) {
+      'completada' => (
+          const Color(0xFFDCFCE7),
+          const Color(0xFF16A34A),
+          'Ya abordó',
+          Icons.check_circle_rounded,
+        ),
+      'cancelada' => (
+          const Color(0xFFFEE2E2),
+          const Color(0xFFDC2626),
+          'Canceló',
+          Icons.cancel_rounded,
+        ),
+      _ => switch (estado) {
+          ManifiestoEstadoPasajero.subio => (
+              const Color(0xFFDCFCE7),
+              const Color(0xFF16A34A),
+              'Subió',
+              Icons.check_circle_outline_rounded,
+            ),
+          ManifiestoEstadoPasajero.noSubio => (
+              const Color(0xFFFEE2E2),
+              const Color(0xFFDC2626),
+              'No subió',
+              Icons.close_rounded,
+            ),
+          ManifiestoEstadoPasajero.cancelado => (
+              const Color(0xFFFEE2E2),
+              const Color(0xFFDC2626),
+              'Canceló',
+              Icons.cancel_rounded,
+            ),
+          ManifiestoEstadoPasajero.pendiente => (
+              const Color(0xFFFEF9C3),
+              const Color(0xFFD97706),
+              'Pendiente',
+              Icons.schedule_rounded,
+            ),
+        },
     };
 
     return Container(
@@ -332,12 +386,19 @@ class _EstadoChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.pill),
         border: Border.all(color: fg.withAlpha(70)),
       ),
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: fg,
-              fontWeight: FontWeight.w900,
-            ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+        ],
       ),
     );
   }

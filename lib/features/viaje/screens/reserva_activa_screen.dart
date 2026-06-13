@@ -30,10 +30,13 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
   bool _started = false;
   bool _sheetOpen = false;
   bool _extraPaidSnackShown = false;
-  bool _boardingListenerReady = false;
   bool _etaInicializado = false;
+  bool _boardingSetupDone = false;
   late final ProviderSubscription<ViajeState> _viajeSub;
   StreamSubscription<List<Map<String, dynamic>>>? _boardingSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _mensajesSubscription;
+  String? _lastLlegandoMessageId;
+  bool _mensajesLlegandoInitialized = false;
   Timer? _etaTimer;
   int? _etaMinutos;
   bool _etaLoading = true;
@@ -46,6 +49,21 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
 
     _etaTimer = Timer.periodic(const Duration(seconds: 40), (_) {
       _actualizarEtaSiMovio();
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _boardingSetupDone) return;
+      final reserva = ref.read(reservaProvider);
+      final reservaId = reserva.reservaId;
+      if (reservaId == null || reservaId.isEmpty) return;
+      _boardingSetupDone = true;
+      unawaited(_verificarAbordajeInicial(reservaId));
+      _suscribirAbordaje(reservaId);
+      final tripId = reserva.conductorSeleccionado?.tripId;
+      final userId = ref.read(passengerSessionProvider).account?.id;
+      if (tripId != null && tripId.isNotEmpty && userId != null) {
+        _suscribirMensajesLlegando(tripId: tripId, userId: userId);
+      }
     });
 
     _viajeSub = ref.listenManual<ViajeState>(viajeProvider, (previous, next) {
@@ -71,19 +89,106 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
     });
   }
 
-  void _subscribeBoarding(String reservaId) {
+  Future<void> _verificarAbordajeInicial(String reservaId) async {
+    try {
+      final reserva = ref.read(reservaProvider);
+      final expectedSeats = reserva.asientosSeleccionados.length;
+      if (expectedSeats == 0) return;
+
+      final entries = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('boarding_status')
+          .eq('reservation_id', reservaId);
+
+      final rows = (entries as List).cast<Map<String, dynamic>>();
+      debugPrint('[Pasajero] verificacion inicial: $rows');
+      if (rows.length >= expectedSeats &&
+          rows.every((e) => e['boarding_status']?.toString() == 'abordo') &&
+          mounted) {
+        _navegarAViajeEnCurso(reservaId);
+      }
+    } catch (e) {
+      debugPrint('[Pasajero] Error verificando abordaje inicial: $e');
+    }
+  }
+
+  void _suscribirAbordaje(String reservaId) {
     _boardingSubscription?.cancel();
     _boardingSubscription = Supabase.instance.client
         .from('manifest_entries')
         .stream(primaryKey: ['id'])
         .eq('reservation_id', reservaId)
-        .listen((rows) {
-      if (!mounted || rows.isEmpty) return;
-      final status = rows.first['boarding_status']?.toString();
-      if (status == 'abordo') {
-        context.go('${AppRoutes.passengerViajeEnCurso}?reservaId=$reservaId');
+        .listen((data) {
+      debugPrint('[Pasajero] manifest_entries stream: $data');
+      if (!mounted || data.isEmpty) return;
+      final expectedSeats = ref.read(reservaProvider).asientosSeleccionados.length;
+      if (expectedSeats == 0 || data.length < expectedSeats) return;
+      final allAboard = data.every((e) => e['boarding_status']?.toString() == 'abordo');
+      debugPrint('[Pasajero] allAboard=$allAboard');
+      if (allAboard) {
+        _navegarAViajeEnCurso(reservaId);
       }
     });
+  }
+
+  void _suscribirMensajesLlegando({
+    required String tripId,
+    required String userId,
+  }) {
+    _mensajesSubscription?.cancel();
+    _mensajesSubscription = Supabase.instance.client
+        .from('trip_messages')
+        .stream(primaryKey: ['id'])
+        .eq('trip_id', tripId)
+        .listen((data) {
+      final llegando = data
+          .where(
+            (m) =>
+                m['message_type']?.toString() == 'llegando' &&
+                m['passenger_id']?.toString() == userId,
+          )
+          .toList();
+
+      if (llegando.isEmpty || !mounted) return;
+
+      if (!_mensajesLlegandoInitialized) {
+        _mensajesLlegandoInitialized = true;
+        _lastLlegandoMessageId = llegando.last['id']?.toString();
+        return;
+      }
+
+      final last = llegando.last;
+      final id = last['id']?.toString();
+      if (id == null || id == _lastLlegandoMessageId) return;
+      _lastLlegandoMessageId = id;
+
+      showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('El conductor esta llegando'),
+          content: const Text('Preparate en tu punto de recojo.'),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+    });
+  }
+
+  void _navegarAViajeEnCurso(String reservaId) {
+    _boardingSubscription?.cancel();
+    final reserva = ref.read(reservaProvider);
+    final tripId = reserva.conductorSeleccionado?.tripId ?? '';
+    final driverId = reserva.conductorSeleccionado?.driverId ?? '';
+    final params = <String>[
+      'reservaId=$reservaId',
+      if (tripId.isNotEmpty) 'tripId=$tripId',
+      if (driverId.isNotEmpty) 'driverId=$driverId',
+    ].join('&');
+    context.go('${AppRoutes.passengerViajeEnCurso}?$params');
   }
 
   Future<void> _calcularEtaInicial() async {
@@ -178,6 +283,7 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
   void dispose() {
     _etaTimer?.cancel();
     _boardingSubscription?.cancel();
+    _mensajesSubscription?.cancel();
     _viajeSub.close();
     super.dispose();
   }
@@ -225,14 +331,6 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
       _etaInicializado = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _calcularEtaInicial();
-      });
-    }
-
-    final reservaId = reserva.reservaId;
-    if (!_boardingListenerReady && reservaId != null && reservaId.isNotEmpty) {
-      _boardingListenerReady = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _subscribeBoarding(reservaId);
       });
     }
 
@@ -385,14 +483,6 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
                           onTap: () => context.push(AppRoutes.passengerForzarSalida),
                         ),
                       ),
-                      SizedBox(
-                        width: MediaQuery.of(context).size.width - (AppSpacing.p20 * 2),
-                        child: _ActionButton(
-                          label: 'Bajarme aquí',
-                          icon: Icons.pin_drop_rounded,
-                          onTap: _bajarmAqui,
-                        ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: AppSpacing.lg),
@@ -424,77 +514,6 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
     if (!mounted) return;
     _sheetOpen = false;
     ref.read(viajeProvider.notifier).dismissAlternativePickup();
-  }
-
-  Future<void> _bajarmAqui() async {
-    final confirmado = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Bajada anticipada'),
-        content: const Text(
-          'Te estás bajando antes de tiempo.\n\n¡Muchas gracias por viajar con nosotros!',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Confirmar bajada'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmado != true) return;
-
-    final userId = Supabase.instance.client.auth.currentUser?.id;
-    if (userId == null) return;
-
-    final reserva = ref.read(reservaProvider);
-    final reservaId = reserva.reservaId;
-
-    if (reservaId == null || reservaId.isEmpty) {
-      if (!mounted) return;
-      AppSnackbars.error(context, 'No se encontró la reserva activa');
-      return;
-    }
-
-    try {
-      await Supabase.instance.client
-          .from('reservations')
-          .update({'status': 'completada'})
-          .eq('id', reservaId);
-
-      await Supabase.instance.client
-          .from('profiles')
-          .update({'has_active_reservation': false})
-          .eq('id', userId);
-
-      final manifestEntries = await Supabase.instance.client
-          .from('manifest_entries')
-          .select('id, boarding_status')
-          .eq('reservation_id', reservaId);
-
-      for (final raw in (manifestEntries as List).cast<Map<String, dynamic>>()) {
-        final boarding = raw['boarding_status']?.toString();
-        if (boarding == 'abordo') continue;
-        await Supabase.instance.client
-            .from('manifest_entries')
-            .update({'boarding_status': 'no_abordo'})
-            .eq('id', raw['id']);
-      }
-
-      ref.read(reservaProvider.notifier).reset();
-      ref.invalidate(viajeProvider);
-
-      if (!mounted) return;
-      context.go(AppRoutes.passengerHome);
-    } catch (_) {
-      if (!mounted) return;
-      AppSnackbars.error(context, 'No se pudo completar el viaje');
-    }
   }
 
   Future<void> _enviarEsperame() async {
@@ -564,18 +583,6 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
   }
 }
 
-class _ActiveQrPassenger {
-  const _ActiveQrPassenger({
-    required this.passengerId,
-    required this.name,
-    required this.seatNumber,
-  });
-
-  final String passengerId;
-  final String name;
-  final int seatNumber;
-}
-
 Future<void> _openQrSheet(
   BuildContext context, {
   required String reservaId,
@@ -583,22 +590,6 @@ Future<void> _openQrSheet(
   required String titularName,
   required Map<int, ReservaAcompanante> acompanantes,
 }) async {
-  final passengers = <_ActiveQrPassenger>[
-    _ActiveQrPassenger(
-      passengerId: 'titular',
-      name: titularName,
-      seatNumber: seats.first,
-    ),
-    ...seats.skip(1).map((seat) {
-      final a = acompanantes[seat];
-      return _ActiveQrPassenger(
-        passengerId: 'acom_$seat',
-        name: a?.fullName ?? 'Acompañante',
-        seatNumber: seat,
-      );
-    }),
-  ];
-
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -622,9 +613,15 @@ Future<void> _openQrSheet(
               Flexible(
                 child: ListView.builder(
                   shrinkWrap: true,
-                  itemCount: passengers.length,
+                  itemCount: seats.length,
                   itemBuilder: (context, index) {
-                    final p = passengers[index];
+                    final seat = seats[index];
+                    final qrData = '$reservaId|$seat';
+                    final companion = index > 0 ? acompanantes[seat] : null;
+                    final name = index == 0
+                        ? titularName
+                        : (companion?.fullName ?? 'Acompanante');
+                    debugPrint('[QR Generado] data="$qrData"');
                     return Padding(
                       padding: const EdgeInsets.only(bottom: AppSpacing.md),
                       child: DecoratedBox(
@@ -645,26 +642,26 @@ Future<void> _openQrSheet(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Center(
-                                child: QrImageView(
-                                  data: reservaId,
-                                  version: QrVersions.auto,
-                                  size: 160,
-                                  backgroundColor: AppColors.white,
-                                ),
-                              ),
-                              const SizedBox(height: AppSpacing.sm),
                               Text(
-                                p.name,
+                                'Asiento #$seat',
                                 textAlign: TextAlign.center,
                                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                                       color: AppColors.textPrimary,
                                       fontWeight: FontWeight.w800,
                                     ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: AppSpacing.sm),
+                              Center(
+                                child: QrImageView(
+                                  data: qrData,
+                                  version: QrVersions.auto,
+                                  size: 180.0,
+                                  backgroundColor: AppColors.white,
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.sm),
                               Text(
-                                'Asiento #${p.seatNumber}',
+                                name,
                                 textAlign: TextAlign.center,
                                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                       color: AppColors.textSecondary,

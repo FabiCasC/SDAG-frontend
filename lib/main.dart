@@ -42,6 +42,15 @@ Future<void> main() async {
 
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       debugPrint('[Auth] event: ${data.event}');
+      if (data.event == AuthChangeEvent.signedOut) {
+        debugPrint('[Auth] Sesión cerrada (posiblemente desde otro dispositivo)');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final context = rootNavigatorKey.currentContext;
+          if (context != null && context.mounted) {
+            GoRouter.of(context).go(AppRoutes.login);
+          }
+        });
+      }
       if (data.event == AuthChangeEvent.passwordRecovery) {
         _navigateToResetPassword();
       }

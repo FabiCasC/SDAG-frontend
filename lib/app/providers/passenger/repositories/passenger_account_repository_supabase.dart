@@ -20,6 +20,9 @@ class PassengerAccountRepositorySupabase implements PassengerAccountRepository {
     final pw = password.trim();
     try {
       final res = await client.auth.signInWithPassword(email: email, password: pw);
+      if (res.session != null) {
+        await client.auth.signOut(scope: SignOutScope.others);
+      }
       final user = res.user ?? client.auth.currentUser;
       if (user == null) throw const InvalidCredentialsFailure();
 

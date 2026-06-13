@@ -182,6 +182,7 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
   int _capacidad = 0;
   int _totalViajesHoy = 0;
   double _gananciaHoy = 0;
+  bool _autoStartInFlight = false;
 
   @override
   void initState() {
@@ -378,12 +379,12 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
             reservation_companions(full_name, seat_number)
           ''')
           .eq('trip_id', tripId)
-          .eq('status', 'activa');
+          .inFilter('status', ['activa', 'completada']);
 
       final reservas = (data as List).cast<Map<String, dynamic>>();
-      debugPrint('[Home] Pasajeros activos: ${reservas.length}');
+      debugPrint('[Home] Pasajeros (activas + completadas): ${reservas.length}');
 
-      await _applyReservations(reservas);
+      await _applyReservations(reservas, tripId);
     } catch (e) {
       debugPrint('[Home] Error cargando pasajeros: $e');
       if (!mounted) return;
@@ -393,11 +394,13 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
     }
   }
 
-  Future<void> _applyReservations(List<Map<String, dynamic>> data) async {
-    final reservasActivas = data.where((r) => r['status'] == 'activa').toList();
-
+  Future<void> _applyReservations(
+    List<Map<String, dynamic>> data,
+    String tripId,
+  ) async {
     final pasajerosConPerfil = <_PassengerReservation>[];
-    for (final reserva in reservasActivas) {
+    for (final reserva in data) {
+      final status = reserva['status']?.toString() ?? 'activa';
       final embeddedProfile = _asMap(reserva['profiles']) ?? _asMap(reserva['perfil']);
       final passengerId = reserva['passenger_profile_id']?.toString();
       Map<String, dynamic>? perfil = embeddedProfile;
@@ -423,6 +426,7 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
           seats: seats,
           companions: companions,
           pickupPoint: reserva['pickup_point']?.toString() ?? '—',
+          status: status,
         ),
       );
     }
@@ -437,6 +441,53 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
       _reservas = pasajerosConPerfil;
       _asientosOcupados = uniqueSeats.length;
     });
+
+    await _verificarInicioAutomatico(tripId);
+  }
+
+  Future<void> _verificarInicioAutomatico(String tripId) async {
+    if (_autoStartInFlight || _capacidad <= 0) return;
+    final tripStatus = _tripData?['status']?.toString();
+    if (tripStatus != 'esperando') return;
+
+    final driverId = _driverData?['id']?.toString();
+    if (driverId == null || driverId.isEmpty) return;
+
+    try {
+      final reservas = await Supabase.instance.client
+          .from('reservations')
+          .select('seats')
+          .eq('trip_id', tripId)
+          .inFilter('status', ['activa', 'completada']);
+
+      final asientosOcupados = (reservas as List)
+          .expand((r) => (r['seats'] as List? ?? const []))
+          .length;
+
+      if (asientosOcupados < _capacidad) return;
+
+      _autoStartInFlight = true;
+
+      await Supabase.instance.client.from('trips').update({
+        'status': 'en_ruta',
+        'started_at': DateTime.now().toIso8601String(),
+      }).eq('id', tripId);
+
+      await Supabase.instance.client
+          .from('drivers')
+          .update({'estado': 'en_ruta'})
+          .eq('id', driverId);
+
+      if (!mounted) return;
+      setState(() {
+        _tripData = Map<String, dynamic>.from(_tripData!)..['status'] = 'en_ruta';
+      });
+      AppSnackbars.success(context, 'Carro lleno. Viaje iniciado automaticamente.');
+    } catch (e) {
+      debugPrint('[Home] Error inicio automatico: $e');
+    } finally {
+      _autoStartInFlight = false;
+    }
   }
 
   void _cancelReservasSubscription() {
@@ -701,6 +752,7 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
                   pulse: widget.pulse,
                   routeLabel: _routeLabel(_tripData),
                   showPassengerChat: _tripData != null,
+                  tripId: _tripData!['id']?.toString(),
                 )
               else
                 const _NoActiveTripCard(),
@@ -839,6 +891,7 @@ class _PassengerReservation {
     required this.seats,
     required this.companions,
     required this.pickupPoint,
+    required this.status,
   });
 
   final String id;
@@ -849,6 +902,10 @@ class _PassengerReservation {
   final List<int> seats;
   final List<String> companions;
   final String pickupPoint;
+  final String status;
+
+  bool get isCompletada => status == 'completada';
+  bool get isActiva => status == 'activa';
 }
 
 Map<String, dynamic>? _asMap(dynamic value) {
@@ -1143,6 +1200,7 @@ class _PassengersSection extends StatelessWidget {
     required this.pulse,
     required this.routeLabel,
     this.showPassengerChat = false,
+    this.tripId,
   });
 
   final List<_PassengerReservation> passengers;
@@ -1151,6 +1209,7 @@ class _PassengersSection extends StatelessWidget {
   final Animation<double> pulse;
   final String routeLabel;
   final bool showPassengerChat;
+  final String? tripId;
 
   @override
   Widget build(BuildContext context) {
@@ -1230,6 +1289,7 @@ class _PassengersSection extends StatelessWidget {
                   child: _PassengerTile(
                     passenger: passenger,
                     showChat: showPassengerChat,
+                    tripId: tripId,
                   ),
                 ),
               ),
@@ -1287,10 +1347,12 @@ class _PassengerTile extends StatelessWidget {
   const _PassengerTile({
     required this.passenger,
     this.showChat = false,
+    this.tripId,
   });
 
   final _PassengerReservation passenger;
   final bool showChat;
+  final String? tripId;
 
   @override
   Widget build(BuildContext context) {
@@ -1300,11 +1362,19 @@ class _PassengerTile extends StatelessWidget {
     final companionsLabel = passenger.companions.isEmpty
         ? null
         : passenger.companions.join(', ');
+    final nameStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.w900,
+          decoration: passenger.isCompletada ? TextDecoration.lineThrough : null,
+          decorationColor: AppColors.textSecondary,
+        );
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+        color: passenger.isCompletada ? const Color(0xFFF0FDF4) : const Color(0xFFF8FAFC),
         borderRadius: BorderRadius.circular(AppRadius.r16),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(
+          color: passenger.isCompletada ? const Color(0xFF86EFAC) : AppColors.border,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
@@ -1318,12 +1388,17 @@ class _PassengerTile extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        passenger.fullName,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w900,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(passenger.fullName, style: nameStyle),
+                          ),
+                          if (passenger.isCompletada)
+                            const Padding(
+                              padding: EdgeInsets.only(left: AppSpacing.xs),
+                              child: Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 20),
                             ),
+                        ],
                       ),
                       const SizedBox(height: AppSpacing.xs),
                       Text(
@@ -1362,7 +1437,7 @@ class _PassengerTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (showChat && passenger.passengerProfileId.isNotEmpty)
+                if (showChat && passenger.isActiva && passenger.passengerProfileId.isNotEmpty)
                   IconButton(
                     tooltip: 'Chat con pasajero',
                     onPressed: () => context.push('/conductor/chat/${passenger.passengerProfileId}'),
@@ -1371,10 +1446,57 @@ class _PassengerTile extends StatelessWidget {
                   ),
               ],
             ),
+            if (tripId != null &&
+                tripId!.isNotEmpty &&
+                passenger.isActiva &&
+                passenger.passengerProfileId.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.directions_car_rounded, size: 16),
+                label: const Text('Ya estoy llegando'),
+                onPressed: () => _notificarLlegandoHome(
+                  context: context,
+                  tripId: tripId!,
+                  passengerProfileId: passenger.passengerProfileId,
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+}
+
+Future<void> _notificarLlegandoHome({
+  required BuildContext context,
+  required String tripId,
+  required String passengerProfileId,
+}) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) {
+    AppSnackbars.error(context, 'No hay una sesion activa');
+    return;
+  }
+
+  const texto = 'El conductor ya esta llegando a tu punto de recojo. Preparate.';
+
+  try {
+    await Supabase.instance.client.from('trip_messages').insert({
+      'trip_id': tripId,
+      'passenger_id': passengerProfileId,
+      'sender_profile_id': user.id,
+      'sender_role': 'driver',
+      'message_type': 'llegando',
+      'body': texto,
+    });
+    if (context.mounted) {
+      AppSnackbars.success(context, 'Notificacion enviada');
+    }
+  } catch (_) {
+    if (context.mounted) {
+      AppSnackbars.error(context, 'No se pudo enviar la notificacion');
+    }
   }
 }
 

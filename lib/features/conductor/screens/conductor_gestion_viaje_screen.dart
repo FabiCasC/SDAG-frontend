@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
@@ -58,29 +59,6 @@ class _ConductorGestionViajeScreenState
   void dispose() {
     _sub.close();
     super.dispose();
-  }
-
-  Future<void> _confirmStartRoute() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Iniciar viaje'),
-        content: const Text('Se actualizara el estado del viaje a en ruta.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Iniciar'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await ref.read(conductorViajeProvider.notifier).iniciarRuta();
-    }
   }
 
   Future<void> _confirmCompleteRoute() async {
@@ -155,26 +133,11 @@ class _ConductorGestionViajeScreenState
           const SizedBox(height: AppSpacing.md),
           _OccupancyCard(state: state, progress: progress),
           const SizedBox(height: AppSpacing.md),
-          _PassengersCard(passengers: state.pasajerosViaje),
+          _PassengersCard(
+            passengers: state.pasajerosViaje,
+            tripId: state.tripId,
+          ),
           const SizedBox(height: AppSpacing.lg),
-          if (state.estadoViaje == ConductorEstadoViaje.esperando)
-            FilledButton(
-              onPressed: state.canStartTrip ? _confirmStartRoute : null,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-                backgroundColor: const Color(0xFF16A34A),
-                disabledBackgroundColor: const Color(0xFFE5E7EB),
-                disabledForegroundColor: const Color(0xFF6B7280),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.r12),
-                ),
-              ),
-              child: Text(
-                state.canStartTrip
-                    ? 'Iniciar viaje'
-                    : 'Iniciar viaje (vehiculo no lleno)',
-              ),
-            ),
           if (state.estadoViaje == ConductorEstadoViaje.enRuta)
             FilledButton(
               onPressed: state.canCompleteTrip ? _confirmCompleteRoute : null,
@@ -323,9 +286,13 @@ class _OccupancyCard extends StatelessWidget {
 }
 
 class _PassengersCard extends StatelessWidget {
-  const _PassengersCard({required this.passengers});
+  const _PassengersCard({
+    required this.passengers,
+    required this.tripId,
+  });
 
   final List<PasajeroViaje> passengers;
+  final String? tripId;
 
   @override
   Widget build(BuildContext context) {
@@ -411,6 +378,18 @@ class _PassengersCard extends StatelessWidget {
                             ),
                         ],
                       ),
+                      if (tripId != null && tripId!.isNotEmpty && passenger.profileId.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.directions_car_rounded, size: 16),
+                          label: const Text('Ya estoy llegando'),
+                          onPressed: () => _notificarLlegando(
+                            context: context,
+                            tripId: tripId!,
+                            passengerProfileId: passenger.profileId,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -419,6 +398,38 @@ class _PassengersCard extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+Future<void> _notificarLlegando({
+  required BuildContext context,
+  required String tripId,
+  required String passengerProfileId,
+}) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) {
+    AppSnackbars.error(context, 'No hay una sesion activa');
+    return;
+  }
+
+  const texto = 'El conductor ya esta llegando a tu punto de recojo. Preparate.';
+
+  try {
+    await Supabase.instance.client.from('trip_messages').insert({
+      'trip_id': tripId,
+      'passenger_id': passengerProfileId,
+      'sender_profile_id': user.id,
+      'sender_role': 'driver',
+      'message_type': 'llegando',
+      'body': texto,
+    });
+    if (context.mounted) {
+      AppSnackbars.success(context, 'Notificacion enviada');
+    }
+  } catch (_) {
+    if (context.mounted) {
+      AppSnackbars.error(context, 'No se pudo enviar la notificacion');
+    }
   }
 }
 

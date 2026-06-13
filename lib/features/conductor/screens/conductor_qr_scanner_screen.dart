@@ -21,8 +21,8 @@ class ConductorQrScannerScreen extends ConsumerStatefulWidget {
 class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScreen>
     with WidgetsBindingObserver {
   final MobileScannerController _controller = MobileScannerController(
-    facing: CameraFacing.back,
-    detectionSpeed: DetectionSpeed.noDuplicates,
+    detectionSpeed: DetectionSpeed.normal,
+    formats: [BarcodeFormat.qrCode],
     returnImage: false,
   );
 
@@ -67,29 +67,55 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
     });
   }
 
-  Future<void> _onDetect(BarcodeCapture capture) async {
-    if (!_escaneando || _procesando) return;
-
+  void _onDetect(BarcodeCapture capture) {
+    debugPrint('[QR] onDetect llamado — barcodes encontrados: ${capture.barcodes.length}');
+    for (final b in capture.barcodes) {
+      debugPrint('[QR] rawValue: ${b.rawValue} | format: ${b.format}');
+    }
+    if (!_escaneando) {
+      debugPrint('[QR] ignorado — _escaneando=false');
+      return;
+    }
+    if (_procesando) {
+      debugPrint('[QR] ignorado — _procesando=true');
+      return;
+    }
     final barcode = capture.barcodes.isNotEmpty ? capture.barcodes.first : null;
-    final raw = barcode?.rawValue?.trim();
-    if (raw == null || raw.isEmpty) return;
-
+    if (barcode?.rawValue == null) {
+      debugPrint('[QR] barcode sin rawValue, ignorado');
+      return;
+    }
+    final raw = barcode!.rawValue!.trim();
+    if (raw.isEmpty) {
+      debugPrint('[QR] rawValue vacío, ignorado');
+      return;
+    }
+    debugPrint('[QR] procesando reservaId=$raw');
     setState(() {
       _escaneando = false;
       _procesando = true;
     });
-
-    await _procesarQR(raw);
+    unawaited(_procesarQR(raw));
   }
 
   Future<void> _procesarQR(String qrValue) async {
-    var reservaId = qrValue.contains('|') ? qrValue.split('|').first.trim() : qrValue.trim();
+    String reservaId;
+    int? asientoNumero;
+
+    if (qrValue.contains('|')) {
+      final partes = qrValue.split('|');
+      reservaId = partes[0].trim();
+      asientoNumero = int.tryParse(partes[1].trim());
+    } else {
+      reservaId = qrValue.trim();
+    }
+
     if (reservaId.startsWith('res_')) {
       reservaId = reservaId.substring(4);
     }
 
     if (!_uuidRegex.hasMatch(reservaId)) {
-      setState(() => _resultado = '❌ QR inválido — formato incorrecto');
+      setState(() => _resultado = 'QR invalido');
       await _reactivarEscanner();
       return;
     }
@@ -99,13 +125,13 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
           .from('reservations')
           .select('''
             id, status, seats, pickup_point, passenger_profile_id, trip_id,
-            profiles:passenger_profile_id(name, first_name, last_name)
+            profiles:passenger_profile_id(name, first_name, last_name, dni, phone)
           ''')
           .eq('id', reservaId)
           .maybeSingle();
 
       if (reserva == null) {
-        setState(() => _resultado = '❌ Reserva no encontrada');
+        setState(() => _resultado = 'QR invalido — reserva no encontrada');
         await _reactivarEscanner();
         return;
       }
@@ -127,21 +153,13 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
           .from('drivers')
           .select('id')
           .eq('profile_id', user.id)
-          .maybeSingle();
-
-      if (driver == null) {
-        setState(() => _resultado = '❌ No se encontró el conductor');
-        await _reactivarEscanner();
-        return;
-      }
+          .single();
 
       final trip = await Supabase.instance.client
           .from('trips')
           .select('id')
           .eq('driver_id', driver['id'])
-          .inFilter('status', ['esperando', 'en_ruta', 'lleno'])
-          .order('created_at', ascending: false)
-          .limit(1)
+          .inFilter('status', ['esperando', 'en_ruta'])
           .maybeSingle();
 
       if (trip == null || reserva['trip_id']?.toString() != trip['id']?.toString()) {
@@ -150,96 +168,120 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
         return;
       }
 
-      final manifestRow = await Supabase.instance.client
+      if (asientoNumero != null) {
+        final reservedSeats = _parseSeats(reserva['seats']);
+        if (!reservedSeats.contains(asientoNumero)) {
+          setState(() => _resultado = 'Asiento no pertenece a esta reserva');
+          await _reactivarEscanner();
+          return;
+        }
+
+        final existingSeat = await Supabase.instance.client
+            .from('manifest_entries')
+            .select('id, boarding_status')
+            .eq('reservation_id', reservaId)
+            .eq('seat_number', asientoNumero)
+            .maybeSingle();
+
+        if (existingSeat?['boarding_status']?.toString() == 'abordo') {
+          setState(() => _resultado = 'Este asiento ya fue escaneado');
+          await _reactivarEscanner();
+          return;
+        }
+      } else {
+        final existingForReserva = await Supabase.instance.client
+            .from('manifest_entries')
+            .select('id, boarding_status')
+            .eq('reservation_id', reservaId);
+
+        final allBoarded = (existingForReserva as List).isNotEmpty &&
+            (existingForReserva as List).every((entry) {
+              final map = (entry as Map).cast<String, dynamic>();
+              return map['boarding_status']?.toString() == 'abordo';
+            });
+
+        if (allBoarded) {
+          setState(() => _resultado = 'Esta reserva ya fue escaneada');
+          await _reactivarEscanner();
+          return;
+        }
+      }
+
+      final manifest = await Supabase.instance.client
           .from('manifests')
           .select('id')
           .eq('trip_id', trip['id'])
           .maybeSingle();
 
       late final String manifestId;
-      if (manifestRow == null) {
-        try {
-          final newManifest = await Supabase.instance.client
-              .from('manifests')
-              .insert({'trip_id': trip['id'], 'estado': 'en_curso'})
-              .select('id')
-              .single();
-          final createdId = newManifest['id']?.toString();
-          if (createdId == null || createdId.isEmpty) {
-            setState(() => _resultado = '❌ No se pudo crear el manifiesto');
-            await _reactivarEscanner();
-            return;
-          }
-          manifestId = createdId;
-        } catch (_) {
-          setState(() => _resultado = '❌ Manifiesto no disponible para este viaje');
-          await _reactivarEscanner();
-          return;
-        }
+      if (manifest == null) {
+        final newManifest = await Supabase.instance.client
+            .from('manifests')
+            .insert({'trip_id': trip['id'], 'estado': 'en_curso'})
+            .select('id')
+            .single();
+        manifestId = newManifest['id'].toString();
       } else {
-        final existingId = manifestRow['id']?.toString();
-        if (existingId == null || existingId.isEmpty) {
-          setState(() => _resultado = '❌ Manifiesto inválido');
-          await _reactivarEscanner();
-          return;
-        }
-        manifestId = existingId;
+        manifestId = manifest['id'].toString();
       }
 
-      final passengerProfileId = reserva['passenger_profile_id']?.toString();
-      if (passengerProfileId == null || passengerProfileId.isEmpty) {
-        setState(() => _resultado = 'QR invalido');
-        await _reactivarEscanner();
-        return;
+      List<dynamic> updateResult;
+      if (asientoNumero != null) {
+        updateResult = await Supabase.instance.client
+            .from('manifest_entries')
+            .update({'boarding_status': 'abordo'})
+            .eq('manifest_id', manifestId)
+            .eq('reservation_id', reservaId)
+            .eq('seat_number', asientoNumero)
+            .select();
+      } else {
+        updateResult = await Supabase.instance.client
+            .from('manifest_entries')
+            .update({'boarding_status': 'abordo'})
+            .eq('manifest_id', manifestId)
+            .eq('passenger_profile_id', reserva['passenger_profile_id'])
+            .select();
       }
 
-      final existingEntries = await Supabase.instance.client
-          .from('manifest_entries')
-          .select('id, boarding_status')
-          .eq('manifest_id', manifestId)
-          .eq('passenger_profile_id', passengerProfileId);
+      debugPrint('[QR Scan] filas actualizadas: ${updateResult.length}');
 
-      final alreadyBoarded = (existingEntries as List).any((entry) {
-        final map = (entry as Map).cast<String, dynamic>();
-        final status = map['boarding_status']?.toString();
-        return status == 'abordo';
-      });
+      if (updateResult.isEmpty) {
+        final perfilInsert = _asMap(reserva['profiles']);
+        final seatsToInsert = asientoNumero != null
+            ? [asientoNumero]
+            : _parseSeats(reserva['seats']);
 
-      if (alreadyBoarded) {
-        setState(() => _resultado = 'Este pasajero ya abordo');
-        await _reactivarEscanner();
-        return;
-      }
-
-      final entriesList = (existingEntries as List).cast<Map<String, dynamic>>();
-      if (entriesList.isEmpty) {
-        setState(() => _resultado = '❌ Pasajero no registrado en el manifiesto');
-        await _reactivarEscanner();
-        return;
-      }
-
-      await Supabase.instance.client
-          .from('manifest_entries')
-          .update({
+        for (final seat in seatsToInsert) {
+          await Supabase.instance.client.from('manifest_entries').insert({
+            'manifest_id': manifestId,
+            'passenger_profile_id': reserva['passenger_profile_id'],
+            'reservation_id': reserva['id'],
+            'first_name': perfilInsert?['first_name'] ?? 'Sin nombre',
+            'last_name': perfilInsert?['last_name'] ?? '',
+            'dni': perfilInsert?['dni'] ?? 'Sin DNI',
+            'phone': perfilInsert?['phone'] ?? 'Sin teléfono',
+            'seat_number': seat,
+            'pickup_text': reserva['pickup_point'] ?? 'Sin punto de recojo',
             'boarding_status': 'abordo',
-            'reservation_id': reservaId,
-          })
-          .eq('manifest_id', manifestId)
-          .eq('passenger_profile_id', passengerProfileId);
+          });
+        }
+      }
 
       ref.invalidate(conductorManifiestoProvider);
       HapticFeedback.mediumImpact();
 
       final perfil = _asMap(reserva['profiles']);
       final nombre = _passengerName(perfil);
-      final asientos = _parseSeats(reserva['seats']).map((s) => '#$s').join(', ');
+      final asientoTexto = asientoNumero != null
+          ? 'Asiento #$asientoNumero'
+          : 'Todos los asientos';
 
-      setState(() {
-        _resultado =
-            'Abordaje confirmado\n$nombre\nAsientos: ${asientos.isEmpty ? '—' : asientos}\nRecojo: ${reserva['pickup_point'] ?? '—'}';
-      });
-
-      await _reactivarEscanner(delay: const Duration(seconds: 3));
+      if (mounted) {
+        setState(() {
+          _resultado = 'Abordaje confirmado\n$nombre\n$asientoTexto';
+        });
+      }
+      unawaited(_reactivarEscanner(delay: const Duration(seconds: 3)));
     } catch (e) {
       if (!mounted) return;
       setState(() => _resultado = 'Error: $e');

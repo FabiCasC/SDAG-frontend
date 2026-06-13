@@ -13,6 +13,8 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/maps/google_directions_service.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 
+import '../providers/viaje_provider.dart';
+
 class ViajeEnCursoScreen extends ConsumerStatefulWidget {
   const ViajeEnCursoScreen({super.key});
 
@@ -85,6 +87,77 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
       _loadingRoute = false;
     });
     _fitCamera();
+  }
+
+  Future<void> _bajarmAqui() async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Bajada anticipada'),
+        content: const Text(
+          'Te estás bajando antes de tiempo.\n\n¡Muchas gracias por viajar con nosotros!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Confirmar bajada'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmado != true) return;
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+
+    final reservaId = GoRouterState.of(context).uri.queryParameters['reservaId']?.trim() ??
+        ref.read(reservaProvider).reservaId;
+
+    if (reservaId == null || reservaId.isEmpty) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se encontró la reserva activa');
+      return;
+    }
+
+    try {
+      await Supabase.instance.client
+          .from('reservations')
+          .update({'status': 'completada'})
+          .eq('id', reservaId);
+
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'has_active_reservation': false})
+          .eq('id', userId);
+
+      final manifestEntries = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('id, boarding_status')
+          .eq('reservation_id', reservaId);
+
+      for (final raw in (manifestEntries as List).cast<Map<String, dynamic>>()) {
+        final boarding = raw['boarding_status']?.toString();
+        if (boarding == 'abordo') continue;
+        await Supabase.instance.client
+            .from('manifest_entries')
+            .update({'boarding_status': 'no_abordo'})
+            .eq('id', raw['id']);
+      }
+
+      ref.read(reservaProvider.notifier).reset();
+      ref.invalidate(viajeProvider);
+
+      if (!mounted) return;
+      context.go(AppRoutes.passengerHome);
+    } catch (_) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se pudo completar el viaje');
+    }
   }
 
   Future<void> _fitCamera() async {
@@ -200,6 +273,11 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
           AppPrimaryButton(
             label: 'Ver en mapa en tiempo real',
             onPressed: () => context.push(AppRoutes.passengerMapaViaje),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppSecondaryButton(
+            label: 'Bajarme aquí',
+            onPressed: () => unawaited(_bajarmAqui()),
           ),
           const SizedBox(height: AppSpacing.sm),
         ],

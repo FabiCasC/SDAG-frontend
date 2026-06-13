@@ -29,7 +29,11 @@ class PagoScreen extends ConsumerStatefulWidget {
 class _PagoScreenState extends ConsumerState<PagoScreen> {
   static const _prefsTypeKey = 'sdag_payment_type';
   static const _prefsLast4Key = 'sdag_payment_last4';
-  static const _prefsTokenKey = 'sdag_payment_token';
+  static const _prefsCardNumberKey = 'sdag_card_number';
+  static const _prefsCardCvvKey = 'sdag_card_cvv';
+  static const _prefsCardExpiryKey = 'sdag_card_expiry';
+  static const _prefsCardHolderKey = 'sdag_card_holder';
+  static const _prefsCardLast4Key = 'sdag_card_last4';
   static const _culqiPublicKeyFallback = 'pk_test_121t6Q3w2iXFBFDF';
 
   final _yapeController = TextEditingController();
@@ -44,12 +48,62 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
   bool _cvvObscure = true;
 
   String? _savedLast4;
-  String? _savedToken;
+  String? _savedCardNumber;
+  String? _savedCardCvv;
+  String? _savedCardExpiry;
+  String? _savedCardHolder;
 
   @override
   void initState() {
     super.initState();
     _loadSaved();
+    void refreshPayButton() {
+      if (mounted) setState(() {});
+    }
+    _yapeController.addListener(refreshPayButton);
+    _cardNumberController.addListener(refreshPayButton);
+    _cardExpiryController.addListener(refreshPayButton);
+    _cardCvvController.addListener(refreshPayButton);
+    _cardHolderController.addListener(refreshPayButton);
+  }
+
+  bool _puedeContinuar(_PaymentOption option) {
+    if (option == _PaymentOption.saved) {
+      return _savedCardNumber != null;
+    }
+    if (option == _PaymentOption.card) {
+      return _cardNumberController.text.replaceAll(' ', '').length == 16 &&
+          _cardCvvController.text.length == 3 &&
+          _cardExpiryController.text.length == 5 &&
+          _cardHolderController.text.trim().length >= 3;
+    }
+    if (option == _PaymentOption.yape) {
+      return _yapeController.text.replaceAll(RegExp(r'\D'), '').length == 9;
+    }
+    return false;
+  }
+
+  Future<void> _persistSavedCard({
+    required String cardNumber,
+    required String cvv,
+    required String expiry,
+    required String holder,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsCardNumberKey, cardNumber);
+    await prefs.setString(_prefsCardCvvKey, cvv);
+    await prefs.setString(_prefsCardExpiryKey, expiry);
+    await prefs.setString(_prefsCardHolderKey, holder);
+    await prefs.setString(_prefsCardLast4Key, cardNumber.substring(cardNumber.length - 4));
+    debugPrint('[Tarjeta] guardada — last4=${cardNumber.substring(cardNumber.length - 4)}');
+    if (!mounted) return;
+    setState(() {
+      _savedCardNumber = cardNumber;
+      _savedCardCvv = cvv;
+      _savedCardExpiry = expiry;
+      _savedCardHolder = holder;
+      _savedLast4 = cardNumber.substring(cardNumber.length - 4);
+    });
   }
 
   @override
@@ -64,35 +118,32 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
 
   Future<void> _loadSaved() async {
     final prefs = await SharedPreferences.getInstance();
-    final type = prefs.getString(_prefsTypeKey);
-    final last4 = prefs.getString(_prefsLast4Key);
-    final token = prefs.getString(_prefsTokenKey);
+    final cardNumber = prefs.getString(_prefsCardNumberKey);
+    final cvv = prefs.getString(_prefsCardCvvKey);
+    final expiry = prefs.getString(_prefsCardExpiryKey);
+    final holder = prefs.getString(_prefsCardHolderKey);
+    final last4 = prefs.getString(_prefsCardLast4Key);
+
+    debugPrint('[Tarjeta] cargada — last4=$last4 hayDatos=${cardNumber != null}');
 
     if (!mounted) return;
     setState(() {
+      _savedCardNumber = cardNumber;
+      _savedCardCvv = cvv;
+      _savedCardExpiry = expiry;
+      _savedCardHolder = holder;
       _savedLast4 = last4;
-      _savedToken = token;
-      if (type != null && last4 != null) {
-        _selectedOption = _PaymentOption.saved;
-        _saveForFuture = true;
-      } else {
-        _selectedOption = _PaymentOption.yape;
-      }
+      _selectedOption = cardNumber != null ? _PaymentOption.saved : _PaymentOption.yape;
+      if (cardNumber != null) _saveForFuture = true;
     });
   }
 
-  Future<void> _persistSaved({
-    required String type,
+  Future<void> _persistSavedYape({
     required String last4,
-    String? token,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsTypeKey, type);
+    await prefs.setString(_prefsTypeKey, 'yape');
     await prefs.setString(_prefsLast4Key, last4);
-    if (token != null && token.isNotEmpty) {
-      await prefs.setString(_prefsTokenKey, token);
-      if (mounted) setState(() => _savedToken = token);
-    }
   }
 
   void _showRetrySnack(String message, VoidCallback onRetry) {
@@ -131,7 +182,7 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     final total = payingAdditional ? reserva.additionalChargeAmount : reserva.montoTotal;
     final title = payingAdditional ? 'Pago adicional' : 'Pago seguro';
 
-    final hasSaved = _savedLast4 != null;
+    final hasSaved = _savedCardNumber != null;
     final option = _selectedOption ?? (hasSaved ? _PaymentOption.saved : _PaymentOption.yape);
 
     return Scaffold(
@@ -325,9 +376,8 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
                 textStyle:
                     Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
               ),
-              onPressed: _paying
-                  ? null
-                  : () async {
+              onPressed: !_paying && _puedeContinuar(option)
+                  ? () async {
                       Future<void> retry() async {
                         if (!mounted) return;
                         ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -340,7 +390,8 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
                         payingAdditional: payingAdditional,
                         onRetry: retry,
                       );
-                    },
+                    }
+                  : null,
               child: _paying
                   ? const SizedBox(
                       width: AppSpacing.lg,
@@ -392,26 +443,42 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
         return;
       }
 
-      final userId = Supabase.instance.client.auth.currentUser?.id;
-      final tripId = ref.read(reservaProvider).conductorSeleccionado?.tripId;
-      if (userId != null && tripId != null && tripId.isNotEmpty) {
-        final existente = await Supabase.instance.client
-            .from('reservations')
-            .select('id')
-            .eq('trip_id', tripId)
-            .eq('passenger_profile_id', userId)
-            .eq('status', 'activa')
-            .maybeSingle();
+      await _persistSavedIfNeeded(option);
 
-        if (existente != null) {
+      if (option == _PaymentOption.saved) {
+        if (_savedCardNumber == null ||
+            _savedCardCvv == null ||
+            _savedCardExpiry == null ||
+            _savedCardHolder == null) {
           if (!mounted) return;
-          AppSnackbars.error(context, 'Ya tienes una reserva activa en este viaje.');
           setState(() => _paying = false);
+          AppSnackbars.error(context, 'No hay tarjeta guardada valida');
           return;
         }
+        try {
+          final reservaId = await _payWithCulqi(ref, usingSavedCard: true);
+          ref.read(reservaProvider.notifier).markPaid(reservaId: reservaId);
+          if (!mounted) return;
+          setState(() => _paying = false);
+          context.go('${AppRoutes.passengerConfirmacion}?reservaId=$reservaId');
+        } catch (e) {
+          if (!mounted) return;
+          setState(() => _paying = false);
+          debugPrint('[PAY ERROR] ${e.runtimeType}: $e');
+          final message = switch (e) {
+            AuthException(:final message) => message,
+            FunctionException(:final details, :final reasonPhrase) =>
+              details?.toString() ?? reasonPhrase ?? 'Error en el pago.',
+            _ => 'Error: ${e.toString()}',
+          };
+          if (onRetry != null) {
+            _showRetrySnack(message, () => onRetry());
+          } else {
+            AppSnackbars.error(context, message);
+          }
+        }
+        return;
       }
-
-      await _persistSavedIfNeeded(option);
 
       if (option == _PaymentOption.yape) {
         final digits = _yapeController.text.replaceAll(RegExp(r'\D'), '');
@@ -430,19 +497,8 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
         return;
       }
 
-      if (option == _PaymentOption.saved || option == _PaymentOption.card) {
-        if (option == _PaymentOption.saved &&
-            (_savedToken == null || _savedToken!.isEmpty)) {
-          if (!mounted) return;
-          setState(() => _paying = false);
-          AppSnackbars.error(
-            context,
-            'No hay tarjeta guardada válida. Ingresa los datos en la opción Tarjeta.',
-          );
-          return;
-        }
-
-        final reservaId = await _payWithCulqi(ref);
+      if (option == _PaymentOption.card) {
+        final reservaId = await _payWithCulqi(ref, usingSavedCard: false);
         ref.read(reservaProvider.notifier).markPaid(reservaId: reservaId);
 
         if (!mounted) return;
@@ -453,7 +509,7 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
 
       if (!mounted) return;
       setState(() => _paying = false);
-      AppSnackbars.error(context, 'Selecciona un método de pago válido.');
+      AppSnackbars.error(context, 'Selecciona un metodo de pago valido.');
     } catch (e) {
       if (!mounted) return;
       setState(() => _paying = false);
@@ -472,7 +528,7 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     }
   }
 
-  Future<String> _payWithCulqi(WidgetRef ref) async {
+  Future<String> _payWithCulqi(WidgetRef ref, {required bool usingSavedCard}) async {
     final user = Supabase.instance.client.auth.currentUser;
     final email = (user?.email ?? ref.read(passengerSessionProvider).account?.email ?? '').trim();
     final userId = user?.id ?? ref.read(passengerSessionProvider).account?.id;
@@ -487,75 +543,88 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       throw const AuthException('Reserva inválida');
     }
 
-    final String token;
-    final usingSavedCard =
-        _selectedOption == _PaymentOption.saved && _savedToken != null && _savedToken!.isNotEmpty;
+    final String cardNumberDigits;
+    final String cvv;
+    final int mm;
+    final int yy;
+    final String holder;
+    final String expiryForPersist;
 
     if (usingSavedCard) {
-      token = _savedToken!;
-      debugPrint('[Culqi] Usando token de tarjeta guardada');
-    } else {
-      final cardNumberDigits = _cardNumberController.text.replaceAll(RegExp(r'\D'), '');
-      final cvv = _cardCvvController.text.replaceAll(RegExp(r'\D'), '');
-      final expiry = _cardExpiryController.text.trim();
-      final holder = _cardHolderController.text.trim();
-
-      final (mm, yy) = _parseExpiry(expiry);
-      if (cardNumberDigits.length != 16) {
-        throw const AuthException('Número de tarjeta inválido');
+      if (_savedCardNumber == null ||
+          _savedCardCvv == null ||
+          _savedCardExpiry == null ||
+          _savedCardHolder == null) {
+        throw const AuthException('No hay tarjeta guardada disponible');
       }
-      if (cvv.length != 3) {
-        throw const AuthException('CVV inválido');
-      }
-      if (mm < 1 || mm > 12) {
-        throw const AuthException('Fecha de vencimiento inválida');
-      }
-      if (yy < 0 || yy > 99) {
-        throw const AuthException('Fecha de vencimiento inválida');
-      }
-      if (holder.length < 3) {
-        throw const AuthException('Nombre del titular inválido');
-      }
-
-      final publicKey = (dotenv.env['CULQI_PUBLIC_KEY'] ?? _culqiPublicKeyFallback).trim();
-      if (publicKey.isEmpty) {
-        throw const AuthException('Falta configurar CULQI_PUBLIC_KEY');
-      }
-
-      final tokenRes = await http.post(
-        Uri.parse('https://secure.culqi.com/v2/tokens'),
-        headers: {
-          'Authorization': 'Bearer $publicKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'card_number': cardNumberDigits,
-          'cvv': cvv,
-          'expiration_month': mm,
-          'expiration_year': yy < 100 ? 2000 + yy : yy,
-          'email': email,
-        }),
+      cardNumberDigits = _savedCardNumber!;
+      cvv = _savedCardCvv!;
+      final (parsedMm, parsedYy) = _parseExpiry(_savedCardExpiry!);
+      mm = parsedMm;
+      yy = parsedYy;
+      holder = _savedCardHolder!;
+      expiryForPersist = _savedCardExpiry!;
+      debugPrint(
+        '[Pago] usando tarjeta guardada last4=${cardNumberDigits.substring(cardNumberDigits.length - 4)}',
       );
+    } else {
+      cardNumberDigits = _cardNumberController.text.replaceAll(RegExp(r'\D'), '');
+      cvv = _cardCvvController.text.replaceAll(RegExp(r'\D'), '');
+      expiryForPersist = _cardExpiryController.text.trim();
+      final (parsedMm, parsedYy) = _parseExpiry(expiryForPersist);
+      mm = parsedMm;
+      yy = parsedYy;
+      holder = _cardHolderController.text.trim();
+    }
 
-      final tokenJson = _tryDecodeJson(tokenRes.body);
-      if (tokenRes.statusCode != 201) {
-        debugPrint('[Culqi][token] status=${tokenRes.statusCode} body=${tokenRes.body}');
-        final msg = tokenJson?['user_message']?.toString() ??
-            tokenJson?['merchant_message']?.toString() ??
-            tokenJson?['message']?.toString() ??
-            'Tarjeta rechazada. Verifica los datos e intenta de nuevo.';
-        throw AuthException(msg);
-      }
-      final newToken = tokenJson?['id']?.toString();
-      if (newToken == null || newToken.isEmpty) {
-        throw const AuthException('Token inválido');
-      }
-      token = newToken;
+    if (cardNumberDigits.length != 16) {
+      throw const AuthException('Número de tarjeta inválido');
+    }
+    if (cvv.length != 3) {
+      throw const AuthException('CVV inválido');
+    }
+    if (mm < 1 || mm > 12) {
+      throw const AuthException('Fecha de vencimiento inválida');
+    }
+    if (yy < 0 || yy > 99) {
+      throw const AuthException('Fecha de vencimiento inválida');
+    }
+    if (holder.length < 3) {
+      throw const AuthException('Nombre del titular inválido');
+    }
 
-      if (_saveForFuture) {
-        final last4 = cardNumberDigits.substring(cardNumberDigits.length - 4);
-        await _persistSaved(type: 'card', last4: last4, token: token);
-      }
+    final publicKey = (dotenv.env['CULQI_PUBLIC_KEY'] ?? _culqiPublicKeyFallback).trim();
+    if (publicKey.isEmpty) {
+      throw const AuthException('Falta configurar CULQI_PUBLIC_KEY');
+    }
+
+    final tokenRes = await http.post(
+      Uri.parse('https://secure.culqi.com/v2/tokens'),
+      headers: {
+        'Authorization': 'Bearer $publicKey',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'card_number': cardNumberDigits,
+        'cvv': cvv,
+        'expiration_month': mm,
+        'expiration_year': yy < 100 ? 2000 + yy : yy,
+        'email': email,
+      }),
+    );
+
+    final tokenJson = _tryDecodeJson(tokenRes.body);
+    if (tokenRes.statusCode != 201) {
+      debugPrint('[Culqi][token] status=${tokenRes.statusCode} body=${tokenRes.body}');
+      final msg = tokenJson?['user_message']?.toString() ??
+          tokenJson?['merchant_message']?.toString() ??
+          tokenJson?['message']?.toString() ??
+          'Tarjeta rechazada. Verifica los datos e intenta de nuevo.';
+      throw AuthException(msg);
+    }
+    final token = tokenJson?['id']?.toString();
+    if (token == null || token.isEmpty) {
+      throw const AuthException('Token inválido');
     }
 
     final amountCents = seats.length * 1500;
@@ -595,6 +664,15 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       throw const AuthException('Cargo fallido');
     }
 
+    if (!usingSavedCard && _saveForFuture) {
+      await _persistSavedCard(
+        cardNumber: cardNumberDigits,
+        cvv: cvv,
+        expiry: expiryForPersist,
+        holder: holder,
+      );
+    }
+
     return _insertReservationAndPayment(
       ref: ref,
       userId: userId,
@@ -622,21 +700,6 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     final tripId = driver.tripId;
     if (tripId.trim().isEmpty) {
       throw const AuthException('No se encontró el viaje del conductor');
-    }
-
-    final existente = await Supabase.instance.client
-        .from('reservations')
-        .select('id')
-        .eq('trip_id', tripId)
-        .eq('passenger_profile_id', userId)
-        .eq('status', 'activa')
-        .maybeSingle();
-
-    if (existente != null) {
-      final existingId = existente['id']?.toString();
-      if (existingId != null && existingId.isNotEmpty) {
-        return existingId;
-      }
     }
 
     final row = await Supabase.instance.client.from('reservations').insert({
@@ -706,9 +769,8 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
     if (option == _PaymentOption.yape) {
       final digits = _yapeController.text.replaceAll(RegExp(r'\D'), '');
       final last4 = digits.length >= 4 ? digits.substring(digits.length - 4) : digits;
-      await _persistSaved(type: 'yape', last4: last4);
+      await _persistSavedYape(last4: last4);
     }
-    // Tarjeta nueva: token y last4 se guardan en _payWithCulqi tras tokenizar.
   }
 }
 

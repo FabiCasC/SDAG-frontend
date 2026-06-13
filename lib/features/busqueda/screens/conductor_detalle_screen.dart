@@ -187,29 +187,7 @@ class ConductorDetalleScreen extends ConsumerWidget {
                           ),
                           textStyle: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                         ),
-                        onPressed: () async {
-                          final yaReservo = await _verificarReservaExistente(driver.tripId);
-                          if (!context.mounted) return;
-                          if (yaReservo) {
-                            await showDialog<void>(
-                              context: context,
-                              builder: (dialogContext) => AlertDialog(
-                                title: const Text('Ya tienes una reserva'),
-                                content: const Text(
-                                  'Ya tienes una reserva activa en este viaje. '
-                                  'No puedes reservar dos veces en el mismo viaje.',
-                                ),
-                                actions: [
-                                  FilledButton(
-                                    onPressed: () => Navigator.pop(dialogContext),
-                                    child: const Text('Entendido'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            return;
-                          }
-
+                        onPressed: () {
                           ref.read(reservaProvider.notifier).startWithDriver(driver);
                           context.push(
                             '${AppRoutes.passengerSeatMap}?id=${driver.driverId}&tripId=${driver.tripId}',
@@ -234,21 +212,6 @@ class ConductorDetalleScreen extends ConsumerWidget {
     if (parts.length == 1) return parts.first.substring(0, parts.first.length >= 2 ? 2 : 1).toUpperCase();
     return ('${parts[0][0]}${parts[1][0]}').toUpperCase();
   }
-}
-
-Future<bool> _verificarReservaExistente(String tripId) async {
-  final userId = Supabase.instance.client.auth.currentUser?.id;
-  if (userId == null) return false;
-
-  final existente = await Supabase.instance.client
-      .from('reservations')
-      .select('id')
-      .eq('trip_id', tripId)
-      .eq('passenger_profile_id', userId)
-      .eq('status', 'activa')
-      .maybeSingle();
-
-  return existente != null;
 }
 
 final driverTripDetailProvider =

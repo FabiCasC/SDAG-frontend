@@ -95,7 +95,6 @@ class HomeScreen extends ConsumerWidget {
                 AppSnackbars.success(context, 'Punto de recojo seleccionado');
               },
               onOpenNews: () => context.go(AppRoutes.passengerNews),
-              onOpenReservationDetail: () => context.go(AppRoutes.passengerReservaActiva),
             ),
           );
       }
@@ -172,7 +171,6 @@ class _PassengerHomeTab extends ConsumerStatefulWidget {
     required this.onSelectRoute,
     required this.onSelectFavoritePickup,
     required this.onOpenNews,
-    required this.onOpenReservationDetail,
   });
 
   final String name;
@@ -182,7 +180,6 @@ class _PassengerHomeTab extends ConsumerStatefulWidget {
   final ValueChanged<String> onSelectRoute;
   final ValueChanged<String> onSelectFavoritePickup;
   final VoidCallback onOpenNews;
-  final VoidCallback onOpenReservationDetail;
 
   @override
   ConsumerState<_PassengerHomeTab> createState() => _PassengerHomeTabState();
@@ -190,17 +187,17 @@ class _PassengerHomeTab extends ConsumerStatefulWidget {
 
 class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
   StreamSubscription<List<Map<String, dynamic>>>? _reservaSub;
-  Map<String, dynamic>? _reservaActiva;
+  List<Map<String, dynamic>> _reservasActivas = const [];
   bool _loadingReserva = true;
 
   @override
   void initState() {
     super.initState();
-    _cargarReservaActiva();
-    _suscribirReservaActiva();
+    _cargarReservasActivas();
+    _suscribirReservasActivas();
   }
 
-  Future<void> _cargarReservaActiva() async {
+  Future<void> _cargarReservasActivas() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) {
       if (mounted) setState(() => _loadingReserva = false);
@@ -208,10 +205,10 @@ class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
     }
 
     try {
-      final reserva = await Supabase.instance.client
+      final reservas = await Supabase.instance.client
           .from('reservations')
           .select('''
-            id, seats, pickup_point, status, amount,
+            id, seats, pickup_point, status, amount, created_at,
             trips(
               id, status, scheduled_departure_at,
               routes(name, from_label, to_label),
@@ -220,25 +217,23 @@ class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
           ''')
           .eq('passenger_profile_id', userId)
           .eq('status', 'activa')
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
+          .order('created_at', ascending: false);
+
+      final lista = (reservas as List).cast<Map<String, dynamic>>();
+      debugPrint('[Home] reservas activas encontradas: ${lista.length}');
 
       if (!mounted) return;
       setState(() {
-        _reservaActiva = reserva;
+        _reservasActivas = lista;
         _loadingReserva = false;
       });
-      if (reserva != null) {
-        ref.read(reservaProvider.notifier).hydrateFromActiveReservation(reserva);
-      }
     } catch (_) {
       if (!mounted) return;
       setState(() => _loadingReserva = false);
     }
   }
 
-  void _suscribirReservaActiva() {
+  void _suscribirReservasActivas() {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
 
@@ -247,45 +242,17 @@ class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
         .from('reservations')
         .stream(primaryKey: ['id'])
         .eq('passenger_profile_id', userId)
-        .listen((data) async {
-      final activas = data.where((r) => r['status']?.toString() == 'activa').toList();
-      if (!mounted) return;
+        .listen((_) => unawaited(_cargarReservasActivas()));
+  }
 
-      if (activas.isEmpty) {
-        setState(() => _reservaActiva = null);
-        return;
-      }
-
-      activas.sort((a, b) {
-        final aDate = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final bDate = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return bDate.compareTo(aDate);
-      });
-
-      final id = activas.first['id']?.toString();
-      if (id == null || id.isEmpty) return;
-
-      try {
-        final full = await Supabase.instance.client
-            .from('reservations')
-            .select('''
-              id, seats, pickup_point, status, amount,
-              trips(
-                id, status, scheduled_departure_at,
-                routes(name, from_label, to_label),
-                drivers(id, plate, profiles(name))
-              )
-            ''')
-            .eq('id', id)
-            .maybeSingle();
-
-        if (!mounted) return;
-        setState(() => _reservaActiva = full);
-        if (full != null) {
-          ref.read(reservaProvider.notifier).hydrateFromActiveReservation(full);
-        }
-      } catch (_) {}
-    });
+  void _abrirReserva(Map<String, dynamic> reserva) {
+    ref.read(reservaProvider.notifier).hydrateFromActiveReservation(reserva);
+    final reservaId = reserva['id']?.toString();
+    if (reservaId == null || reservaId.isEmpty) {
+      context.go(AppRoutes.passengerReservaActiva);
+      return;
+    }
+    context.go('${AppRoutes.passengerReservaActiva}?reservaId=$reservaId');
   }
 
   @override
@@ -294,10 +261,7 @@ class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
     super.dispose();
   }
 
-  _ActiveReservationView? _parseReservaActiva() {
-    final row = _reservaActiva;
-    if (row == null) return null;
-
+  _ActiveReservationView? _parseReserva(Map<String, dynamic> row) {
     final tripRaw = row['trips'];
     final trip = tripRaw is Map<String, dynamic>
         ? tripRaw
@@ -328,6 +292,7 @@ class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
     seats.sort();
 
     return _ActiveReservationView(
+      reservaId: row['id']?.toString() ?? '',
       driverName: profile?['name']?.toString() ?? 'Conductor',
       plate: driver?['plate']?.toString() ?? '—',
       seats: seats,
@@ -338,7 +303,6 @@ class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final active = _parseReservaActiva();
 
     return Column(
       children: [
@@ -442,15 +406,29 @@ class _PassengerHomeTabState extends ConsumerState<_PassengerHomeTab> {
                   padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
                   child: LinearProgressIndicator(),
                 )
-              else if (active != null) ...[
+              else if (_reservasActivas.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.lg),
-                _ActiveReservationCard(
-                  driverName: active.driverName,
-                  plate: active.plate,
-                  seats: active.seats,
-                  pickup: active.pickup,
-                  onViewDetails: widget.onOpenReservationDetail,
+                Text(
+                  'Reservas activas',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
                 ),
+                const SizedBox(height: AppSpacing.md),
+                ..._reservasActivas.map((reserva) {
+                  final view = _parseReserva(reserva);
+                  if (view == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: _ActiveReservationCard(
+                      driverName: view.driverName,
+                      plate: view.plate,
+                      seats: view.seats,
+                      pickup: view.pickup,
+                      onViewDetails: () => _abrirReserva(reserva),
+                    ),
+                  );
+                }),
               ],
               const SizedBox(height: AppSpacing.lg),
               Row(
@@ -701,12 +679,14 @@ class _RouteCard extends StatelessWidget {
 
 class _ActiveReservationView {
   const _ActiveReservationView({
+    required this.reservaId,
     required this.driverName,
     required this.plate,
     required this.seats,
     required this.pickup,
   });
 
+  final String reservaId;
   final String driverName;
   final String plate;
   final List<int> seats;
@@ -770,7 +750,7 @@ class _ActiveReservationCard extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.md),
             AppSecondaryButton(
-              label: 'Ver mi reserva',
+              label: 'Ver QR / Ver reserva',
               onPressed: onViewDetails,
             ),
           ],

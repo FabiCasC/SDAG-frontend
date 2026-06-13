@@ -1,0 +1,41 @@
+name: Build & Deploy APK to Firebase
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v3
+
+      - name: Configurar Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Crear env.json
+        run: echo '${{ secrets.ENV_JSON }}' > env.json
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Build APK release
+        run: flutter build apk --release
+
+      - name: Subir a Firebase App Distribution
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_APP_ID }}
+          token: ${{ secrets.FIREBASE_TOKEN }}
+          file: build/app/outputs/flutter-apk/app-release.apk
+          releaseNotes: "Build automático - ${{ github.sha }}"

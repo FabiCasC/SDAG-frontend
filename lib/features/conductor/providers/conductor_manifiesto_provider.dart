@@ -9,6 +9,7 @@ enum ManifiestoEstadoPasajero {
   pendiente,
   subio,
   noSubio,
+  cancelado,
 }
 
 enum ConductorManifiestoLoadStatus {
@@ -29,6 +30,7 @@ class ManifiestoItem {
     required this.asiento,
     required this.puntoRecojo,
     required this.estado,
+    required this.reservationStatus,
   });
 
   final String id;
@@ -39,6 +41,7 @@ class ManifiestoItem {
   final int asiento;
   final String puntoRecojo;
   final ManifiestoEstadoPasajero estado;
+  final String reservationStatus;
 
   String get nombreCompleto => '$nombres $apellidos'.trim();
 
@@ -51,6 +54,7 @@ class ManifiestoItem {
     int? asiento,
     String? puntoRecojo,
     ManifiestoEstadoPasajero? estado,
+    String? reservationStatus,
   }) {
     return ManifiestoItem(
       id: id ?? this.id,
@@ -61,6 +65,7 @@ class ManifiestoItem {
       asiento: asiento ?? this.asiento,
       puntoRecojo: puntoRecojo ?? this.puntoRecojo,
       estado: estado ?? this.estado,
+      reservationStatus: reservationStatus ?? this.reservationStatus,
     );
   }
 
@@ -74,6 +79,7 @@ class ManifiestoItem {
       'asiento': asiento,
       'puntoRecojo': puntoRecojo,
       'estado': estado.name,
+      'reservationStatus': reservationStatus,
     };
   }
 
@@ -86,6 +92,7 @@ class ManifiestoItem {
     final asiento = json['asiento'];
     final puntoRecojo = json['puntoRecojo'] as String?;
     final estadoRaw = json['estado'] as String?;
+    final reservationStatus = json['reservationStatus'] as String? ?? 'activa';
     if (id == null ||
         nombres == null ||
         apellidos == null ||
@@ -110,6 +117,7 @@ class ManifiestoItem {
       asiento: asiento,
       puntoRecojo: puntoRecojo,
       estado: estado,
+      reservationStatus: reservationStatus,
     );
   }
 }
@@ -329,11 +337,11 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
       final reservasRaw = await Supabase.instance.client
           .from('reservations')
           .select('''
-            id, seats, pickup_point, status,
+            id, seats, pickup_point, status, passenger_profile_id,
             profiles:passenger_profile_id(name, first_name, last_name, dni, phone)
           ''')
           .eq('trip_id', tripId)
-          .eq('status', 'activa')
+          .inFilter('status', ['activa', 'completada', 'cancelada'])
           .order('created_at');
 
       final reservas = (reservasRaw as List).cast<Map<String, dynamic>>();
@@ -385,6 +393,7 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
         final dni = profile['dni']?.toString().trim();
         final phone = profile['phone']?.toString().trim();
         final pickup = reserva['pickup_point']?.toString().trim() ?? '—';
+        final reservationStatus = reserva['status']?.toString() ?? 'activa';
         final passengerId = profile['id']?.toString() ??
             reserva['passenger_profile_id']?.toString() ??
             reservationId;
@@ -416,7 +425,11 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
               telefono: (phone == null || phone.isEmpty) ? '—' : phone,
               asiento: seat,
               puntoRecojo: pickup,
-              estado: _boardingEstado(boarding),
+              estado: _resolveEstado(
+                reservationStatus: reservationStatus,
+                boarding: boarding,
+              ),
+              reservationStatus: reservationStatus,
             ),
           );
         }
@@ -461,11 +474,18 @@ class ConductorManifiestoController extends StateNotifier<ConductorManifiestoSta
     return out;
   }
 
-  ManifiestoEstadoPasajero _boardingEstado(dynamic boarding) {
+  ManifiestoEstadoPasajero _resolveEstado({
+    required String reservationStatus,
+    required dynamic boarding,
+  }) {
+    if (reservationStatus == 'cancelada') return ManifiestoEstadoPasajero.cancelado;
+    if (reservationStatus == 'completada') return ManifiestoEstadoPasajero.subio;
+
     final value = boarding?.toString() ?? '';
     return switch (value) {
       'abordo' => ManifiestoEstadoPasajero.subio,
       'no_abordo' => ManifiestoEstadoPasajero.noSubio,
+      'cancelado' => ManifiestoEstadoPasajero.cancelado,
       _ => ManifiestoEstadoPasajero.pendiente,
     };
   }

@@ -112,6 +112,9 @@ class AdminAuthController extends StateNotifier<AdminAuthState> {
 
     try {
       final res = await Supabase.instance.client.auth.signInWithPassword(email: e, password: p);
+      if (res.session != null) {
+        await Supabase.instance.client.auth.signOut(scope: SignOutScope.others);
+      }
       final user = res.user ?? Supabase.instance.client.auth.currentUser;
       if (user == null) return AdminLoginResult.invalidCredentials;
 

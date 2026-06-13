@@ -32,7 +32,7 @@ begin
     create type public.news_type as enum ('incidencia','novedad');
   end if;
   if not exists (select 1 from pg_type where typname = 'boarding_status') then
-    create type public.boarding_status as enum ('pendiente','abordo','no_abordo');
+    create type public.boarding_status as enum ('pendiente','abordo','no_abordo','cancelado');
   end if;
   if not exists (select 1 from pg_type where typname = 'commission_request_status') then
     create type public.commission_request_status as enum ('sin_solicitud','pendiente','confirmado_admin','recibido_conductor');

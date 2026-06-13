@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
 import '../../../app/router/app_routes.dart';
@@ -23,6 +26,8 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
   bool _showCheck = false;
   int? _etaMinutos;
   bool _etaLoading = true;
+  bool _boardingSetupDone = false;
+  StreamSubscription<List<Map<String, dynamic>>>? _boardingSubscription;
 
   @override
   void initState() {
@@ -31,7 +36,71 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
       if (!mounted) return;
       setState(() => _showCheck = true);
       _calcularEtaInicial();
+      _setupAbordajeRealtime();
     });
+  }
+
+  void _setupAbordajeRealtime() {
+    if (_boardingSetupDone) return;
+    final reserva = ref.read(reservaProvider);
+    final reservaId = reserva.reservaId;
+    if (reservaId == null || reservaId.isEmpty) return;
+    _boardingSetupDone = true;
+    unawaited(_verificarAbordajeInicial(reservaId));
+    _suscribirAbordaje(reservaId);
+  }
+
+  Future<void> _verificarAbordajeInicial(String reservaId) async {
+    try {
+      final entry = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('boarding_status')
+          .eq('reservation_id', reservaId)
+          .limit(1)
+          .maybeSingle();
+      debugPrint('[Pasajero] verificación inicial: $entry');
+      if (entry != null && entry['boarding_status']?.toString() == 'abordo' && mounted) {
+        _navegarAViajeEnCurso(reservaId);
+      }
+    } catch (e) {
+      debugPrint('[Pasajero] Error verificando abordaje inicial: $e');
+    }
+  }
+
+  void _suscribirAbordaje(String reservaId) {
+    _boardingSubscription?.cancel();
+    _boardingSubscription = Supabase.instance.client
+        .from('manifest_entries')
+        .stream(primaryKey: ['id'])
+        .eq('reservation_id', reservaId)
+        .listen((data) {
+      debugPrint('[Pasajero] manifest_entries stream: $data');
+      if (!mounted || data.isEmpty) return;
+      final status = data[0]['boarding_status']?.toString();
+      debugPrint('[Pasajero] boarding_status=$status');
+      if (status == 'abordo') {
+        _navegarAViajeEnCurso(reservaId);
+      }
+    });
+  }
+
+  void _navegarAViajeEnCurso(String reservaId) {
+    _boardingSubscription?.cancel();
+    final reserva = ref.read(reservaProvider);
+    final tripId = reserva.conductorSeleccionado?.tripId ?? '';
+    final driverId = reserva.conductorSeleccionado?.driverId ?? '';
+    final params = <String>[
+      'reservaId=$reservaId',
+      if (tripId.isNotEmpty) 'tripId=$tripId',
+      if (driverId.isNotEmpty) 'driverId=$driverId',
+    ].join('&');
+    context.go('${AppRoutes.passengerViajeEnCurso}?$params');
+  }
+
+  @override
+  void dispose() {
+    _boardingSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _calcularEtaInicial() async {
@@ -84,26 +153,7 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
       );
     }
 
-    final titularId = session.account?.id ?? 'titular';
     final titularName = _displayName(session.account?.name, fallback: 'Titular');
-
-    final passengers = <_QrPassenger>[
-      _QrPassenger(
-        passengerId: titularId,
-        name: titularName,
-        seatNumber: seats.first,
-        isCompanion: false,
-      ),
-      ...seats.skip(1).map((seat) {
-        final a = reserva.acompanantes[seat];
-        return _QrPassenger(
-          passengerId: 'acom_$seat',
-          name: _displayName(a?.fullName, fallback: 'Acompañante'),
-          seatNumber: seat,
-          isCompanion: true,
-        );
-      }),
-    ];
 
     return Scaffold(
       backgroundColor: AppColors.backgroundLight,
@@ -213,13 +263,29 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
-            ...passengers.map((p) => Padding(
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: seats.length,
+              itemBuilder: (context, index) {
+                final asiento = seats[index];
+                final qrData = '$reservaId|$asiento';
+                final companion = index > 0 ? reserva.acompanantes[asiento] : null;
+                final nombre = index == 0
+                    ? titularName
+                    : _displayName(companion?.fullName, fallback: 'Acompanante');
+                return Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                  child: _QrCard(
+                  child: _QrSeatCard(
                     reservaId: reservaId,
-                    passenger: p,
+                    seatNumber: asiento,
+                    passengerName: nombre,
+                    qrData: qrData,
+                    isCompanion: index > 0,
                   ),
-                )),
+                );
+              },
+            ),
             const SizedBox(height: AppSpacing.lg),
             AppPrimaryButton(
               label: 'Ver mi reserva activa',
@@ -242,29 +308,25 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
   }
 }
 
-class _QrPassenger {
-  const _QrPassenger({
-    required this.passengerId,
-    required this.name,
+class _QrSeatCard extends StatelessWidget {
+  const _QrSeatCard({
+    required this.reservaId,
     required this.seatNumber,
+    required this.passengerName,
+    required this.qrData,
     required this.isCompanion,
   });
 
-  final String passengerId;
-  final String name;
-  final int seatNumber;
-  final bool isCompanion;
-}
-
-class _QrCard extends StatelessWidget {
-  const _QrCard({required this.reservaId, required this.passenger});
-
   final String reservaId;
-  final _QrPassenger passenger;
+  final int seatNumber;
+  final String passengerName;
+  final String qrData;
+  final bool isCompanion;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    debugPrint('[QR Generado] data="$qrData"');
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AppColors.white,
@@ -283,28 +345,31 @@ class _QrCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Text(
+              'Asiento #$seatNumber',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
             Center(
               child: QrImageView(
-                data: reservaId,
+                data: qrData,
                 version: QrVersions.auto,
-                size: 180,
+                size: 180.0,
                 backgroundColor: AppColors.white,
               ),
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
-              passenger.name,
+              passengerName,
               textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: AppColors.textPrimary,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: AppColors.textSecondary,
                 fontWeight: FontWeight.w700,
               ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              'Asiento #${passenger.seatNumber}',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             const SizedBox(height: AppSpacing.md),
             Align(
@@ -324,12 +389,12 @@ class _QrCard extends StatelessWidget {
                 ),
               ),
             ),
-            if (passenger.isCompanion) ...[
+            if (isCompanion) ...[
               const SizedBox(height: AppSpacing.md),
               AppSecondaryButton(
                 label: 'Compartir QR',
                 onPressed: () {
-                  AppSnackbars.info(context, 'QR compartido con ${passenger.name}');
+                  AppSnackbars.info(context, 'QR compartido con $passengerName');
                 },
               ),
             ],

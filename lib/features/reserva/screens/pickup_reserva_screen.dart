@@ -104,6 +104,59 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
     });
   }
 
+  Future<void> _useCurrentLocation() async {
+    setState(() => _buscando = true);
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+      final key = googleMapsRestApiKey();
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+        '?latlng=${position.latitude},${position.longitude}'
+        '&language=es'
+        '&key=$key',
+      );
+      final response = await http.get(url);
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['status'] == 'OK' && (data['results'] as List).isNotEmpty) {
+        final direccion = data['results'][0]['formatted_address'].toString();
+        final coords = LatLng(position.latitude, position.longitude);
+        await _applySelection(address: direccion, coords: coords);
+      } else if (mounted) {
+        AppSnackbars.error(context, 'No se pudo obtener tu ubicacion');
+      }
+    } catch (_) {
+      if (mounted) {
+        AppSnackbars.error(context, 'No se pudo obtener tu ubicacion');
+      }
+    } finally {
+      if (mounted) setState(() => _buscando = false);
+    }
+  }
+
+  Future<void> _onMapTap(LatLng coords) async {
+    setState(() => _buscando = true);
+    try {
+      final key = googleMapsRestApiKey();
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+        '?latlng=${coords.latitude},${coords.longitude}'
+        '&language=es'
+        '&key=$key',
+      );
+      final res = await http.get(url);
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (data['status'] == 'OK' && (data['results'] as List).isNotEmpty) {
+        final direccion = data['results'][0]['formatted_address'].toString();
+        await _applySelection(address: direccion, coords: coords);
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _buscando = false);
+    }
+  }
+
   Future<void> _applySelection({
     required String address,
     required LatLng coords,
@@ -573,6 +626,12 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                   ),
                 _buildSearchField(),
                 const SizedBox(height: AppSpacing.sm),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.my_location_rounded),
+                  label: const Text('Usar mi ubicacion actual'),
+                  onPressed: _buscando || _resolvingGeo ? null : () => unawaited(_useCurrentLocation()),
+                ),
+                const SizedBox(height: AppSpacing.sm),
                 _buildQuickPickups(selected),
               ],
             ),
@@ -593,6 +652,7 @@ class _PickupReservaScreenState extends ConsumerState<PickupReservaScreen> {
                 myLocationEnabled: true,
                 myLocationButtonEnabled: true,
                 markers: _markers,
+                onTap: (coords) => unawaited(_onMapTap(coords)),
                 gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
                   Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
                 },

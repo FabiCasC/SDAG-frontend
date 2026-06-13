@@ -224,6 +224,7 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
   }
 
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
+  bool _autoStartInFlight = false;
 
   Future<void> refresh() async {
     await _cancelReservationSubscription();
@@ -357,6 +358,23 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
     try {
       state = state.copyWith(processingAction: true, clearErrorMessage: true);
 
+      final manifest = await Supabase.instance.client
+          .from('manifests')
+          .select('id')
+          .eq('trip_id', state.tripId!)
+          .maybeSingle();
+
+      if (manifest != null) {
+        final manifestId = manifest['id']?.toString();
+        if (manifestId != null && manifestId.isNotEmpty) {
+          await Supabase.instance.client
+              .from('manifest_entries')
+              .update({'boarding_status': 'no_abordo'})
+              .eq('manifest_id', manifestId)
+              .eq('boarding_status', 'pendiente');
+        }
+      }
+
       await Supabase.instance.client
           .from('trips')
           .update({
@@ -432,6 +450,14 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
       clearErrorMessage: true,
     );
 
+    if (tripStatus == 'esperando') {
+      await _verificarInicioAutomatico(
+        tripId: tripId ?? '',
+        capacidad: totalSeats,
+        driverId: driverId,
+      );
+    }
+
     if (subscribeRealtime && tripId != null && tripId.isNotEmpty) {
       _subscription = Supabase.instance.client
           .from('reservations')
@@ -445,10 +471,63 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
             asientosOcupados: seats,
             pasajerosViaje: reservasActualizadas,
           );
+          await _verificarInicioAutomatico(
+            tripId: tripId,
+            capacidad: state.totalSeats,
+            driverId: driverId,
+          );
         } catch (_) {
           _toast(ConductorToastType.error, 'No se pudo actualizar la lista de pasajeros.');
         }
       });
+    }
+  }
+
+  Future<void> _verificarInicioAutomatico({
+    required String tripId,
+    required int capacidad,
+    required String driverId,
+  }) async {
+    if (_autoStartInFlight || tripId.isEmpty || capacidad <= 0) return;
+    if (state.estadoViaje != ConductorEstadoViaje.esperando) return;
+
+    try {
+      final reservas = await Supabase.instance.client
+          .from('reservations')
+          .select('seats')
+          .eq('trip_id', tripId)
+          .inFilter('status', ['activa', 'completada']);
+
+      final asientosOcupados = (reservas as List)
+          .expand((r) => (r['seats'] as List? ?? const []))
+          .length;
+
+      if (asientosOcupados < capacidad) return;
+
+      _autoStartInFlight = true;
+
+      await Supabase.instance.client.from('trips').update({
+        'status': 'en_ruta',
+        'started_at': DateTime.now().toIso8601String(),
+      }).eq('id', tripId);
+
+      await Supabase.instance.client
+          .from('drivers')
+          .update({'estado': 'en_ruta'})
+          .eq('id', driverId);
+
+      state = state.copyWith(
+        estadoViaje: ConductorEstadoViaje.enRuta,
+        startedAt: DateTime.now(),
+      );
+      _toast(
+        ConductorToastType.success,
+        'Carro lleno. Viaje iniciado automaticamente.',
+      );
+    } catch (_) {
+      _toast(ConductorToastType.error, 'No se pudo iniciar el viaje automaticamente.');
+    } finally {
+      _autoStartInFlight = false;
     }
   }
 
@@ -462,7 +541,7 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
           profiles:passenger_profile_id(id, name, first_name, last_name, phone, dni)
         ''')
         .eq('trip_id', tripId)
-        .eq('status', 'activa');
+        .inFilter('status', ['activa', 'completada']);
 
     final reservas = (rows as List)
         .whereType<Map>()
