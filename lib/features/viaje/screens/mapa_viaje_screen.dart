@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 
@@ -11,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
+import '../../../core/config/google_maps_config.dart';
 import '../../../features/reserva/providers/reserva_provider.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
@@ -18,8 +20,6 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/viaje_provider.dart';
-
-const _mapsApiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
 
 List<LatLng> _decodePolyline(String encoded) {
   final points = <LatLng>[];
@@ -33,7 +33,8 @@ List<LatLng> _decodePolyline(String encoded) {
       shift += 5;
     } while (b >= 0x20);
     lat += (result & 1) != 0 ? ~(result >> 1) : result >> 1;
-    shift = 0; result = 0;
+    shift = 0;
+    result = 0;
     do {
       b = encoded.codeUnitAt(index++) - 63;
       result |= (b & 0x1f) << shift;
@@ -46,11 +47,12 @@ List<LatLng> _decodePolyline(String encoded) {
 }
 
 Future<List<LatLng>> _fetchDirections(LatLng origin, LatLng destination) async {
+  final key = googleMapsRestApiKey();
   final url = Uri.parse(
     'https://maps.googleapis.com/maps/api/directions/json'
-        '?origin=${origin.latitude},${origin.longitude}'
-        '&destination=${destination.latitude},${destination.longitude}'
-        '&key=$_mapsApiKey&language=es',
+    '?origin=${origin.latitude},${origin.longitude}'
+    '&destination=${destination.latitude},${destination.longitude}'
+    '&key=$key&language=es',
   );
   try {
     final response = await http.get(url);
@@ -75,24 +77,43 @@ class MapaViajeScreen extends ConsumerStatefulWidget {
 class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
   GoogleMapController? _mapController;
   List<LatLng> _routePoints = const <LatLng>[];
-  LatLng? _passengerPosition;
-  LatLng? _driverPosition;
-  int? _driverEta;
-  String? _errorMessage;
+  LatLng? _pasajeroPos;
+  LatLng? _conductorPos;
+  bool _conductorDisponible = false;
+  int? _etaMinutos;
   bool _loadingRoute = true;
   bool _initialized = false;
   bool _routeFetched = false;
+  bool _yaAbordo = false;
 
-  @override
-  void initState() {
-    super.initState();
-  }
+  StreamSubscription<List<Map<String, dynamic>>>? _conductorSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _boardingSubscription;
+  LatLng? _lastConductorPosEta;
 
   @override
   void dispose() {
+    _conductorSubscription?.cancel();
+    _boardingSubscription?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
+
+  Set<Marker> get _markers => {
+        if (_conductorPos != null)
+          Marker(
+            markerId: const MarkerId('conductor'),
+            position: _conductorPos!,
+            infoWindow: const InfoWindow(title: 'Conductor'),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+          ),
+        if (_pasajeroPos != null)
+          Marker(
+            markerId: const MarkerId('pasajero'),
+            position: _pasajeroPos!,
+            infoWindow: const InfoWindow(title: 'Tu ubicacion'),
+            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+          ),
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -101,23 +122,13 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
       if (next.finished && previous?.finished != true) {
         context.go(AppRoutes.passengerCalificacion);
       }
-      final pos = next.driverPosition;
-      if (pos != null) {
-        final nextDriver = LatLng(pos.lat, pos.lng);
-        if (_driverPosition?.latitude != nextDriver.latitude ||
-            _driverPosition?.longitude != nextDriver.longitude) {
-          setState(() {
-            _driverPosition = nextDriver;
-            if (next.etaMinutes > 0) _driverEta = next.etaMinutes;
-          });
-        }
-      }
     });
 
     final driver = reserva.conductorSeleccionado;
-    if (driver == null || reserva.reservaId == null) {
+    final reservaId = reserva.reservaId;
+    if (driver == null || reservaId == null) {
       return const AppScaffold(
-        title: 'Ubicación',
+        title: 'Ubicacion',
         body: PlaceholderPage(
           title: 'No hay viaje activo',
           subtitle: 'Confirma una reserva para ver el mapa del viaje.',
@@ -128,8 +139,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
     if (!kIsWeb && !_initialized) {
       _initialized = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadMapData(driver.driverId);
-        ref.read(viajeProvider.notifier).start(driver.driverId);
+        unawaited(_inicializarMapa(reservaId));
       });
     }
 
@@ -165,22 +175,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                 _fitBounds();
               },
               polylines: _routePoints.length >= 2 ? {polyline} : const <Polyline>{},
-              markers: {
-                if (_passengerPosition != null)
-                  Marker(
-                    markerId: const MarkerId('passenger'),
-                    position: _passengerPosition!,
-                    infoWindow: const InfoWindow(title: 'Tu ubicación'),
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-                  ),
-                if (_driverPosition != null)
-                  Marker(
-                    markerId: const MarkerId('driver'),
-                    position: _driverPosition!,
-                    infoWindow: InfoWindow(title: driver.name, snippet: driver.plate),
-                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-                  ),
-              },
+              markers: _markers,
             ),
           if (_loadingRoute && !kIsWeb)
             const Positioned.fill(
@@ -245,40 +240,47 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
                                 color: AppColors.textSecondary,
                               ),
                         ),
-                        if (_errorMessage != null) ...[
-                          const SizedBox(height: AppSpacing.sm),
+                        const SizedBox(height: AppSpacing.sm),
+                        if (!_conductorDisponible)
                           Text(
-                            _errorMessage!,
+                            'Ubicacion del conductor aproximada — GPS no activo',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: AppColors.error,
+                                  color: AppColors.warning,
                                   fontWeight: FontWeight.w600,
                                 ),
-                          ),
-                        ] else ...[
-                          const SizedBox(height: AppSpacing.sm),
+                          )
+                        else if (_etaMinutos != null)
                           Text(
-                            _driverEta != null && _driverEta! > 0
-                                ? '≈ $_driverEta min'
-                                : 'ETA no disponible',
+                            'El conductor llegara en ≈ $_etaMinutos min',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          )
+                        else
+                          Text(
+                            'Calculando tiempo de llegada...',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                   color: AppColors.textSecondary,
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
-                        ],
-                        const SizedBox(height: AppSpacing.md),
-                        FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.energeticOrange,
-                            foregroundColor: AppColors.white,
-                            minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(AppRadius.r12),
+                        if (_yaAbordo) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          FilledButton.icon(
+                            icon: const Icon(Icons.exit_to_app_rounded),
+                            label: const Text('Bajarme aqui'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: AppColors.white,
+                              minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(AppRadius.r12),
+                              ),
                             ),
+                            onPressed: _bajarmAqui,
                           ),
-                          onPressed: _bajarmAqui,
-                          child: const Text('Bajarme aquí'),
-                        ),
+                        ],
                       ],
                     ),
                   ),
@@ -291,13 +293,194 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
     );
   }
 
+  Future<void> _inicializarMapa(String reservaId) async {
+    if (!mounted || kIsWeb) return;
+    setState(() {
+      _loadingRoute = true;
+    });
+
+    try {
+      await _ensureLocationPermission();
+      final position = await Geolocator.getCurrentPosition();
+      if (!mounted) return;
+      setState(() => _pasajeroPos = LatLng(position.latitude, position.longitude));
+
+      await Future.wait([
+        _cargarUbicacionConductor(reservaId),
+        _verificarEstadoAbordaje(reservaId),
+      ]);
+
+      if (_conductorPos != null && _pasajeroPos != null && !_routeFetched) {
+        _routePoints = await _fetchDirections(_pasajeroPos!, _conductorPos!);
+        _routeFetched = true;
+      }
+
+      await _calcularEtaInicial();
+
+      if (!mounted) return;
+      setState(() => _loadingRoute = false);
+      _fitBounds();
+    } catch (e) {
+      debugPrint('[Mapa] Error inicializando: $e');
+      if (!mounted) return;
+      setState(() => _loadingRoute = false);
+    }
+  }
+
+  Future<void> _cargarUbicacionConductor(String reservaId) async {
+    try {
+      final reserva = await Supabase.instance.client
+          .from('reservations')
+          .select('trip_id, trips(driver_id)')
+          .eq('id', reservaId)
+          .single();
+
+      final trips = reserva['trips'];
+      final tripMap = trips is Map ? Map<String, dynamic>.from(trips) : null;
+      final driverId = tripMap?['driver_id']?.toString();
+      if (driverId == null || driverId.isEmpty) return;
+
+      final loc = await Supabase.instance.client
+          .from('driver_locations')
+          .select('lat, lng, updated_at')
+          .eq('driver_id', driverId)
+          .maybeSingle();
+
+      if (loc == null) {
+        if (!mounted) return;
+        setState(() {
+          _conductorPos = const LatLng(-12.1092, -77.0365);
+          _conductorDisponible = false;
+        });
+      } else {
+        final lat = (loc['lat'] as num?)?.toDouble();
+        final lng = (loc['lng'] as num?)?.toDouble();
+        if (lat == null || lng == null) {
+          if (!mounted) return;
+          setState(() {
+            _conductorPos = const LatLng(-12.1092, -77.0365);
+            _conductorDisponible = false;
+          });
+        } else if (mounted) {
+          setState(() {
+            _conductorPos = LatLng(lat, lng);
+            _conductorDisponible = true;
+          });
+        }
+      }
+
+      _conductorSubscription?.cancel();
+      _conductorSubscription = Supabase.instance.client
+          .from('driver_locations')
+          .stream(primaryKey: ['driver_id'])
+          .eq('driver_id', driverId)
+          .listen((data) {
+        if (data.isEmpty || !mounted) return;
+        final lat = (data[0]['lat'] as num?)?.toDouble();
+        final lng = (data[0]['lng'] as num?)?.toDouble();
+        if (lat == null || lng == null) return;
+        setState(() {
+          _conductorPos = LatLng(lat, lng);
+          _conductorDisponible = true;
+        });
+        unawaited(_actualizarEtaSiMovio());
+      });
+    } catch (e) {
+      debugPrint('[Mapa] Error cargando ubicacion conductor: $e');
+      if (!mounted) return;
+      setState(() {
+        _conductorPos = const LatLng(-12.1092, -77.0365);
+        _conductorDisponible = false;
+      });
+    }
+  }
+
+  Future<void> _verificarEstadoAbordaje(String reservaId) async {
+    try {
+      final entries = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('boarding_status')
+          .eq('reservation_id', reservaId);
+
+      final rows = (entries as List).cast<Map<String, dynamic>>();
+      if (mounted) {
+        setState(() {
+          _yaAbordo = rows.any((e) => e['boarding_status']?.toString() == 'abordo');
+        });
+      }
+
+      _boardingSubscription?.cancel();
+      _boardingSubscription = Supabase.instance.client
+          .from('manifest_entries')
+          .stream(primaryKey: ['id'])
+          .eq('reservation_id', reservaId)
+          .listen((data) {
+        if (data.isEmpty || !mounted) return;
+        setState(() {
+          _yaAbordo = data.any((e) => e['boarding_status']?.toString() == 'abordo');
+        });
+      });
+    } catch (e) {
+      debugPrint('[Mapa] Error verificando abordaje: $e');
+    }
+  }
+
+  Future<void> _calcularEtaInicial() async {
+    if (_conductorPos == null || _pasajeroPos == null) return;
+
+    try {
+      final key = googleMapsRestApiKey();
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/distancematrix/json'
+        '?origins=${_conductorPos!.latitude},${_conductorPos!.longitude}'
+        '&destinations=${_pasajeroPos!.latitude},${_pasajeroPos!.longitude}'
+        '&departure_time=now'
+        '&key=$key',
+      );
+      final response = await http.get(url);
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      debugPrint('[ETA] status=${data['status']}');
+
+      final rows = data['rows'] as List?;
+      final elements = rows != null && rows.isNotEmpty ? rows[0]['elements'] as List? : null;
+      final element = elements != null && elements.isNotEmpty
+          ? elements[0] as Map<String, dynamic>?
+          : null;
+      if (element == null || element['status'] != 'OK') return;
+
+      final duracion = element['duration_in_traffic']?['value'] ?? element['duration']?['value'];
+      if (duracion == null) return;
+
+      if (mounted) {
+        setState(() => _etaMinutos = ((duracion as num) / 60).round());
+      }
+    } catch (e) {
+      debugPrint('[ETA] Error: $e');
+    }
+  }
+
+  Future<void> _actualizarEtaSiMovio() async {
+    if (_conductorPos == null) return;
+    if (_lastConductorPosEta != null) {
+      final distancia = Geolocator.distanceBetween(
+        _lastConductorPosEta!.latitude,
+        _lastConductorPosEta!.longitude,
+        _conductorPos!.latitude,
+        _conductorPos!.longitude,
+      );
+      if (distancia < 300) return;
+    }
+    _lastConductorPosEta = _conductorPos;
+    await _calcularEtaInicial();
+  }
+
   Future<void> _bajarmAqui() async {
     final confirmado = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Bajada anticipada'),
         content: const Text(
-          'Te estás bajando antes de tiempo.\n\n¡Muchas gracias por viajar con nosotros!',
+          'Te estas bajando antes de tiempo.\n\nMuchas gracias por viajar con nosotros.',
         ),
         actions: [
           TextButton(
@@ -322,7 +505,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
 
     if (reservaId == null || reservaId.isEmpty) {
       if (!mounted) return;
-      AppSnackbars.error(context, 'No se encontró la reserva activa');
+      AppSnackbars.error(context, 'No se encontro la reserva activa');
       return;
     }
 
@@ -362,76 +545,20 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
     }
   }
 
-  Future<void> _loadMapData(String driverId, {bool silent = false}) async {
-    if (!mounted || kIsWeb) return;
-    if (!silent) {
-      setState(() {
-        _loadingRoute = true;
-        _errorMessage = null;
-      });
-    }
-
-    try {
-      await _ensureLocationPermission();
-      final position = await Geolocator.getCurrentPosition();
-      final passengerLatLng = LatLng(position.latitude, position.longitude);
-
-      final driverLocation = await Supabase.instance.client
-          .from('driver_locations')
-          .select('lat, lng')
-          .eq('driver_id', driverId)
-          .maybeSingle();
-
-      if (driverLocation == null) {
-        throw Exception('La ubicación del conductor aún no está disponible.');
-      }
-
-      final driverLat = (driverLocation['lat'] as num?)?.toDouble();
-      final driverLng = (driverLocation['lng'] as num?)?.toDouble();
-      if (driverLat == null || driverLng == null) {
-        throw Exception('La ubicación del conductor aún no está disponible.');
-      }
-
-      final driverLatLng = LatLng(driverLat, driverLng);
-
-      if (!_routeFetched) {
-        _routePoints = await _fetchDirections(passengerLatLng, driverLatLng);
-        _routeFetched = true;
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _passengerPosition = passengerLatLng;
-        _driverPosition = driverLatLng;
-        final eta = ref.read(viajeProvider).etaMinutes;
-        _driverEta = eta > 0 ? eta : null;
-        _errorMessage = null;
-        _loadingRoute = false;
-      });
-      _fitBounds();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '');
-        _loadingRoute = false;
-      });
-    }
-  }
-
   LatLng _cameraTarget() {
-    if (_passengerPosition != null && _driverPosition != null) {
+    if (_pasajeroPos != null && _conductorPos != null) {
       return LatLng(
-        (_passengerPosition!.latitude + _driverPosition!.latitude) / 2,
-        (_passengerPosition!.longitude + _driverPosition!.longitude) / 2,
+        (_pasajeroPos!.latitude + _conductorPos!.latitude) / 2,
+        (_pasajeroPos!.longitude + _conductorPos!.longitude) / 2,
       );
     }
-    return _passengerPosition ?? _driverPosition ?? const LatLng(-12.0464, -76.9156);
+    return _pasajeroPos ?? _conductorPos ?? const LatLng(-12.0464, -76.9156);
   }
 
   Future<void> _fitBounds() async {
     final controller = _mapController;
-    final passenger = _passengerPosition;
-    final driver = _driverPosition;
+    final passenger = _pasajeroPos;
+    final driver = _conductorPos;
     if (controller == null || passenger == null || driver == null) return;
 
     final bounds = LatLngBounds(
@@ -452,7 +579,7 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
 Future<void> _ensureLocationPermission() async {
   final enabled = await Geolocator.isLocationServiceEnabled();
   if (!enabled) {
-    throw Exception('Activa la ubicación del dispositivo para ver el mapa.');
+    throw Exception('Activa la ubicacion del dispositivo para ver el mapa.');
   }
 
   var permission = await Geolocator.checkPermission();
@@ -460,7 +587,7 @@ Future<void> _ensureLocationPermission() async {
     permission = await Geolocator.requestPermission();
   }
   if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-    throw Exception('La app no tiene permiso para acceder a tu ubicación.');
+    throw Exception('La app no tiene permiso para acceder a tu ubicacion.');
   }
 }
 

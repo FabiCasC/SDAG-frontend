@@ -16,6 +16,7 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
+import '../utils/payment_validation.dart';
 
 enum _PaymentOption { saved, yape, card }
 
@@ -72,13 +73,15 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       return _savedCardNumber != null;
     }
     if (option == _PaymentOption.card) {
-      return _cardNumberController.text.replaceAll(' ', '').length == 16 &&
-          _cardCvvController.text.length == 3 &&
-          _cardExpiryController.text.length == 5 &&
-          _cardHolderController.text.trim().length >= 3;
+      return isNewCardFormComplete(
+        cardNumber: _cardNumberController.text,
+        cvv: _cardCvvController.text,
+        expiry: _cardExpiryController.text,
+        holder: _cardHolderController.text,
+      );
     }
     if (option == _PaymentOption.yape) {
-      return _yapeController.text.replaceAll(RegExp(r'\D'), '').length == 9;
+      return isYapePhoneComplete(_yapeController.text);
     }
     return false;
   }
@@ -559,7 +562,7 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       }
       cardNumberDigits = _savedCardNumber!;
       cvv = _savedCardCvv!;
-      final (parsedMm, parsedYy) = _parseExpiry(_savedCardExpiry!);
+      final (parsedMm, parsedYy) = parseCardExpiry(_savedCardExpiry!);
       mm = parsedMm;
       yy = parsedYy;
       holder = _savedCardHolder!;
@@ -571,26 +574,20 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       cardNumberDigits = _cardNumberController.text.replaceAll(RegExp(r'\D'), '');
       cvv = _cardCvvController.text.replaceAll(RegExp(r'\D'), '');
       expiryForPersist = _cardExpiryController.text.trim();
-      final (parsedMm, parsedYy) = _parseExpiry(expiryForPersist);
+      final (parsedMm, parsedYy) = parseCardExpiry(expiryForPersist);
       mm = parsedMm;
       yy = parsedYy;
       holder = _cardHolderController.text.trim();
     }
 
-    if (cardNumberDigits.length != 16) {
-      throw const AuthException('Número de tarjeta inválido');
-    }
-    if (cvv.length != 3) {
-      throw const AuthException('CVV inválido');
-    }
-    if (mm < 1 || mm > 12) {
-      throw const AuthException('Fecha de vencimiento inválida');
-    }
-    if (yy < 0 || yy > 99) {
-      throw const AuthException('Fecha de vencimiento inválida');
-    }
-    if (holder.length < 3) {
-      throw const AuthException('Nombre del titular inválido');
+    final cardError = validateCardPaymentFields(
+      cardNumber: cardNumberDigits,
+      cvv: cvv,
+      expiry: expiryForPersist,
+      holder: holder,
+    );
+    if (cardError != null) {
+      throw AuthException(cardError);
     }
 
     final publicKey = (dotenv.env['CULQI_PUBLIC_KEY'] ?? _culqiPublicKeyFallback).trim();
@@ -608,7 +605,7 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
         'card_number': cardNumberDigits,
         'cvv': cvv,
         'expiration_month': mm,
-        'expiration_year': yy < 100 ? 2000 + yy : yy,
+        'expiration_year': culqiExpirationYear(yy),
         'email': email,
       }),
     );
@@ -627,7 +624,7 @@ class _PagoScreenState extends ConsumerState<PagoScreen> {
       throw const AuthException('Token inválido');
     }
 
-    final amountCents = seats.length * 1500;
+    final amountCents = paymentAmountCents(seats.length);
     String? chargeId;
     try {
       final chargeResp = await Supabase.instance.client.functions.invoke(
@@ -806,11 +803,8 @@ class _ExpiryFormatter extends TextInputFormatter {
 }
 
 (int, int) _parseExpiry(String value) {
-  final digits = value.replaceAll(RegExp(r'\D'), '');
-  if (digits.length < 4) return (0, 0);
-  final mm = int.tryParse(digits.substring(0, 2)) ?? 0;
-  final yy = int.tryParse(digits.substring(2, 4)) ?? 0;
-  return (mm, yy);
+  final parsed = parseCardExpiry(value);
+  return (parsed.$1, parsed.$2);
 }
 
 Map<String, dynamic>? _tryDecodeJson(String raw) {

@@ -28,6 +28,9 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
   bool _loadingRoute = true;
   String? _driverName;
   String? _routeLabel;
+  bool _yaAbordo = false;
+
+  StreamSubscription<List<Map<String, dynamic>>>? _boardingSubscription;
 
   @override
   void initState() {
@@ -37,8 +40,38 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
 
   @override
   void dispose() {
+    _boardingSubscription?.cancel();
     _mapController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _verificarEstadoAbordaje(String? reservaId) async {
+    if (reservaId == null || reservaId.isEmpty) return;
+    try {
+      final entries = await Supabase.instance.client
+          .from('manifest_entries')
+          .select('boarding_status')
+          .eq('reservation_id', reservaId);
+
+      final rows = (entries as List).cast<Map<String, dynamic>>();
+      if (mounted) {
+        setState(() {
+          _yaAbordo = rows.any((e) => e['boarding_status']?.toString() == 'abordo');
+        });
+      }
+
+      _boardingSubscription?.cancel();
+      _boardingSubscription = Supabase.instance.client
+          .from('manifest_entries')
+          .stream(primaryKey: ['id'])
+          .eq('reservation_id', reservaId)
+          .listen((data) {
+        if (data.isEmpty || !mounted) return;
+        setState(() {
+          _yaAbordo = data.any((e) => e['boarding_status']?.toString() == 'abordo');
+        });
+      });
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -46,6 +79,8 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
     final reserva = ref.read(reservaProvider);
     var driverName = reserva.conductorSeleccionado?.name;
     var routeLabel = reserva.conductorSeleccionado?.routeLabel ?? 'San Isidro → Chosica';
+
+    await _verificarEstadoAbordaje(reservaId ?? reserva.reservaId);
 
     if (reservaId != null && reservaId.isNotEmpty) {
       try {
@@ -275,10 +310,11 @@ class _ViajeEnCursoScreenState extends ConsumerState<ViajeEnCursoScreen> {
             onPressed: () => context.push(AppRoutes.passengerMapaViaje),
           ),
           const SizedBox(height: AppSpacing.sm),
-          AppSecondaryButton(
-            label: 'Bajarme aquí',
-            onPressed: () => unawaited(_bajarmAqui()),
-          ),
+          if (_yaAbordo)
+            AppSecondaryButton(
+              label: 'Bajarme aqui',
+              onPressed: () => unawaited(_bajarmAqui()),
+            ),
           const SizedBox(height: AppSpacing.sm),
         ],
       ),

@@ -1,0 +1,28 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sdag/app/providers/passenger/utils/passenger_db_error_mapping.dart';
+import 'package:sdag/app/providers/passenger/validators/passenger_auth_validators.dart';
+import 'package:sdag/features/busqueda/utils/busqueda_utils.dart';
+import 'package:sdag/features/conductor/utils/notification_utils.dart';
+import 'package:sdag/features/conductor/utils/qr_scan_utils.dart';
+import 'package:sdag/features/reserva/utils/payment_validation.dart';
+import 'package:sdag/features/reserva/utils/pickup_validation.dart';
+import 'package:sdag/features/reserva/utils/trip_rules.dart';
+
+// RF-009: Ingreso de datos de acompañantes
+// CP04 — Campos requeridos incompletos (E3)
+
+void main() {
+  test('CP04 — Campos requeridos incompletos (E3)', () {
+      // ARRANGE — Hay al menos un campo obligatorio vacío o nulo en el formulario.
+      const campoNulo = null;
+      const dniValor2020 = '';
+      // ACT — Se ejecuta la lógica de negocio/validación de la app: PassengerAuthValidators.validateDniField().
+      final resultado1 = PassengerAuthValidators.validateDniField(campoNulo);
+      final resultado2 = PassengerAuthValidators.validateDniField(dniValor2020);
+      // ASSERT — El sistema debe responder: equals('Campo requerido'); equals('Campo requerido').
+      expect(resultado1, equals('Campo requerido'));
+      expect(resultado2, equals('Campo requerido'));
+      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      print('  ✅ CP04 PASS — Campos requeridos incompletos (E3)');
+  });
+}

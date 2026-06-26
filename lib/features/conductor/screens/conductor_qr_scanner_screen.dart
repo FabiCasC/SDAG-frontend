@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/conductor_manifiesto_provider.dart';
+import '../utils/qr_scan_utils.dart';
 
 class ConductorQrScannerScreen extends ConsumerStatefulWidget {
   const ConductorQrScannerScreen({super.key});
@@ -26,10 +27,7 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
     returnImage: false,
   );
 
-  static final _uuidRegex = RegExp(
-    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-    caseSensitive: false,
-  );
+  static final _uuidRegex = reservationUuidRegex;
 
   bool _escaneando = true;
   bool _procesando = false;
@@ -99,22 +97,11 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
   }
 
   Future<void> _procesarQR(String qrValue) async {
-    String reservaId;
-    int? asientoNumero;
+    final payload = parseQrScanValue(qrValue);
+    final reservaId = payload.reservaId;
+    final asientoNumero = payload.seatNumber;
 
-    if (qrValue.contains('|')) {
-      final partes = qrValue.split('|');
-      reservaId = partes[0].trim();
-      asientoNumero = int.tryParse(partes[1].trim());
-    } else {
-      reservaId = qrValue.trim();
-    }
-
-    if (reservaId.startsWith('res_')) {
-      reservaId = reservaId.substring(4);
-    }
-
-    if (!_uuidRegex.hasMatch(reservaId)) {
+    if (!isValidReservationUuid(reservaId)) {
       setState(() => _resultado = 'QR invalido');
       await _reactivarEscanner();
       return;
@@ -168,9 +155,9 @@ class _ConductorQrScannerScreenState extends ConsumerState<ConductorQrScannerScr
         return;
       }
 
-      if (asientoNumero != null) {
+        if (asientoNumero != null) {
         final reservedSeats = _parseSeats(reserva['seats']);
-        if (!reservedSeats.contains(asientoNumero)) {
+        if (!isSeatInReservation(asientoNumero, reservedSeats)) {
           setState(() => _resultado = 'Asiento no pertenece a esta reserva');
           await _reactivarEscanner();
           return;

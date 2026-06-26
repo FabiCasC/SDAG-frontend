@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../../../../data/models/app_role.dart';
 import '../models/passenger_account.dart';
 import '../models/payment_method.dart';
+import '../utils/passenger_db_error_mapping.dart';
 import 'passenger_account_repository.dart';
 
 class PassengerAccountRepositorySupabase implements PassengerAccountRepository {
@@ -124,7 +125,6 @@ class PassengerAccountRepositorySupabase implements PassengerAccountRepository {
     required String code,
   }) async {
     if (code.trim().isEmpty) throw const InvalidVerificationCodeFailure();
-    return;
   }
 
   @override
@@ -322,16 +322,19 @@ class PassengerAccountRepositorySupabase implements PassengerAccountRepository {
   }
 
   PassengerAuthFailure? _mapUniqueViolation(PostgrestException e) {
-    final lower = e.message.toLowerCase();
-    if (lower.contains('email')) return const EmailAlreadyRegisteredFailure();
-    if (lower.contains('phone')) return const PhoneAlreadyRegisteredFailure();
-    if (lower.contains('dni')) return const DniAlreadyRegisteredFailure();
-    if (e.code == '23505') return const DuplicateEmailFailure();
-    return null;
+    switch (classifyUniqueViolation(message: e.message, code: e.code)) {
+      case UniqueViolationKind.email:
+        return const EmailAlreadyRegisteredFailure();
+      case UniqueViolationKind.phone:
+        return const PhoneAlreadyRegisteredFailure();
+      case UniqueViolationKind.dni:
+        return const DniAlreadyRegisteredFailure();
+      case UniqueViolationKind.duplicateCode:
+        return const DuplicateEmailFailure();
+      case UniqueViolationKind.none:
+        return null;
+    }
   }
 
-  String _dbMessage(PostgrestException e) {
-    final msg = e.message.trim();
-    return msg.isEmpty ? 'Error de base de datos' : msg;
-  }
+  String _dbMessage(PostgrestException e) => normalizeDbMessage(e.message);
 }

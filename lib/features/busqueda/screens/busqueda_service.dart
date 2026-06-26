@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../reserva/providers/reserva_provider.dart';
+import '../utils/busqueda_utils.dart';
 
 /// Viaje disponible para el pasajero (solo datos de Supabase).
 class ViajeDisponible {
@@ -55,7 +56,7 @@ class BusquedaService {
   /// [direction] `si_cho` (San Isidro → Chosica) o `cho_si` (Chosica → San Isidro), según `routes.from_label`.
   Future<List<ViajeDisponible>> buscarViajes(String direction) async {
     try {
-      final expectedFrom = direction == 'si_cho' ? 'San Isidro' : 'Chosica';
+      final expectedFrom = expectedFromLabelForDirection(direction);
 
       final tripsRes = await _supabase.from('trips').select('''
             id,
@@ -92,8 +93,10 @@ class BusquedaService {
         if (drivers is! Map) continue;
         final driverMap = Map<String, dynamic>.from(drivers);
 
-        if ((driverMap['cuenta_activa'] as bool?) == false) continue;
-        if ((driverMap['estado']?.toString() ?? '').toLowerCase() == 'inactivo') continue;
+        if (!isDriverEligibleForListing(
+          cuentaActiva: driverMap['cuenta_activa'] as bool?,
+          estado: driverMap['estado']?.toString(),
+        )) continue;
 
         final driverId = driverMap['id']?.toString();
         if (driverId == null || driverId.isEmpty) continue;
@@ -117,15 +120,11 @@ class BusquedaService {
             .eq('trip_id', tripId)
             .inFilter('status', ['activa', 'completada']);
 
-        var occupiedSeats = 0;
-        for (final rawReservation in reservationsRes as List) {
-          final reservation = Map<String, dynamic>.from(rawReservation as Map);
-          final seats = reservation['seats'];
-          if (seats is List) {
-            occupiedSeats += seats.length;
-          }
-        }
-        final availableSeats = totalSeats - occupiedSeats;
+        var occupiedSeats = countOccupiedSeatsFromReservationRows(reservationsRes as List);
+        final availableSeats = availableSeatsCount(
+          totalSeats: totalSeats,
+          occupiedSeats: occupiedSeats,
+        );
         if (availableSeats <= 0) continue;
 
         seenDriverIds.add(driverId);
@@ -134,7 +133,6 @@ class BusquedaService {
         final firstName = profile?['first_name']?.toString().trim() ?? '';
         final lastName = profile?['last_name']?.toString().trim() ?? '';
         final fullName = '$firstName $lastName'.trim();
-        final routeName = routeMap['name']?.toString().trim();
         final routeFrom = routeMap['from_label']?.toString().trim() ?? '';
         final routeTo = routeMap['to_label']?.toString().trim() ?? '';
 
@@ -149,7 +147,11 @@ class BusquedaService {
             vehicleType: driverMap['vehicle_type']?.toString() ?? 'Vehículo',
             totalSeats: totalSeats,
             availableSeats: availableSeats,
-            routeLabel: (routeName != null && routeName.isNotEmpty) ? routeName : '$routeFrom → $routeTo',
+            routeLabel: buildRouteLabel(
+              name: routeMap['name']?.toString(),
+              from: routeFrom,
+              to: routeTo,
+            ),
             rating: (driverMap['rating_avg'] as num?)?.toDouble() ?? 0.0,
             ratingCount: (driverMap['rating_count'] as num?)?.toInt() ?? 0,
             direction: direction,
