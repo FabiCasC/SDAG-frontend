@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,7 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart' hide SeatMapWidget;
 import '../providers/reserva_provider.dart';
+import '../utils/seat_hold_utils.dart';
 
 // IMPORTS DEL MAPA
 import '../../../shared/widgets/mapa_ruta_widget.dart';
@@ -31,6 +34,43 @@ class SeatMapScreen extends ConsumerStatefulWidget {
 
 class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
   bool _initScheduled = false;
+  Timer? _holdTimer;
+  int _holdRemainingSeconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _holdTimer = Timer.periodic(const Duration(seconds: 1), (_) => _tickSeatHold());
+  }
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    super.dispose();
+  }
+
+  void _tickSeatHold() {
+    if (!mounted) return;
+    final state = ref.read(reservaProvider);
+    if (state.asientosSeleccionados.isEmpty) {
+      if (_holdRemainingSeconds != 0) setState(() => _holdRemainingSeconds = 0);
+      return;
+    }
+    ref.read(reservaProvider.notifier).clearSeatHoldIfExpired(DateTime.now());
+    final updated = ref.read(reservaProvider);
+    if (updated.asientosSeleccionados.isEmpty) {
+      AppSnackbars.warning(context, 'Tiempo agotado. Los asientos fueron liberados.');
+      setState(() => _holdRemainingSeconds = 0);
+      return;
+    }
+    final remaining = seatHoldRemainingSeconds(
+      holdStartedAt: updated.seatHoldStartedAt,
+      now: DateTime.now(),
+    );
+    if (remaining != _holdRemainingSeconds) {
+      setState(() => _holdRemainingSeconds = remaining);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -206,6 +246,28 @@ class _SeatMapScreenState extends ConsumerState<SeatMapScreen> {
                     color: AppColors.textPrimary,
                   ),
                 ),
+                if (state.asientosSeleccionados.isNotEmpty && _holdRemainingSeconds > 0) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.seatWarnBg,
+                      borderRadius: BorderRadius.circular(AppRadius.r12),
+                      border: Border.all(color: AppColors.energeticOrange.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(
+                      'Asientos reservados temporalmente: ${formatSeatHoldCountdown(_holdRemainingSeconds)}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.md),
                 _VehicleLayout(
                   totalSeats: driver.totalSeats,

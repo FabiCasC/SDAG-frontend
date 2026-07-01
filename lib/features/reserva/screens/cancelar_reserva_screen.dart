@@ -9,6 +9,8 @@ import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
+import '../services/reservation_refund_service.dart';
+import '../utils/trip_rules.dart';
 
 class CancelarReservaScreen extends ConsumerStatefulWidget {
   const CancelarReservaScreen({super.key});
@@ -19,14 +21,20 @@ class CancelarReservaScreen extends ConsumerStatefulWidget {
 
 class _CancelarReservaScreenState extends ConsumerState<CancelarReservaScreen> {
   bool _cancelando = false;
+  bool _loadingTrip = true;
+  String? _tripStatus;
+  String? _reservaIdLoaded;
 
-  Future<void> _cancelarReserva() async {
-    if (_cancelando) return;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadTripStatus());
+  }
 
+  Future<void> _loadTripStatus() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) {
-      if (!mounted) return;
-      AppSnackbars.error(context, 'Sesión inválida');
+      setState(() => _loadingTrip = false);
       return;
     }
 
@@ -34,7 +42,6 @@ class _CancelarReservaScreenState extends ConsumerState<CancelarReservaScreen> {
     var reservaId = reserva.reservaId?.trim();
     var tripId = reserva.conductorSeleccionado?.tripId.trim();
 
-    setState(() => _cancelando = true);
     try {
       if (reservaId == null || reservaId.isEmpty) {
         final row = await Supabase.instance.client
@@ -49,42 +56,72 @@ class _CancelarReservaScreenState extends ConsumerState<CancelarReservaScreen> {
         tripId ??= row?['trip_id']?.toString();
       }
 
-      if (reservaId == null || reservaId.isEmpty) {
-        if (!mounted) return;
-        AppSnackbars.error(context, 'No se encontró una reserva activa para cancelar');
-        return;
-      }
-
-      await Supabase.instance.client
-          .from('reservations')
-          .update({'status': 'cancelada'})
-          .eq('id', reservaId);
-
-      await Supabase.instance.client
-          .from('profiles')
-          .update({'has_active_reservation': false})
-          .eq('id', userId);
+      _reservaIdLoaded = reservaId;
 
       if (tripId != null && tripId.isNotEmpty) {
-        final manifest = await Supabase.instance.client
-            .from('manifests')
-            .select('id')
-            .eq('trip_id', tripId)
+        final trip = await Supabase.instance.client
+            .from('trips')
+            .select('status')
+            .eq('id', tripId)
             .maybeSingle();
-
-        if (manifest != null) {
-          await Supabase.instance.client
-              .from('manifest_entries')
-              .update({'boarding_status': 'cancelado'})
-              .eq('manifest_id', manifest['id'])
-              .eq('passenger_profile_id', userId);
+        final status = trip?['status']?.toString() ?? 'esperando';
+        ref.read(reservaProvider.notifier).setVehiculoPartio(isTripDeparted(status));
+        if (mounted) {
+          setState(() {
+            _tripStatus = status;
+            _loadingTrip = false;
+          });
         }
+        return;
+      }
+    } catch (_) {}
+
+    if (mounted) setState(() => _loadingTrip = false);
+  }
+
+  Future<void> _cancelarReserva() async {
+    if (_cancelando) return;
+
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'Sesión inválida');
+      return;
+    }
+
+    final reservaId = _reservaIdLoaded ?? ref.read(reservaProvider).reservaId?.trim();
+    if (reservaId == null || reservaId.isEmpty) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'No se encontró una reserva activa');
+      return;
+    }
+
+    if (_tripStatus != null && !canCancelReservationForTripStatus(_tripStatus!)) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'El vehículo ya partió. No se puede cancelar.');
+      return;
+    }
+
+    setState(() => _cancelando = true);
+    try {
+      final result = await ReservationRefundService().cancelWithRefund(
+        reservationId: reservaId,
+        passengerProfileId: userId,
+      );
+
+      if (!result.success) {
+        if (!mounted) return;
+        AppSnackbars.error(context, result.message);
+        return;
       }
 
       ref.read(reservaProvider.notifier).reset();
 
       if (!mounted) return;
-      AppSnackbars.success(context, 'Reserva cancelada correctamente');
+      AppSnackbars.success(
+        context,
+        'Reserva cancelada. Reembolso procesado${result.refundId != null ? ' (${result.refundId})' : ''}.',
+      );
       context.go(AppRoutes.passengerHome);
     } catch (e) {
       if (!mounted) return;
@@ -97,19 +134,24 @@ class _CancelarReservaScreenState extends ConsumerState<CancelarReservaScreen> {
   @override
   Widget build(BuildContext context) {
     final reserva = ref.watch(reservaProvider);
+    final blocked = _tripStatus != null
+        ? !canCancelReservationForTripStatus(_tripStatus!)
+        : reserva.vehiculoPartio;
 
-    final vehiculoPartio = reserva.vehiculoPartio;
-    final monto = reserva.montoTotal;
+    if (_loadingTrip) {
+      return const AppScaffold(
+        title: 'Cancelar reserva',
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
 
     return AppScaffold(
       title: 'Cancelar reserva',
       fallbackRoute: AppRoutes.passengerReservaActiva,
-      body: vehiculoPartio
-          ? _VehicleDepartedCard(
-              onClose: () => context.pop(),
-            )
+      body: blocked
+          ? _VehicleDepartedCard(onClose: () => context.pop())
           : _CancelableCard(
-              monto: monto,
+              monto: reserva.montoTotal,
               cancelando: _cancelando,
               onConfirm: _cancelarReserva,
             ),
@@ -148,7 +190,7 @@ class _CancelableCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  'Puedes cancelar antes de que el vehículo parta. La reserva quedará marcada como cancelada.',
+                  'Puedes cancelar mientras el viaje esté en espera. Se procesará el reembolso vía Culqi y quedará registrado en Supabase.',
                   style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textPrimary),
                 ),
               ),
@@ -163,12 +205,12 @@ class _CancelableCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'Monto pagado:',
+                    'Monto a reembolsar:',
                     style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
                   ),
                 ),
                 Text(
-                  'S/ ${monto.toStringAsFixed(0)}',
+                  'S/ ${monto.toStringAsFixed(2)}',
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: AppColors.primaryBlue,
                     fontWeight: FontWeight.w800,
@@ -192,7 +234,7 @@ class _CancelableCard extends StatelessWidget {
                   height: 22,
                   child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
                 )
-              : const Text('Confirmar cancelación'),
+              : const Text('Confirmar cancelación y reembolso'),
         ),
       ],
     );
@@ -235,7 +277,7 @@ class _VehicleDepartedCard extends StatelessWidget {
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      'No es posible cancelar ni obtener reembolso una vez iniciado el viaje.',
+                      'No es posible cancelar ni obtener reembolso una vez iniciado el viaje (status en_ruta).',
                       style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textPrimary),
                     ),
                   ],
@@ -245,10 +287,7 @@ class _VehicleDepartedCard extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        AppSecondaryButton(
-          label: 'Entendido',
-          onPressed: onClose,
-        ),
+        AppSecondaryButton(label: 'Entendido', onPressed: onClose),
       ],
     );
   }

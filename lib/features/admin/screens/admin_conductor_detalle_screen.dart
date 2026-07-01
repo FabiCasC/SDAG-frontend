@@ -10,6 +10,24 @@ import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../providers/admin_conductores_provider.dart';
+import '../../conductor/providers/perfil_conductor_provider.dart';
+
+final adminConductorVehiclesProvider =
+    FutureProvider.family<List<ConductorVehicleInfo>, String>((ref, driverId) async {
+  if (driverId.isEmpty) return const [];
+
+  final res = await Supabase.instance.client
+      .from('vehicles')
+      .select('id, plate, label, vehicle_type, total_seats, active, created_at')
+      .eq('driver_id', driverId)
+      .order('active', ascending: false)
+      .order('created_at', ascending: false);
+
+  return (res as List)
+      .cast<Map<String, dynamic>>()
+      .map(ConductorVehicleInfo.fromMap)
+      .toList(growable: false);
+});
 
 final adminConductorActividadProvider =
     FutureProvider.family<AdminConductorActividadResumen, String>((ref, driverId) async {
@@ -265,6 +283,7 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
     final comisionPendientePorcentaje = (conductor['comisionPendientePorcentaje'] as num?)?.toDouble();
 
     final actividadAsync = ref.watch(adminConductorActividadProvider(driverRecordId));
+    final vehiculosAsync = ref.watch(adminConductorVehiclesProvider(driverRecordId));
     final initials = _initials(nombres, apellidos);
     final estaEnRuta = actividadAsync.maybeWhen(
       data: (actividad) => actividad.estaEnRuta,
@@ -372,57 +391,123 @@ class _AdminConductorDetalleScreenState extends ConsumerState<AdminConductorDeta
               border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
             padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Datos del vehículo',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Placa: $placa',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Tipo: $vehiculoTipo',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Capacidad: $capacidad asientos',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Row(
+            child: vehiculosAsync.when(
+              loading: () => const Center(child: Padding(
+                padding: EdgeInsets.all(AppSpacing.md),
+                child: CircularProgressIndicator(),
+              )),
+              error: (e, _) => Text('No se pudo cargar vehículos: $e'),
+              data: (vehiculos) {
+                final activo = vehiculos.where((v) => v.active).isNotEmpty
+                    ? vehiculos.firstWhere((v) => v.active)
+                    : (vehiculos.isNotEmpty ? vehiculos.first : null);
+                final placaActiva = activo?.plate ?? placa;
+                final modeloActivo = activo?.modelLabel ?? vehiculoTipo;
+                final capacidadActiva = activo?.totalSeats ?? capacidad;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Icon(Icons.lock_rounded, size: 18, color: AppColors.textSecondary),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        "Solo editable desde 'Editar'",
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w700,
+                    Text(
+                      'Datos del vehículo',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Placa: $placaActiva',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Modelo: $modeloActivo',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Capacidad: $capacidadActiva asientos',
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: AppColors.textSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    if (vehiculos.length > 1) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      Text(
+                        'Histórico de vehículos vinculados',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w900,
                             ),
                       ),
+                      const SizedBox(height: AppSpacing.xs),
+                      ...vehiculos.map(
+                        (v) => Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${v.plate} · ${v.modelLabel} · ${v.totalSeats} asientos',
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.sm,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: v.active
+                                      ? const Color(0xFFDCFCE7)
+                                      : const Color(0xFFF1F5F9),
+                                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                                ),
+                                child: Text(
+                                  v.active ? 'Activo' : 'Inactivo',
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        color: v.active
+                                            ? const Color(0xFF16A34A)
+                                            : AppColors.textSecondary,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        const Icon(Icons.lock_rounded, size: 18, color: AppColors.textSecondary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            "Solo editable desde 'Editar'",
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
-                ),
-              ],
+                );
+              },
             ),
           ),
           const SizedBox(height: AppSpacing.md),

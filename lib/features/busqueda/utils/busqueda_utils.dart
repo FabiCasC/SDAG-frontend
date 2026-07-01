@@ -1,14 +1,58 @@
 /// Lógica pura de búsqueda extraída de [BusquedaService].
+
+const String kDirectionSiCho = 'si_cho';
+const String kDirectionChoSi = 'cho_si';
+
 String expectedFromLabelForDirection(String direction) {
-  return direction == 'si_cho' ? 'San Isidro' : 'Chosica';
+  return direction == kDirectionSiCho ? 'San Isidro' : 'Chosica';
+}
+
+String expectedToLabelForDirection(String direction) {
+  return direction == kDirectionSiCho ? 'Chosica' : 'San Isidro';
+}
+
+String directionRouteLabel(String direction) {
+  return '${expectedFromLabelForDirection(direction)} → ${expectedToLabelForDirection(direction)}';
+}
+
+bool isRegisteredRouteDirection(String? direction) {
+  return direction == kDirectionSiCho || direction == kDirectionChoSi;
+}
+
+/// Paraderos de subida según sentido del viaje (RF-098).
+List<String> pickupStopsForDirection(String direction) {
+  switch (direction) {
+    case kDirectionSiCho:
+      return const [
+        'Av. Javier Prado (San Isidro)',
+        'Av. República de Panamá',
+        'Av. Tomás Marsano',
+      ];
+    case kDirectionChoSi:
+      return const [
+        'Plaza de Armas (Chosica)',
+        'Av. Nicolás de Piérola (Chosica)',
+        'Mercado Central de Chosica',
+      ];
+    default:
+      return const [];
+  }
+}
+
+String primaryPickupHintForDirection(String direction) {
+  final stops = pickupStopsForDirection(direction);
+  return stops.isEmpty ? '—' : stops.first;
 }
 
 bool matchesTripDirection({
   required String? fromLabel,
+  required String? toLabel,
   required String direction,
 }) {
   if (fromLabel == null || fromLabel.trim().isEmpty) return false;
-  return fromLabel.trim() == expectedFromLabelForDirection(direction);
+  if (toLabel == null || toLabel.trim().isEmpty) return false;
+  return fromLabel.trim() == expectedFromLabelForDirection(direction) &&
+      toLabel.trim() == expectedToLabelForDirection(direction);
 }
 
 bool isDriverEligibleForListing({

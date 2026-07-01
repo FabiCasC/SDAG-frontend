@@ -56,7 +56,9 @@ class BusquedaService {
   /// [direction] `si_cho` (San Isidro → Chosica) o `cho_si` (Chosica → San Isidro), según `routes.from_label`.
   Future<List<ViajeDisponible>> buscarViajes(String direction) async {
     try {
-      final expectedFrom = expectedFromLabelForDirection(direction);
+      if (!isRegisteredRouteDirection(direction)) {
+        throw Exception('Dirección de ruta no registrada');
+      }
 
       final tripsRes = await _supabase.from('trips').select('''
             id,
@@ -87,7 +89,10 @@ class BusquedaService {
         if (route is! Map) continue;
         final routeMap = Map<String, dynamic>.from(route);
         final fromLabel = routeMap['from_label']?.toString().trim();
-        if (fromLabel != expectedFrom) continue;
+        final toLabel = routeMap['to_label']?.toString().trim();
+        if (!matchesTripDirection(fromLabel: fromLabel, toLabel: toLabel, direction: direction)) {
+          continue;
+        }
 
         final drivers = row['drivers'];
         if (drivers is! Map) continue;

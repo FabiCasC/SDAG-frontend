@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app/router/app_routes.dart';
 import 'app/sdag_app.dart';
 import 'app/router/app_router.dart';
+import 'core/services/push_notification_service.dart';
 
 void _navigateToResetPassword({int attempt = 0}) {
   if (attempt > 60) {
@@ -31,6 +32,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await dotenv.load(fileName: 'env.json');
+
+  await PushNotificationService.instance.initialize();
+
   final url = dotenv.env['SUPABASE_URL'];
   final anonKey = dotenv.env['SUPABASE_ANON_KEY'];
 

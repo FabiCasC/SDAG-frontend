@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/services/audit_log_service.dart';
+import '../../../core/services/push_notification_service.dart';
+import '../../reserva/utils/trip_rules.dart';
+
 enum ConductorEstadoViaje {
   esperando,
   enRuta,
@@ -225,6 +229,8 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
 
   StreamSubscription<List<Map<String, dynamic>>>? _subscription;
   bool _autoStartInFlight = false;
+  DateTime? _vehicleFullSince;
+  Timer? _departureCountdownTimer;
 
   Future<void> refresh() async {
     await _cancelReservationSubscription();
@@ -383,7 +389,10 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
           })
           .eq('id', state.tripId!);
 
-      await Supabase.instance.client.from('trip_messages').delete().eq('trip_id', state.tripId!);
+      await Supabase.instance.client
+          .from('trip_messages')
+          .update({'message_status': 'archivado'})
+          .eq('trip_id', state.tripId!);
 
       await Supabase.instance.client
           .from('drivers')
@@ -502,9 +511,43 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
           .expand((r) => (r['seats'] as List? ?? const []))
           .length;
 
-      if (asientosOcupados < capacidad) return;
+      if (asientosOcupados < capacidad) {
+        _vehicleFullSince = null;
+        _departureCountdownTimer?.cancel();
+        _departureCountdownTimer = null;
+        return;
+      }
+
+      _vehicleFullSince ??= DateTime.now();
+      PushNotificationService.instance.notifyVehicleFull();
+
+      if (!canDepartAfterCountdown(
+        fullSince: _vehicleFullSince,
+        now: DateTime.now(),
+        isFull: true,
+      )) {
+        _departureCountdownTimer ??= Timer.periodic(const Duration(seconds: 1), (_) async {
+          if (!canDepartAfterCountdown(
+            fullSince: _vehicleFullSince,
+            now: DateTime.now(),
+            isFull: true,
+          )) {
+            return;
+          }
+          _departureCountdownTimer?.cancel();
+          _departureCountdownTimer = null;
+          await _verificarInicioAutomatico(
+            tripId: tripId,
+            capacidad: capacidad,
+            driverId: driverId,
+          );
+        });
+        return;
+      }
 
       _autoStartInFlight = true;
+      _departureCountdownTimer?.cancel();
+      _departureCountdownTimer = null;
 
       await Supabase.instance.client.from('trips').update({
         'status': 'en_ruta',
@@ -516,13 +559,21 @@ class ConductorViajeController extends StateNotifier<ConductorViajeState> {
           .update({'estado': 'en_ruta'})
           .eq('id', driverId);
 
+      await logAuditEvent(
+        eventType: 'trip_auto_start',
+        actorId: driverId,
+        actorRole: 'conductor',
+        metadata: {'trip_id': tripId},
+      );
+
       state = state.copyWith(
         estadoViaje: ConductorEstadoViaje.enRuta,
         startedAt: DateTime.now(),
       );
+      _vehicleFullSince = null;
       _toast(
         ConductorToastType.success,
-        'Carro lleno. Viaje iniciado automaticamente.',
+        'Carro lleno. Viaje iniciado tras temporizador de 3 minutos.',
       );
     } catch (_) {
       _toast(ConductorToastType.error, 'No se pudo iniciar el viaje automaticamente.');

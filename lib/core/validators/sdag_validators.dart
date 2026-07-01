@@ -212,9 +212,10 @@ bool conductorElegibleParaListado({
 
 bool rutaCoincideDireccion({
   required String? fromLabel,
+  required String? toLabel,
   required String direction,
 }) {
-  return matchesTripDirection(fromLabel: fromLabel, direction: direction);
+  return matchesTripDirection(fromLabel: fromLabel, toLabel: toLabel, direction: direction);
 }
 
 String etiquetaOrigenEsperada(String direction) {
@@ -307,7 +308,7 @@ bool flujoNotificacionVozValido() =>
     null;
 
 bool flujoNotificacionVehiculoLlenoValido() => debeNotificarVehiculoLleno(
-      ocupados: 4,
-      capacidad: 4,
+      occupiedSeats: 4,
+      capacity: 4,
       pushConductorHabilitado: true,
     );

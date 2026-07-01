@@ -6,6 +6,7 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
+import '../utils/busqueda_utils.dart';
 import 'busqueda_service.dart';
 
 class BusquedaScreen extends StatefulWidget {
@@ -42,7 +43,12 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
 
   /// Consulta Supabase y actualiza la lista de viajes
   Future<void> _cargarViajes(String direction) async {
-    setState(() => _cargando = true);
+    if (!isRegisteredRouteDirection(direction)) return;
+    setState(() {
+      _cargando = true;
+      _viajes = [];
+      _errorMessage = null;
+    });
     try {
       final viajes = await _service.buscarViajes(direction);
       if (!mounted) return;
@@ -86,14 +92,15 @@ class _BusquedaScreenState extends State<BusquedaScreen> {
             _DirectionSelector(
               direction: _direction,
               onChanged: (value) {
-                setState(() {
-                  _direction = value;
-                  _viajes = [];
-                  _errorMessage = null;
-                });
+                if (value == _direction) return;
+                setState(() => _direction = value);
                 _cargarViajes(value);
               },
             ),
+            if (_direction != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              _RouteParaderosBanner(direction: _direction!),
+            ],
             const SizedBox(height: AppSpacing.lg),
             if (_direction == null)
               const PlaceholderPage(
@@ -141,27 +148,108 @@ class _DirectionSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final leftSelected = direction == 'si_cho';
-    final rightSelected = direction == 'cho_si';
+    final leftSelected = direction == kDirectionSiCho;
+    final rightSelected = direction == kDirectionChoSi;
 
     return Row(
       children: [
         Expanded(
           child: _DirectionButton(
             selected: leftSelected,
-            label: 'San Isidro → Chosica',
-            onPressed: () => onChanged('si_cho'),
+            label: directionRouteLabel(kDirectionSiCho),
+            onPressed: () => onChanged(kDirectionSiCho),
           ),
         ),
         const SizedBox(width: AppSpacing.md),
         Expanded(
           child: _DirectionButton(
             selected: rightSelected,
-            label: 'Chosica → San Isidro',
-            onPressed: () => onChanged('cho_si'),
+            label: directionRouteLabel(kDirectionChoSi),
+            onPressed: () => onChanged(kDirectionChoSi),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _RouteParaderosBanner extends StatelessWidget {
+  const _RouteParaderosBanner({required this.direction});
+
+  final String direction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final stops = pickupStopsForDirection(direction);
+    final origin = expectedFromLabelForDirection(direction);
+    final destination = expectedToLabelForDirection(direction);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.r16),
+        border: Border.all(color: AppColors.border),
+      ),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.swap_horiz_rounded, size: 20, color: AppColors.primaryBlue),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Text(
+                  directionRouteLabel(direction),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Subida en $origin · Destino $destination',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Paraderos de subida',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          ...stops.map(
+            (stop) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.place_outlined, size: 16, color: AppColors.primaryBlue),
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(
+                    child: Text(
+                      stop,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

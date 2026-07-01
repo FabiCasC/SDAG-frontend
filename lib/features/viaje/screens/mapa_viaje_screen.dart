@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 
+import 'package:async/async.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -88,12 +89,20 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
 
   StreamSubscription<List<Map<String, dynamic>>>? _conductorSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _boardingSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _tripStatusSubscription;
+  Timer? _simulationTimer;
   LatLng? _lastConductorPosEta;
+
+  String? _activeTripId;
+  String? _activeDriverId;
+  String? _activeTripStatus;
 
   @override
   void dispose() {
     _conductorSubscription?.cancel();
     _boardingSubscription?.cancel();
+    _tripStatusSubscription?.cancel();
+    _simulationTimer?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -338,7 +347,14 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
       final trips = reserva['trips'];
       final tripMap = trips is Map ? Map<String, dynamic>.from(trips) : null;
       final driverId = tripMap?['driver_id']?.toString();
+      final tripId = reserva['trip_id']?.toString();
       if (driverId == null || driverId.isEmpty) return;
+
+      _activeDriverId = driverId;
+      _activeTripId = tripId;
+      if (tripId != null && tripId.isNotEmpty) {
+        await _configurarSimulacionConductor(tripId);
+      }
 
       final loc = await Supabase.instance.client
           .from('driver_locations')
@@ -392,6 +408,67 @@ class _MapaViajeScreenState extends ConsumerState<MapaViajeScreen> {
         _conductorPos = const LatLng(-12.1092, -77.0365);
         _conductorDisponible = false;
       });
+    }
+  }
+
+  Future<void> _configurarSimulacionConductor(String tripId) async {
+    try {
+      final tripRow = await Supabase.instance.client
+          .from('trips')
+          .select('status')
+          .eq('id', tripId)
+          .maybeSingle();
+
+      final status = tripRow?['status']?.toString() ?? '';
+      _syncSimulationTimer(status);
+
+      _tripStatusSubscription?.cancel();
+      _tripStatusSubscription = Supabase.instance.client
+          .from('trips')
+          .stream(primaryKey: ['id'])
+          .eq('id', tripId)
+          .listen((rows) {
+        if (rows.isEmpty) return;
+        _syncSimulationTimer(rows.first['status']?.toString() ?? '');
+      });
+    } catch (e) {
+      debugPrint('[Mapa] Error configurando simulacion: $e');
+    }
+  }
+
+  void _syncSimulationTimer(String tripStatus) {
+    _activeTripStatus = tripStatus;
+
+    if (tripStatus == 'en_ruta' &&
+        _activeDriverId != null &&
+        _activeTripId != null) {
+      _simulationTimer ??= Timer.periodic(const Duration(seconds: 5), (_) {
+        unawaited(_ejecutarSimulacionMovimiento());
+      });
+      return;
+    }
+
+    _simulationTimer?.cancel();
+    _simulationTimer = null;
+  }
+
+  Future<void> _ejecutarSimulacionMovimiento() async {
+    if (_activeTripStatus != 'en_ruta') return;
+
+    final driverId = _activeDriverId;
+    final tripId = _activeTripId;
+    if (driverId == null || tripId == null) return;
+
+    try {
+      await Supabase.instance.client.rpc(
+        'simular_movimiento_conductor',
+        params: {
+          'p_driver_id': driverId,
+          'p_trip_id': tripId,
+        },
+      );
+    } catch (e) {
+      debugPrint('[Mapa] simular_movimiento_conductor: $e');
     }
   }
 

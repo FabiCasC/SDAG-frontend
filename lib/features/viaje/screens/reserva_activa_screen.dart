@@ -7,6 +7,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/services/push_notification_service.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
 import '../../../features/reserva/providers/reserva_provider.dart';
@@ -14,6 +15,7 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/maps/google_eta_service.dart';
+import '../../../shared/maps/waze_service.dart';
 import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/viaje_provider.dart';
@@ -63,6 +65,13 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
       final userId = ref.read(passengerSessionProvider).account?.id;
       if (tripId != null && tripId.isNotEmpty && userId != null) {
         _suscribirMensajesLlegando(tripId: tripId, userId: userId);
+        unawaited(
+          PushNotificationService.instance.startSupabaseBrokers(
+            role: 'passenger',
+            tripId: tripId,
+            profileId: userId,
+          ),
+        );
       }
     });
 
@@ -219,12 +228,20 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
       }
     }
 
-    final eta = await GoogleEtaService.calcularEtaConductorAlPickup(
+    final googleEta = await GoogleEtaService.calcularEtaConductorAlPickup(
       driverId: driver.driverId,
       pickupAddress: pickup,
       pickupLat: reserva.pickupLat,
       pickupLng: reserva.pickupLng,
       conductorPos: _lastConductorPos,
+    );
+
+    final eta = wazeEtaMinutes(
+      fromLat: _lastConductorPos?.latitude,
+      fromLng: _lastConductorPos?.longitude,
+      toLat: reserva.pickupLat,
+      toLng: reserva.pickupLng,
+      googleEtaMinutes: googleEta,
     );
 
     if (!mounted) return;
@@ -284,6 +301,7 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
     _etaTimer?.cancel();
     _boardingSubscription?.cancel();
     _mensajesSubscription?.cancel();
+    unawaited(PushNotificationService.instance.stopSupabaseBrokers());
     _viajeSub.close();
     super.dispose();
   }
@@ -419,7 +437,7 @@ class _ReservaActivaScreenState extends ConsumerState<ReservaActivaScreen> {
                   if (_etaMinutos != null) ...[
                     const SizedBox(height: AppSpacing.sm),
                     Text(
-                      '≈ $_etaMinutos min',
+                      '≈ $_etaMinutos min (Waze/Google)',
                       style: Theme.of(context).textTheme.displaySmall?.copyWith(
                             color: AppColors.primaryBlue,
                             fontWeight: FontWeight.w800,

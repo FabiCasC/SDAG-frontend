@@ -108,8 +108,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     try {
       final rows = await Supabase.instance.client
           .from('trip_messages')
-          .select('id, sender_role, message, body, created_at')
+          .select('id, sender_role, message, body, created_at, message_status')
           .eq('trip_id', tripId)
+          .neq('message_status', 'archivado')
           .order('created_at', ascending: true);
 
       if (!mounted) return;
@@ -131,6 +132,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _appendRow(Map<String, dynamic> row) {
+    if (row['message_status']?.toString() == 'archivado') return;
     final entry = _rowToEntry(row);
     // Evitar duplicados por Realtime + carga inicial
     if (_messages.any((m) => m.id == entry.id)) return;

@@ -37,11 +37,11 @@ class ConductorReservasScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Mis Reservas'),
       ),
-      body: _buildBody(context, state),
+      body: _buildBody(context, ref, state),
     );
   }
 
-  Widget _buildBody(BuildContext context, ConductorReservasState state) {
+  Widget _buildBody(BuildContext context, WidgetRef ref, ConductorReservasState state) {
     if (state.loading && state.reservations.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -69,18 +69,16 @@ class ConductorReservasScreen extends ConsumerWidget {
     }
 
     return RefreshIndicator(
-      onRefresh: () => ref.read(conductorReservasProvider.notifier).loadReservations(), // Need to make sure ref is available, but it's a ConsumerWidget. Wait, RefreshIndicator needs ref, let's use Consumer
-      child: Consumer(
-        builder: (context, ref, child) {
-          return RefreshIndicator(
-            onRefresh: () => ref.read(conductorReservasProvider.notifier).loadReservations(),
-            child: ListView.separated(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              itemCount: state.reservations.length,
-              separatorBuilder: (context, index) => const SizedBox(height: AppSpacing.sm),
-              itemBuilder: (context, index) {
-                final res = state.reservations[index];
-                return Card(
+      onRefresh: () async {
+        await ref.read(conductorReservasProvider.notifier).loadReservations();
+      },
+      child: ListView.separated(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        itemCount: state.reservations.length,
+        separatorBuilder: (context, index) => const SizedBox(height: AppSpacing.sm),
+        itemBuilder: (context, index) {
+          final res = state.reservations[index];
+          return Card(
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppRadius.r12),
                   ),
@@ -166,10 +164,7 @@ class ConductorReservasScreen extends ConsumerWidget {
                     ),
                   ),
                 );
-              },
-            ),
-          );
-        }
+        },
       ),
     );
   }

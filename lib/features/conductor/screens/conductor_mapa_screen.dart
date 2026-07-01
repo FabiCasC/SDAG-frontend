@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -13,11 +14,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/maps/google_directions_service.dart';
+import '../../../shared/maps/waze_service.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/conductor_viaje_provider.dart';
+import '../providers/conductor_voice_provider.dart';
+import '../../../core/services/conductor_tts_service.dart';
 
 const _driverMapsApiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
 
@@ -38,6 +42,7 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
   List<_PickupMarkerData> _pickupMarkers = const <_PickupMarkerData>[];
   List<LatLng> _routePolyline = const <LatLng>[];
   bool _routeLoaded = false;
+  String? _lastSpokenPickupId;
 
   @override
   void initState() {
@@ -305,6 +310,12 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
                   bg: const Color(0xFFF97316),
                   onTap: () => context.push(AppRoutes.driverQrScanner),
                 ),
+                const SizedBox(height: AppSpacing.sm),
+                _FabCircle(
+                  icon: Icons.navigation_rounded,
+                  bg: const Color(0xFF33CCFF),
+                  onTap: _openWazeNavigation,
+                ),
               ],
             ),
           ),
@@ -381,6 +392,7 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
         _loading = false;
         _errorMessage = null;
       });
+      _announceNextPickupIfNeeded();
       _fitBounds();
     } catch (e) {
       if (!mounted) return;
@@ -507,6 +519,55 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
         CameraPosition(target: _driverPosition!, zoom: 14),
       ),
     );
+  }
+
+  void _announceNextPickupIfNeeded() {
+    if (_pickupMarkers.isEmpty) return;
+    final next = _pickupMarkers.first;
+    if (next.id == _lastSpokenPickupId) return;
+    _lastSpokenPickupId = next.id;
+
+    final voiceEnabled = ref.read(conductorVoiceProvider).enabled;
+    unawaited(
+      ConductorTtsService.instance.speakNextStop(
+        enabled: voiceEnabled,
+        passengerName: next.title,
+        pickupPoint: next.subtitle,
+      ),
+    );
+  }
+
+  Future<void> _openWazeNavigation() async {
+    LatLng? destination;
+    if (_pickupMarkers.isNotEmpty) {
+      destination = _pickupMarkers.first.position;
+    } else if (_routePolyline.isNotEmpty) {
+      destination = _routePolyline.last;
+    }
+
+    final driver = _driverPosition;
+    if (destination == null || driver == null) {
+      if (!mounted) return;
+      AppSnackbars.warning(context, mensajeWazeNoDisponible());
+      return;
+    }
+
+    if (!wazeDisponible(lat: destination.latitude, lng: destination.longitude)) {
+      if (!mounted) return;
+      AppSnackbars.warning(context, mensajeWazeNoDisponible());
+      return;
+    }
+
+    final uri = buildWazeRouteUri(
+      fromLat: driver.latitude,
+      fromLng: driver.longitude,
+      toLat: destination.latitude,
+      toLng: destination.longitude,
+    );
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      AppSnackbars.warning(context, mensajeWazeNoDisponible());
+    }
   }
 }
 

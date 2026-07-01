@@ -4,6 +4,44 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'conductor_voice_provider.dart';
 
+class ConductorVehicleInfo {
+  const ConductorVehicleInfo({
+    required this.id,
+    required this.plate,
+    required this.label,
+    required this.vehicleType,
+    required this.totalSeats,
+    required this.active,
+    required this.createdAt,
+  });
+
+  factory ConductorVehicleInfo.fromMap(Map<String, dynamic> map) {
+    return ConductorVehicleInfo(
+      id: map['id']?.toString() ?? '',
+      plate: map['plate']?.toString() ?? '',
+      label: map['label']?.toString() ?? '',
+      vehicleType: map['vehicle_type']?.toString() ?? '',
+      totalSeats: (map['total_seats'] as num?)?.toInt() ?? 0,
+      active: (map['active'] as bool?) ?? false,
+      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? ''),
+    );
+  }
+
+  final String id;
+  final String plate;
+  final String label;
+  final String vehicleType;
+  final int totalSeats;
+  final bool active;
+  final DateTime? createdAt;
+
+  String get modelLabel {
+    if (label.trim().isNotEmpty) return label.trim();
+    if (vehicleType.trim().isNotEmpty) return vehicleType.trim();
+    return '—';
+  }
+}
+
 class PerfilConductorState {
   const PerfilConductorState({
     required this.isLoading,
@@ -14,6 +52,9 @@ class PerfilConductorState {
     required this.phone,
     required this.plate,
     required this.vehicleType,
+    required this.totalSeats,
+    required this.assignedVehicle,
+    required this.vehicleHistory,
     required this.driverEstado,
     required this.cuentaActiva,
     required this.telefono,
@@ -31,6 +72,9 @@ class PerfilConductorState {
   final String phone;
   final String plate;
   final String vehicleType;
+  final int totalSeats;
+  final ConductorVehicleInfo? assignedVehicle;
+  final List<ConductorVehicleInfo> vehicleHistory;
   final String driverEstado;
   final bool cuentaActiva;
 
@@ -48,6 +92,9 @@ class PerfilConductorState {
     String? phone,
     String? plate,
     String? vehicleType,
+    int? totalSeats,
+    ConductorVehicleInfo? assignedVehicle,
+    List<ConductorVehicleInfo>? vehicleHistory,
     String? driverEstado,
     bool? cuentaActiva,
     String? telefono,
@@ -64,6 +111,9 @@ class PerfilConductorState {
       phone: phone ?? this.phone,
       plate: plate ?? this.plate,
       vehicleType: vehicleType ?? this.vehicleType,
+      totalSeats: totalSeats ?? this.totalSeats,
+      assignedVehicle: assignedVehicle ?? this.assignedVehicle,
+      vehicleHistory: vehicleHistory ?? this.vehicleHistory,
       driverEstado: driverEstado ?? this.driverEstado,
       cuentaActiva: cuentaActiva ?? this.cuentaActiva,
       telefono: telefono ?? this.telefono,
@@ -82,6 +132,9 @@ class PerfilConductorState {
     phone: '',
     plate: '',
     vehicleType: '',
+    totalSeats: 0,
+    assignedVehicle: null,
+    vehicleHistory: const [],
     driverEstado: 'disponible',
     cuentaActiva: true,
     telefono: '',
@@ -133,6 +186,9 @@ class PerfilConductorController extends StateNotifier<PerfilConductorState> {
 
       String plate = '';
       String vehicleType = '';
+      int totalSeats = 0;
+      ConductorVehicleInfo? assignedVehicle;
+      var vehicleHistory = <ConductorVehicleInfo>[];
       String driverEstado = 'disponible';
       var cuentaActiva = true;
       if (driver != null) {
@@ -142,8 +198,33 @@ class PerfilConductorController extends StateNotifier<PerfilConductorState> {
         final rawEstado = driver['estado']?.toString();
         driverEstado = rawEstado == 'en_ruta' ? 'en_ruta' : 'disponible';
 
+        final driverRecordId = driver['id']?.toString() ?? '';
+        if (driverRecordId.isNotEmpty) {
+          final vehiclesRes = await Supabase.instance.client
+              .from('vehicles')
+              .select('id, plate, label, vehicle_type, total_seats, active, created_at')
+              .eq('driver_id', driverRecordId)
+              .order('active', ascending: false)
+              .order('created_at', ascending: false);
+
+          vehicleHistory = (vehiclesRes as List)
+              .cast<Map<String, dynamic>>()
+              .map(ConductorVehicleInfo.fromMap)
+              .toList(growable: false);
+
+          assignedVehicle = vehicleHistory.where((v) => v.active).isNotEmpty
+              ? vehicleHistory.firstWhere((v) => v.active)
+              : (vehicleHistory.isNotEmpty ? vehicleHistory.first : null);
+
+          if (assignedVehicle != null) {
+            plate = plate.isEmpty ? assignedVehicle.plate : plate;
+            vehicleType = vehicleType.isEmpty ? assignedVehicle.vehicleType : vehicleType;
+            totalSeats = assignedVehicle.totalSeats;
+          }
+        }
+
         final v = driver['vehicles'];
-        if ((plate.isEmpty || vehicleType.isEmpty) && v != null) {
+        if ((plate.isEmpty || vehicleType.isEmpty) && v != null && assignedVehicle == null) {
           Map<String, dynamic>? vm;
           if (v is Map<String, dynamic>) {
             vm = v;
@@ -176,6 +257,9 @@ class PerfilConductorController extends StateNotifier<PerfilConductorState> {
         telefono: phone,
         plate: plate,
         vehicleType: vehicleType,
+        totalSeats: totalSeats,
+        assignedVehicle: assignedVehicle,
+        vehicleHistory: vehicleHistory,
         driverEstado: driverEstado,
         cuentaActiva: cuentaActiva,
         errorMessage: null,

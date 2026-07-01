@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/services/conductor_tts_service.dart';
+
 import 'conductor_viaje_provider.dart';
 
 class ConductorVoiceState {
@@ -62,6 +64,7 @@ class ConductorVoiceController extends StateNotifier<ConductorVoiceState> {
   void _emit(String text) {
     if (!state.enabled) return;
     state = state.copyWith(bannerText: '🔊 $text', bannerId: state.bannerId + 1);
+    unawaited(ConductorTtsService.instance.speak(text, enabled: state.enabled));
   }
 
   void onViajeChanged(ConductorViajeState? prev, ConductorViajeState next) {
@@ -73,7 +76,7 @@ class ConductorVoiceController extends StateNotifier<ConductorVoiceState> {
       final nextPassenger = _nextPending(next);
       if (nextPassenger != null) {
         _lastNextPassengerId = nextPassenger.id;
-        _emit('Próxima parada: ${nextPassenger.nombre}');
+        _emit('Próxima parada: ${nextPassenger.puntoRecojo.isNotEmpty ? nextPassenger.puntoRecojo : nextPassenger.nombre}');
       }
       _nearPickupTimer?.cancel();
       _nearPickupTimer = Timer(const Duration(seconds: 12), () {
@@ -88,7 +91,7 @@ class ConductorVoiceController extends StateNotifier<ConductorVoiceState> {
       final nextPassenger = _nextPending(next);
       if (nextPassenger != null && nextPassenger.id != _lastNextPassengerId) {
         _lastNextPassengerId = nextPassenger.id;
-        _emit('Próxima parada: ${nextPassenger.nombre}');
+        _emit('Próxima parada: ${nextPassenger.puntoRecojo.isNotEmpty ? nextPassenger.puntoRecojo : nextPassenger.nombre}');
       }
     }
   }

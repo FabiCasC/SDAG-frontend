@@ -32,6 +32,7 @@ import '../../features/conductor/screens/conductor_home_screen.dart';
 import '../../features/conductor/screens/conductor_chat_grupal_screen.dart';
 import '../../features/conductor/screens/conductor_chat_screen.dart';
 import '../../features/conductor/screens/conductor_historial_screen.dart';
+import '../../features/conductor/screens/conductor_historial_chats_screen.dart';
 import '../../features/conductor/screens/conductor_manifiesto_screen.dart';
 import '../../features/conductor/screens/conductor_mapa_screen.dart';
 import '../../features/conductor/screens/conductor_noticias_screen.dart';
@@ -266,6 +267,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.driverHistorial,
         builder: (context, state) => const ConductorHistorialScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.driverHistorialChats,
+        builder: (context, state) => const ConductorHistorialChatsScreen(),
       ),
       GoRoute(
         path: AppRoutes.driverNoticias,

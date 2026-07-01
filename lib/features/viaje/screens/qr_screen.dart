@@ -11,6 +11,7 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
+import '../../conductor/utils/qr_security_utils.dart';
 
 class QrScreen extends ConsumerStatefulWidget {
   const QrScreen({required this.tripId, super.key});
@@ -105,7 +106,16 @@ class _QrScreenState extends ConsumerState<QrScreen> {
 
           final firstSeat = trip.seats.isEmpty ? 0 : trip.seats.first;
           final cacheKey = 'qr_cache_${trip.id}_$firstSeat';
-          final qrData = trip.id;
+          final qrData = buildSecurePassengerQrPayload(
+            reservationId: trip.id,
+            seatNumber: firstSeat,
+            passengerProfileId: trip.passengerProfileId,
+          );
+          final signatureHash = qrPersonalSignatureHash(
+            reservationId: trip.id,
+            seatNumber: firstSeat,
+            passengerProfileId: trip.passengerProfileId,
+          );
 
           if (!online && _cachedQrData == null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -169,7 +179,26 @@ class _QrScreenState extends ConsumerState<QrScreen> {
                               backgroundColor: AppColors.white,
                             ),
                           ),
-                          const SizedBox(height: AppSpacing.lg),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            formatQrSignatureLabel(signatureHash),
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.2,
+                                  fontFamily: 'monospace',
+                                ),
+                            textAlign: TextAlign.center,
+                          ),
+                          Text(
+                            'Boleto personal · no transferible',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppColors.textSecondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
                           Text(
                             trip.passengerName,
                             style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -226,6 +255,7 @@ Future<_QrTripData?> _loadQrTripData(String? reservationId) async {
         trip_id,
         seats,
         vehiculo_partio,
+        passenger_profile_id,
         profiles (
           name,
           first_name,
@@ -248,6 +278,7 @@ Future<_QrTripData?> _loadQrTripData(String? reservationId) async {
     tripId: map['trip_id']?.toString() ?? '',
     seats: ((map['seats'] as List?) ?? const <dynamic>[]).whereType<int>().toList(),
     boarded: (map['vehiculo_partio'] as bool?) ?? false,
+    passengerProfileId: map['passenger_profile_id']?.toString() ?? '',
     passengerName: (profile['name']?.toString().trim().isNotEmpty ?? false)
         ? profile['name'].toString().trim()
         : (fullName.isNotEmpty ? fullName : 'Pasajero'),
@@ -260,6 +291,7 @@ class _QrTripData {
     required this.tripId,
     required this.seats,
     required this.boarded,
+    required this.passengerProfileId,
     required this.passengerName,
   });
 
@@ -267,6 +299,7 @@ class _QrTripData {
   final String tripId;
   final List<int> seats;
   final bool boarded;
+  final String passengerProfileId;
   final String passengerName;
 
   String get seatsLabel => seats.isEmpty ? 'Sin asiento' : seats.map((s) => 'Asiento #$s').join(', ');

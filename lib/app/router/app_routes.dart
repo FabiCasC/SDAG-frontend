@@ -46,6 +46,7 @@ class AppRoutes {
   static const driverChatGrupal = '/conductor/chat-grupal';
   static const driverComisiones = '/conductor/comisiones';
   static const driverHistorial = '/conductor/historial';
+  static const driverHistorialChats = '/conductor/historial-chats';
   static const driverNoticias = '/conductor/noticias';
   static const driverNoticiasDetalle = '/conductor/noticias/:id';
   static const driverNoticiasNueva = '/conductor/noticias/nueva';

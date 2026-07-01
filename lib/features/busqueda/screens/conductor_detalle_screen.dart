@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
@@ -11,6 +12,7 @@ import '../../../shared/widgets/reusable_ui_components.dart';
 import '../../reserva/providers/reserva_provider.dart';
 import '../../../data/models/route_polyline_model.dart';
 import '../../../shared/widgets/mapa_ruta_widget.dart';
+import '../../../shared/maps/waze_service.dart';
 class ConductorDetalleScreen extends ConsumerWidget {
   const ConductorDetalleScreen({
     required this.driverId,
@@ -176,6 +178,34 @@ class ConductorDetalleScreen extends ConsumerWidget {
                         )
                       else
                         _RoutePreview(routeLabel: driver.routeLabel),
+                      const SizedBox(height: AppSpacing.md),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.navigation_rounded),
+                        label: const Text('Ver ruta en Waze'),
+                        onPressed: () async {
+                          final poly = driver.routePolyline;
+                          if (poly == null || poly.points.length < 2) {
+                            AppSnackbars.warning(context, mensajeWazeNoDisponible());
+                            return;
+                          }
+                          final from = poly.points.first;
+                          final to = poly.points.last;
+                          if (!wazeDisponible(lat: to.lat, lng: to.lng)) {
+                            AppSnackbars.warning(context, mensajeWazeNoDisponible());
+                            return;
+                          }
+                          final uri = buildWazeRouteUri(
+                            fromLat: from.lat,
+                            fromLng: from.lng,
+                            toLat: to.lat,
+                            toLng: to.lng,
+                          );
+                          final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          if (!ok && context.mounted) {
+                            AppSnackbars.warning(context, mensajeWazeNoDisponible());
+                          }
+                        },
+                      ),
                       const SizedBox(height: AppSpacing.lg),
                       FilledButton(
                         style: FilledButton.styleFrom(

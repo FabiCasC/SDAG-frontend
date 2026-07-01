@@ -306,6 +306,56 @@ class _ConductorPerfilScreenState extends ConsumerState<ConductorPerfilScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
+                  'Vehículo asignado',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                if (perfil.assignedVehicle == null)
+                  Text(
+                    'Sin vehículo vinculado en Supabase.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  )
+                else ...[
+                  _kv(context, 'Placa', perfil.assignedVehicle!.plate),
+                  _kv(context, 'Modelo', perfil.assignedVehicle!.modelLabel),
+                  _kv(context, 'Capacidad', '${perfil.assignedVehicle!.totalSeats} asientos'),
+                  _kv(
+                    context,
+                    'Estado',
+                    perfil.assignedVehicle!.active ? 'Activo' : 'Inactivo',
+                  ),
+                ],
+                if (perfil.vehicleHistory.length > 1) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Histórico (${perfil.vehicleHistory.length} vehículos)',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Container(
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(AppRadius.r16),
+              border: Border.all(color: AppColors.border),
+            ),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
                   'Datos editables',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: AppColors.textPrimary,

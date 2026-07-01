@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../data/models/route_polyline_model.dart';
+import '../utils/seat_hold_utils.dart';
 
 class ReservaAcompanante {
   const ReservaAcompanante({
@@ -56,6 +57,7 @@ class ReservaState {
     required this.vehiculoPartio,
     required this.additionalChargePending,
     required this.additionalChargeAmount,
+    this.seatHoldStartedAt,
   });
 
   final String? reservaId;
@@ -68,6 +70,7 @@ class ReservaState {
   final bool vehiculoPartio;
   final bool additionalChargePending;
   final double additionalChargeAmount;
+  final DateTime? seatHoldStartedAt;
 
   double get montoTotal => asientosSeleccionados.length * 15.0;
   double get montoTotalFinal => montoTotal + (additionalChargePending ? additionalChargeAmount : 0.0);
@@ -86,6 +89,8 @@ class ReservaState {
     bool? additionalChargePending,
     double? additionalChargeAmount,
     bool clearAdditionalCharge = false,
+    DateTime? seatHoldStartedAt,
+    bool clearSeatHold = false,
   }) {
     return ReservaState(
       reservaId: reservaId ?? this.reservaId,
@@ -101,6 +106,7 @@ class ReservaState {
           : (additionalChargePending ?? this.additionalChargePending),
       additionalChargeAmount:
           clearAdditionalCharge ? 0.0 : (additionalChargeAmount ?? this.additionalChargeAmount),
+      seatHoldStartedAt: clearSeatHold ? null : (seatHoldStartedAt ?? this.seatHoldStartedAt),
     );
   }
 
@@ -115,6 +121,7 @@ class ReservaState {
     vehiculoPartio: false,
     additionalChargePending: false,
     additionalChargeAmount: 0.0,
+    seatHoldStartedAt: null,
   );
 }
 
@@ -136,6 +143,7 @@ class ReservaController extends StateNotifier<ReservaState> {
       vehiculoPartio: false,
       additionalChargePending: false,
       additionalChargeAmount: 0.0,
+      seatHoldStartedAt: null,
     );
   }
 
@@ -146,9 +154,25 @@ class ReservaController extends StateNotifier<ReservaState> {
       final existing = state.acompanantes[s];
       if (existing != null) keep[s] = existing;
     }
+    final holdStart = normalized.isEmpty
+        ? null
+        : (state.seatHoldStartedAt ?? DateTime.now());
     state = state.copyWith(
       asientosSeleccionados: normalized,
       acompanantes: keep,
+      seatHoldStartedAt: holdStart,
+      clearSeatHold: normalized.isEmpty,
+    );
+  }
+
+  /// RF-120 — libera asientos cuando expira el bloqueo temporal.
+  void clearSeatHoldIfExpired(DateTime now) {
+    if (state.seatHoldStartedAt == null || state.asientosSeleccionados.isEmpty) return;
+    if (!seatHoldExpired(holdStartedAt: state.seatHoldStartedAt, now: now)) return;
+    state = state.copyWith(
+      asientosSeleccionados: const <int>[],
+      acompanantes: const <int, ReservaAcompanante>{},
+      clearSeatHold: true,
     );
   }
 

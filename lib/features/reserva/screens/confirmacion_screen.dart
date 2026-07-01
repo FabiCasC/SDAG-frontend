@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:printing/printing.dart';
+
 import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
@@ -14,6 +16,7 @@ import '../../../shared/design/app_spacing.dart';
 import '../../../shared/maps/google_eta_service.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
+import '../utils/receipt_pdf_builder.dart';
 
 class ConfirmacionScreen extends ConsumerStatefulWidget {
   const ConfirmacionScreen({super.key});
@@ -27,6 +30,8 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
   int? _etaMinutos;
   bool _etaLoading = true;
   bool _boardingSetupDone = false;
+  bool _downloadingReceipt = false;
+  String? _receiptNumber;
   StreamSubscription<List<Map<String, dynamic>>>? _boardingSubscription;
 
   @override
@@ -37,7 +42,59 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
       setState(() => _showCheck = true);
       _calcularEtaInicial();
       _setupAbordajeRealtime();
+      _loadPaymentReceipt();
     });
+  }
+
+  Future<void> _loadPaymentReceipt() async {
+    final reservaId = ref.read(reservaProvider).reservaId;
+    if (reservaId == null) return;
+    try {
+      final payment = await Supabase.instance.client
+          .from('payments')
+          .select('receipt_number')
+          .eq('reservation_id', reservaId)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (mounted) {
+        setState(() => _receiptNumber = payment?['receipt_number']?.toString());
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _downloadReceipt() async {
+    if (_downloadingReceipt) return;
+    final reserva = ref.read(reservaProvider);
+    final session = ref.read(passengerSessionProvider);
+    final reservaId = reserva.reservaId;
+    final driver = reserva.conductorSeleccionado;
+    if (reservaId == null || driver == null) return;
+
+    setState(() => _downloadingReceipt = true);
+    try {
+      final doc = await buildPaymentReceiptPdf(
+        reservationId: reservaId,
+        passengerName: session.account?.name ?? 'Pasajero',
+        passengerDni: session.account?.dni ?? '',
+        pickupPoint: reserva.puntoRecojo ?? '',
+        seats: reserva.asientosSeleccionados,
+        amountSoles: reserva.montoTotal,
+        receiptNumber: _receiptNumber ?? '—',
+        driverName: driver.name,
+        driverPlate: driver.plate,
+        paidAt: DateTime.now(),
+      );
+
+      await Printing.sharePdf(
+        bytes: await doc.save(),
+        filename: 'recibo_sdag_$reservaId.pdf',
+      );
+    } catch (e) {
+      if (mounted) AppSnackbars.error(context, 'No se pudo generar el recibo');
+    } finally {
+      if (mounted) setState(() => _downloadingReceipt = false);
+    }
   }
 
   void _setupAbordajeRealtime() {
@@ -287,6 +344,18 @@ class _ConfirmacionScreenState extends ConsumerState<ConfirmacionScreen> {
               },
             ),
             const SizedBox(height: AppSpacing.lg),
+            OutlinedButton.icon(
+              icon: _downloadingReceipt
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.download_rounded),
+              label: const Text('Descargar Recibo'),
+              onPressed: _downloadingReceipt ? null : _downloadReceipt,
+            ),
+            const SizedBox(height: AppSpacing.md),
             AppPrimaryButton(
               label: 'Ver mi reserva activa',
               onPressed: () => context.go(AppRoutes.passengerReservaActiva),

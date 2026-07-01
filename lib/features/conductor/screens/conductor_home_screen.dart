@@ -11,6 +11,8 @@ import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
+import '../../../core/services/push_notification_service.dart';
+import '../../reserva/utils/trip_rules.dart';
 import '../providers/conductor_auth_provider.dart';
 import '../providers/conductor_comisiones_provider.dart';
 import '../providers/conductor_voice_provider.dart';
@@ -170,6 +172,7 @@ class _ConductorInicioTab extends ConsumerStatefulWidget {
 class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
   StreamSubscription<List<Map<String, dynamic>>>? _reservasSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _mensajesSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _tripsSubscription;
   String? _lastEsperameMessageId;
   bool _mensajesInitialized = false;
 
@@ -183,6 +186,19 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
   int _totalViajesHoy = 0;
   double _gananciaHoy = 0;
   bool _autoStartInFlight = false;
+  DateTime? _vehicleFullSince;
+  Timer? _departureCountdownTimer;
+  int _departureRemainingSeconds = 0;
+
+  @override
+  void dispose() {
+    _departureCountdownTimer?.cancel();
+    _reservasSubscription?.cancel();
+    _mensajesSubscription?.cancel();
+    _tripsSubscription?.cancel();
+    unawaited(PushNotificationService.instance.stopSupabaseBrokers());
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -328,7 +344,7 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
     final trip = await Supabase.instance.client
         .from('trips')
         .select('''
-          id, status, route_id, scheduled_departure_at, eta_minutes, amount_total,
+          id, status, route_id, scheduled_departure_at, eta_minutes, amount_total, votos_salida,
           routes(id, name, from_label, to_label)
         ''')
         .eq('driver_id', driver['id'])
@@ -354,7 +370,36 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
     if (!mounted) return;
     setState(() => _tripData = trip);
 
+    await PushNotificationService.instance.startSupabaseBrokers(
+      role: 'driver',
+      tripId: tripId,
+      profileId: user.id,
+    );
+
     await _fetchPasajeros(tripId);
+
+    _cancelTripsSubscription();
+    _tripsSubscription = Supabase.instance.client
+        .from('trips')
+        .stream(primaryKey: ['id'])
+        .eq('id', tripId)
+        .listen((data) {
+      if (!mounted || data.isEmpty) return;
+      final row = data.first;
+      final prevStatus = _tripData?['status']?.toString();
+      final newStatus = row['status']?.toString();
+      setState(() => _tripData = Map<String, dynamic>.from(row));
+
+      if (prevStatus == 'esperando' && newStatus == 'en_ruta') {
+        final votos = (row['votos_salida'] as num?)?.toInt() ?? 0;
+        if (votos > 0) {
+          AppSnackbars.success(
+            context,
+            'Salida anticipada autorizada ($votos votos). Viaje iniciado.',
+          );
+        }
+      }
+    });
 
     _cancelReservasSubscription();
     _reservasSubscription = Supabase.instance.client
@@ -464,9 +509,50 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
           .expand((r) => (r['seats'] as List? ?? const []))
           .length;
 
-      if (asientosOcupados < _capacidad) return;
+      if (asientosOcupados < _capacidad) {
+        _vehicleFullSince = null;
+        _departureCountdownTimer?.cancel();
+        if (_departureRemainingSeconds != 0 && mounted) {
+          setState(() => _departureRemainingSeconds = 0);
+        }
+        return;
+      }
+
+      _vehicleFullSince ??= DateTime.now();
+      PushNotificationService.instance.notifyVehicleFull();
+
+      final remaining = departureCountdownRemainingSeconds(
+        fullSince: _vehicleFullSince,
+        now: DateTime.now(),
+      );
+      if (mounted && remaining != _departureRemainingSeconds) {
+        setState(() => _departureRemainingSeconds = remaining);
+      }
+
+      if (!canDepartAfterCountdown(
+        fullSince: _vehicleFullSince,
+        now: DateTime.now(),
+        isFull: true,
+      )) {
+        _departureCountdownTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+          if (!mounted) return;
+          final left = departureCountdownRemainingSeconds(
+            fullSince: _vehicleFullSince,
+            now: DateTime.now(),
+          );
+          setState(() => _departureRemainingSeconds = left);
+          if (left <= 0) {
+            _departureCountdownTimer?.cancel();
+            _departureCountdownTimer = null;
+            unawaited(_verificarInicioAutomatico(tripId));
+          }
+        });
+        return;
+      }
 
       _autoStartInFlight = true;
+      _departureCountdownTimer?.cancel();
+      _departureCountdownTimer = null;
 
       await Supabase.instance.client.from('trips').update({
         'status': 'en_ruta',
@@ -481,8 +567,10 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
       if (!mounted) return;
       setState(() {
         _tripData = Map<String, dynamic>.from(_tripData!)..['status'] = 'en_ruta';
+        _departureRemainingSeconds = 0;
+        _vehicleFullSince = null;
       });
-      AppSnackbars.success(context, 'Carro lleno. Viaje iniciado automaticamente.');
+      AppSnackbars.success(context, 'Carro lleno. Viaje iniciado tras temporizador de 3 minutos.');
     } catch (e) {
       debugPrint('[Home] Error inicio automatico: $e');
     } finally {
@@ -493,6 +581,11 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
   void _cancelReservasSubscription() {
     _reservasSubscription?.cancel();
     _reservasSubscription = null;
+  }
+
+  void _cancelTripsSubscription() {
+    _tripsSubscription?.cancel();
+    _tripsSubscription = null;
   }
 
   void _cancelMensajesSubscription() {
@@ -546,13 +639,6 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
         ),
       );
     });
-  }
-
-  @override
-  void dispose() {
-    _reservasSubscription?.cancel();
-    _mensajesSubscription?.cancel();
-    super.dispose();
   }
 
   @override
@@ -744,6 +830,54 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
                 ],
               ),
               const SizedBox(height: AppSpacing.lg),
+              if (_tripData != null && ((_tripData!['votos_salida'] as num?)?.toInt() ?? 0) > 0)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.seatWarnBg,
+                    borderRadius: BorderRadius.circular(AppRadius.r12),
+                  ),
+                  child: Text(
+                    'Votos salida anticipada: ${_tripData!['votos_salida']} · Estado: ${_tripData!['status']}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              if (_tripData != null && _capacidad > 0 && _asientosOcupados < _capacidad)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.infoSurface,
+                    borderRadius: BorderRadius.circular(AppRadius.r12),
+                  ),
+                  child: Text(
+                    'Tiempo estimado de llenado: ~${estimateVehicleFillMinutes(occupiedSeats: _asientosOcupados, capacity: _capacidad)} min',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                  ),
+                ),
+              if (_departureRemainingSeconds > 0)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.seatWarnBg,
+                    borderRadius: BorderRadius.circular(AppRadius.r12),
+                  ),
+                  child: Text(
+                    'Vehículo lleno. Salida en ${formatDepartureCountdown(_departureRemainingSeconds)}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                        ),
+                  ),
+                ),
               if (_tripData != null)
                 _PassengersSection(
                   passengers: _reservas,
@@ -772,6 +906,12 @@ class _ConductorInicioTabState extends ConsumerState<_ConductorInicioTab> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
+                  _QuickActionCard(
+                    title: 'Historial chats',
+                    color: const Color(0xFF2563EB),
+                    icon: Icons.history_rounded,
+                    onTap: () => context.push(AppRoutes.driverHistorialChats),
+                  ),
                   _QuickActionCard(
                     title: 'Chat grupal',
                     color: canGroupChat ? const Color(0xFF2563EB) : const Color(0xFFE5E7EB),

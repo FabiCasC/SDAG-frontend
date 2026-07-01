@@ -3,15 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../app/providers/passenger/controllers/passenger_session_controller.dart';
 import '../../../app/router/app_routes.dart';
 import '../../../shared/design/app_colors.dart';
 import '../../../shared/design/app_radius.dart';
 import '../../../shared/design/app_spacing.dart';
 import '../../../shared/widgets/reusable_ui_components.dart';
 import '../providers/reserva_provider.dart';
-
-enum _Acceptance { accepted, pending, rejected }
+import '../services/forced_departure_service.dart';
+import '../utils/forced_departure_utils.dart';
 
 class ForzarSalidaScreen extends ConsumerStatefulWidget {
   const ForzarSalidaScreen({super.key});
@@ -21,114 +23,148 @@ class ForzarSalidaScreen extends ConsumerStatefulWidget {
 }
 
 class _ForzarSalidaScreenState extends ConsumerState<ForzarSalidaScreen> {
-  Timer? _countdownTimer;
-  Timer? _autoAcceptTimer;
+  final _service = ForcedDepartureService();
+  Timer? _refreshTimer;
 
-  int _secondsLeft = 60;
-  bool _authorizedShown = false;
-
-  final Map<String, _Acceptance> _statusByPassengerId = {};
+  bool _loading = true;
+  bool _voting = false;
+  bool _alreadyVoted = false;
+  TripVoteSnapshot? _snapshot;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      if (_secondsLeft <= 0) return;
-      setState(() => _secondsLeft -= 1);
-    });
-
-    _autoAcceptTimer = Timer(const Duration(seconds: 5), () {
-      if (!mounted) return;
-      setState(() {
-        for (final k in _statusByPassengerId.keys) {
-          _statusByPassengerId[k] = _Acceptance.accepted;
-        }
-      });
-      _checkAllAccepted();
-    });
+    _load();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) => _load(silent: true));
   }
 
   @override
   void dispose() {
-    _countdownTimer?.cancel();
-    _autoAcceptTimer?.cancel();
+    _refreshTimer?.cancel();
     super.dispose();
   }
 
-  void _seedIfNeeded(List<_PassengerItem> items) {
-    if (_statusByPassengerId.isNotEmpty) return;
-    for (final p in items) {
-      _statusByPassengerId[p.id] = p.isTitular ? _Acceptance.accepted : _Acceptance.pending;
+  Future<void> _load({bool silent = false}) async {
+    final reserva = ref.read(reservaProvider);
+    final tripId = reserva.conductorSeleccionado?.tripId.trim();
+    final userId = ref.read(passengerSessionProvider).account?.id;
+
+    if (tripId == null || tripId.isEmpty) {
+      if (!silent && mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'No hay viaje activo';
+        });
+      }
+      return;
+    }
+
+    if (!silent && mounted) setState(() => _loading = true);
+
+    try {
+      final snap = await _service.loadTripSnapshot(tripId);
+      var voted = false;
+      if (userId != null) {
+        final row = await Supabase.instance.client
+            .from('reservations')
+            .select('voted_early_departure')
+            .eq('trip_id', tripId)
+            .eq('passenger_profile_id', userId)
+            .eq('status', 'activa')
+            .maybeSingle();
+        voted = row?['voted_early_departure'] == true;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _snapshot = snap;
+        _alreadyVoted = voted;
+        _loading = false;
+        _error = snap == null ? 'No se pudo cargar el viaje' : null;
+      });
+    } catch (e) {
+      if (!silent && mounted) {
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
+      }
     }
   }
 
-  Future<void> _checkAllAccepted() async {
-    if (_authorizedShown) return;
-    final allAccepted =
-        _statusByPassengerId.isNotEmpty && _statusByPassengerId.values.every((v) => v == _Acceptance.accepted);
-    if (!allAccepted) return;
+  Future<void> _vote() async {
+    if (_voting || _alreadyVoted) return;
+    final tripId = _snapshot?.tripId ?? ref.read(reservaProvider).conductorSeleccionado?.tripId;
+    if (tripId == null || tripId.isEmpty) return;
 
-    _authorizedShown = true;
-    final reserva = ref.read(reservaProvider);
-    final seats = [...reserva.asientosSeleccionados]..sort();
-    final additionalPerPassenger = 3.0;
-    final additionalTotal = seats.length * additionalPerPassenger;
-    ref.read(reservaProvider.notifier).requestAdditionalCharge(additionalTotal);
+    setState(() => _voting = true);
+    final result = await _service.registerVote(tripId: tripId);
     if (!mounted) return;
 
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('¡Salida autorizada!'),
-          content: const Text('Todos los pasajeros aceptaron la salida anticipada.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Continuar al pago'),
-            ),
-          ],
-        );
-      },
-    );
-    if (!mounted) return;
-    context.go('${AppRoutes.passengerPago}?mode=additional');
+    setState(() => _voting = false);
+
+    if (!result.ok) {
+      AppSnackbars.error(context, result.message);
+      return;
+    }
+
+    setState(() => _alreadyVoted = true);
+    await _load(silent: true);
+
+    if (result.departureAuthorized) {
+      AppSnackbars.success(context, '¡Salida anticipada autorizada! El viaje ha iniciado.');
+      context.go(AppRoutes.passengerReservaActiva);
+    } else {
+      AppSnackbars.info(
+        context,
+        'Voto registrado: ${result.votos}/${result.totalPassengers} (se requiere 50%)',
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final reserva = ref.watch(reservaProvider);
     final driver = reserva.conductorSeleccionado;
-    final seats = [...reserva.asientosSeleccionados]..sort();
 
-    if (driver == null || reserva.reservaId == null || seats.isEmpty) {
+    if (_loading) {
       return const AppScaffold(
         title: 'Forzar salida',
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_error != null || _snapshot == null || driver == null) {
+      return AppScaffold(
+        title: 'Forzar salida',
         body: PlaceholderPage(
-          title: 'No hay reserva activa',
-          subtitle: 'Confirma una reserva para poder solicitar salida anticipada.',
+          title: 'No disponible',
+          subtitle: _error ?? 'Confirma una reserva activa para votar.',
         ),
       );
     }
 
-    final passengers = _buildPassengers(reserva);
-    _seedIfNeeded(passengers);
-
-    final emptySeats = (driver.totalSeats - seats.length).clamp(0, driver.totalSeats);
-    final additionalPerPassenger = 3.0;
-    final additionalTotal = seats.length * additionalPerPassenger;
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkAllAccepted());
+    final snap = _snapshot!;
+    final now = DateTime.now();
+    final canVote = canVoteEarlyDeparture(
+      tripStatus: snap.status,
+      tripCreatedAt: snap.createdAt,
+      now: now,
+      alreadyVoted: _alreadyVoted,
+    );
+    final waitLeft = waitingMinutesRemaining(tripCreatedAt: snap.createdAt, now: now);
+    final occupied = snap.passengerCount;
+    final capacity = driver.totalSeats;
+    final emptySeats = (capacity - occupied).clamp(0, capacity);
 
     return AppScaffold(
-      title: 'Forzar salida anticipada',
+      title: 'Votar salida anticipada',
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Si el vehículo sale antes de llenarse, se calcula un pago proporcional adicional entre los pasajeros.',
+            'Si el vehículo lleva más de 10 minutos esperando, puedes votar para salir antes de llenarse.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
           ),
           const SizedBox(height: AppSpacing.md),
@@ -138,142 +174,63 @@ class _ForzarSalidaScreenState extends ConsumerState<ForzarSalidaScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _StatRow(label: 'Asientos vacíos restantes', value: '$emptySeats'),
+                  _StatRow(label: 'Asientos vacíos', value: '$emptySeats'),
                   const SizedBox(height: AppSpacing.sm),
                   _StatRow(
-                    label: 'Costo adicional por pasajero',
-                    value: 'S/ ${additionalPerPassenger.toStringAsFixed(0)}',
+                    label: 'Votos registrados',
+                    value: '${snap.votos} / ${snap.passengerCount} (mín. ${snap.threshold})',
+                    strong: true,
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   _StatRow(
-                    label: 'Total a pagar adicional',
-                    value: 'S/ ${additionalTotal.toStringAsFixed(0)}',
-                    strong: true,
+                    label: 'Estado del viaje',
+                    value: snap.status,
                   ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Container(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: AppColors.fieldFill,
-              borderRadius: BorderRadius.circular(AppRadius.r16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.timer_rounded, color: AppColors.primaryBlue),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    'Tiempo restante: $_secondsLeft s',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: AppSpacing.md),
-          Expanded(
-            child: ListView(
-              children: [
-                ...passengers.map((p) {
-                  final status = _statusByPassengerId[p.id] ?? _Acceptance.pending;
-                  final (icon, color, label) = switch (status) {
-                    _Acceptance.accepted => (Icons.check_circle_rounded, AppColors.success, 'Aceptó'),
-                    _Acceptance.pending => (Icons.hourglass_top_rounded, AppColors.warning, 'Pendiente'),
-                    _Acceptance.rejected => (Icons.cancel_rounded, AppColors.error, 'Rechazó'),
-                  };
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: AppCard(
-                      child: Padding(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        child: Row(
-                          children: [
-                            Icon(icon, color: color),
-                            const SizedBox(width: AppSpacing.sm),
-                            Expanded(
-                              child: Text(
-                                '${p.name} · Asiento #${p.seat}',
-                                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      color: AppColors.textPrimary,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                              ),
-                            ),
-                            Text(
-                              label,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: color,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-              ],
+          if (waitLeft > 0)
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.infoSurface,
+                borderRadius: BorderRadius.circular(AppRadius.r16),
+              ),
+              child: Text(
+                'Podrás votar en $waitLeft min (espera mínima de 10 min)',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            )
+          else if (_alreadyVoted)
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.seatOkBg,
+                borderRadius: BorderRadius.circular(AppRadius.r16),
+              ),
+              child: const Text('✓ Ya registraste tu voto'),
             ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.error,
-              side: const BorderSide(color: AppColors.error),
+          const Spacer(),
+          FilledButton(
+            onPressed: canVote && !_voting ? _vote : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.energeticOrange,
               minimumSize: const Size.fromHeight(AppSpacing.controlHeight),
             ),
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: const Text('Cancelar solicitud'),
+            child: _voting
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                  )
+                : const Text('Votar por salida anticipada'),
           ),
         ],
       ),
     );
   }
-
-  List<_PassengerItem> _buildPassengers(ReservaState reserva) {
-    final seats = [...reserva.asientosSeleccionados]..sort();
-    final list = <_PassengerItem>[];
-    if (seats.isEmpty) return list;
-
-    list.add(_PassengerItem(id: 'titular', name: 'Titular', seat: seats.first, isTitular: true));
-    for (final seat in seats.skip(1)) {
-      final a = reserva.acompanantes[seat];
-      list.add(
-        _PassengerItem(
-          id: 'acom_$seat',
-          name: (a?.fullName.trim().isNotEmpty ?? false) ? a!.fullName.trim() : 'Acompañante',
-          seat: seat,
-          isTitular: false,
-        ),
-      );
-    }
-    return list;
-  }
-}
-
-class _PassengerItem {
-  const _PassengerItem({
-    required this.id,
-    required this.name,
-    required this.seat,
-    required this.isTitular,
-  });
-
-  final String id;
-  final String name;
-  final int seat;
-  final bool isTitular;
 }
 
 class _StatRow extends StatelessWidget {
@@ -289,16 +246,13 @@ class _StatRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(
-            label,
-            style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary),
-          ),
+          child: Text(label, style: theme.textTheme.bodyLarge?.copyWith(color: AppColors.textSecondary)),
         ),
         Text(
           value,
           style: theme.textTheme.titleMedium?.copyWith(
-            color: strong ? AppColors.primaryBlue : AppColors.textPrimary,
-            fontWeight: strong ? FontWeight.w800 : FontWeight.w700,
+            color: AppColors.textPrimary,
+            fontWeight: strong ? FontWeight.w900 : FontWeight.w600,
           ),
         ),
       ],
