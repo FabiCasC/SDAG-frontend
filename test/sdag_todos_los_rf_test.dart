@@ -1,19 +1,28 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sdag/core/validators/sdag_validators.dart';
 import 'package:sdag/app/providers/passenger/utils/passenger_db_error_mapping.dart';
 import 'package:sdag/app/providers/passenger/validators/passenger_auth_validators.dart';
 import 'package:sdag/features/busqueda/utils/busqueda_utils.dart';
 import 'package:sdag/features/conductor/utils/notification_utils.dart';
 import 'package:sdag/features/conductor/utils/qr_scan_utils.dart';
+import 'package:sdag/features/conductor/utils/qr_security_utils.dart';
+import 'package:sdag/features/conductor/utils/trip_message_utils.dart';
+import 'package:sdag/features/conductor/utils/manifest_utils.dart';
+import 'package:sdag/features/conductor/utils/vehicle_utils.dart';
 import 'package:sdag/features/reserva/utils/payment_validation.dart';
 import 'package:sdag/features/reserva/utils/pickup_validation.dart';
 import 'package:sdag/features/reserva/utils/trip_rules.dart';
+import 'package:sdag/features/reserva/utils/forced_departure_utils.dart';
+import 'package:sdag/features/reserva/utils/seat_hold_utils.dart';
+import 'package:sdag/shared/maps/waze_service.dart';
+import 'package:sdag/core/services/push_notification_utils.dart';
+import 'package:sdag/core/services/audit_log_utils.dart';
 
 // ================================================================
 // SDAG — UTP Semana 13 S2 — Momento 3 TDD (Guía Lab Pruebas de Software)
 // Patrón ARRANGE | ACT | ASSERT sobre clases reales del proyecto (lib/)
-// Ejecutar: flutter test test/sdag_tdd_momento3_test.dart --reporter expanded
+// Ejecutar: flutter test test/sdag_todos_los_rf_test.dart --reporter expanded
 // ================================================================
-
 
 
 
@@ -22,10 +31,12 @@ import 'package:sdag/features/reserva/utils/trip_rules.dart';
 // Ejecutar: flutter test test/sdag_todos_los_rf_test.dart --reporter expanded
 // ================================================================
 
+
 // RF-001: Registro de pasajero
 void testRF001() {
   group('RF-001 — Registro de pasajero', () {
     test('CP01 — Flujo exitoso — registrar pasajero', () {
+
       // Arrange — Flujo exitoso: Registro de pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('pasajero@test.com') && PassengerAuthValidators.isValidPeruPhone('987654321') && PassengerAuthValidators.isValidDni('12345678') && PassengerAuthValidators.isValidPassword('password123'));
@@ -34,6 +45,7 @@ void testRF001() {
       print('  ✅ CP01 PASS — Flujo exitoso — registrar pasajero');
     });
     test('CP02 — Correo ya registrado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeEmailDuplicado = 'email already registered';
       // Act — ejecutar la validación / regla de la app
@@ -43,6 +55,7 @@ void testRF001() {
       print('  ✅ CP02 PASS — Correo ya registrado (E1)');
     });
     test('CP03 — Teléfono inválido (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const telefonoInvalido = '12345';
       const telefonoValido = '987654321';
@@ -55,6 +68,7 @@ void testRF001() {
       print('  ✅ CP03 PASS — Teléfono inválido (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -65,6 +79,7 @@ void testRF001() {
       print('  ✅ CP04 PASS — Campos requeridos incompletos (E3)');
     });
     test('CP05 — Formato de datos inválido (E4)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateEmailField('correo-sin-arroba') != null;
@@ -79,6 +94,7 @@ void testRF001() {
 void testRF002() {
   group('RF-002 — Inicio de sesión de pasajero', () {
     test('CP01 — Flujo exitoso — iniciar sesión pasajero', () {
+
       // Arrange — Flujo exitoso: Inicio de sesión de pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('pasajero@test.com') && PassengerAuthValidators.isValidPassword('password123'));
@@ -87,6 +103,7 @@ void testRF002() {
       print('  ✅ CP01 PASS — Flujo exitoso — iniciar sesión pasajero');
     });
     test('CP02 — Credenciales incorrectas (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const tipoAuthException = 'AuthException';
       // Act — ejecutar la validación / regla de la app
@@ -96,6 +113,7 @@ void testRF002() {
       print('  ✅ CP02 PASS — Credenciales incorrectas (E1)');
     });
     test('CP03 — Cuenta bloqueada (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const cuentaBloqueada = true;
       // Act — ejecutar la validación / regla de la app
@@ -105,6 +123,7 @@ void testRF002() {
       print('  ✅ CP03 PASS — Cuenta bloqueada (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -115,6 +134,7 @@ void testRF002() {
       print('  ✅ CP04 PASS — Campos requeridos incompletos (E3)');
     });
     test('CP05 — Formato de datos inválido (E4)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateEmailField('correo-sin-arroba') != null;
@@ -129,6 +149,7 @@ void testRF002() {
 void testRF003() {
   group('RF-003 — Guardar punto de recojo preferido', () {
     test('CP01 — Flujo exitoso — configurar punto de recojo', () {
+
       // Arrange — Flujo exitoso: Guardar punto de recojo preferido
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (validatePickupPoint('Av. Principal 123, Chosica') == null);
@@ -137,6 +158,7 @@ void testRF003() {
       print('  ✅ CP01 PASS — Flujo exitoso — configurar punto de recojo');
     });
     test('CP02 — Campo vacío (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const puntoRecojoValor1010 = '';
       const campoVacio20 = null;
@@ -149,6 +171,7 @@ void testRF003() {
       print('  ✅ CP02 PASS — Campo vacío (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -159,6 +182,7 @@ void testRF003() {
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
     test('CP04 — Formato de datos inválido (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateEmailField('correo-sin-arroba') != null;
@@ -173,6 +197,7 @@ void testRF003() {
 void testRF004() {
   group('RF-004 — Edición de perfil de pasajero', () {
     test('CP01 — Flujo exitoso — editar perfil pasajero', () {
+
       // Arrange — Flujo exitoso: Edición de perfil de pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('editado@test.com') && PassengerAuthValidators.isValidPeruPhone('912345678'));
@@ -181,6 +206,7 @@ void testRF004() {
       print('  ✅ CP01 PASS — Flujo exitoso — editar perfil pasajero');
     });
     test('CP02 — Correo duplicado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeEmailDuplicado = 'email already registered';
       // Act — ejecutar la validación / regla de la app
@@ -190,6 +216,7 @@ void testRF004() {
       print('  ✅ CP02 PASS — Correo duplicado (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -200,6 +227,7 @@ void testRF004() {
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
     test('CP04 — Formato de datos inválido (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateEmailField('correo-sin-arroba') != null;
@@ -214,6 +242,7 @@ void testRF004() {
 void testRF005() {
   group('RF-005 — Ver conductores activos en ruta', () {
     test('CP01 — Flujo exitoso — consultar conductores activos', () {
+
       // Arrange — Flujo exitoso: Ver conductores activos en ruta
       const cuentaActiva = true;
       const estadoConductor = 'activo';
@@ -224,6 +253,7 @@ void testRF005() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar conductores activos');
     });
     test('CP02 — Sin conductores activos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <Map<String, dynamic>>[];
       final isEmpty1 = busquedaSinResultados(lista.length);
@@ -232,6 +262,7 @@ void testRF005() {
       print('  ✅ CP02 PASS — Sin conductores activos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -248,6 +279,7 @@ void testRF005() {
 void testRF006() {
   group('RF-006 — Ver ruta del conductor antes de reservar', () {
     test('CP01 — Flujo exitoso — consultar ruta del conductor', () {
+
       // Arrange — Flujo exitoso: Ver ruta del conductor antes de reservar
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-006)
@@ -257,6 +289,7 @@ void testRF006() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar ruta del conductor');
     });
     test('CP02 — Información de Waze no disponible (E1)', () {
+
       // Arrange — escenario «Información de Waze no disponible (E1)»
       // Act — lógica real de lib/ (RF-006)
       final resultado1 = wazeDisponible(lat: null, lng: -76.6934);
@@ -267,6 +300,7 @@ void testRF006() {
       print('  ✅ CP02 PASS — Información de Waze no disponible (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -283,6 +317,7 @@ void testRF006() {
 void testRF007() {
   group('RF-007 — Selección de asientos en mapa interactivo', () {
     test('CP01 — Flujo exitoso — seleccionar asientos', () {
+
       // Arrange — Flujo exitoso: Selección de asientos en mapa interactivo
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -292,6 +327,7 @@ void testRF007() {
       print('  ✅ CP01 PASS — Flujo exitoso — seleccionar asientos');
     });
     test('CP02 — Asientos ya reservados por otro usuario en paralelo (E1', () {
+
       // Arrange — datos de entrada del caso de prueba
       final ocupados = {1, 3, 5};
       // Act — ejecutar la validación / regla de la app
@@ -303,6 +339,7 @@ void testRF007() {
       print('  ✅ CP02 PASS — Asientos ya reservados por otro usuario en paralelo (E1');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -313,6 +350,7 @@ void testRF007() {
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
     test('CP04 — Formato de datos inválido (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateEmailField('correo-sin-arroba') != null;
@@ -327,6 +365,7 @@ void testRF007() {
 void testRF008() {
   group('RF-008 — Reserva de asientos', () {
     test('CP01 — Flujo exitoso — reservar asiento', () {
+
       // Arrange — Flujo exitoso: Reserva de asientos
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -336,6 +375,7 @@ void testRF008() {
       print('  ✅ CP01 PASS — Flujo exitoso — reservar asiento');
     });
     test('CP02 — Pago fallido (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const pagoExitosoFlag10 = false;
       // Act — ejecutar la validación / regla de la app
@@ -345,6 +385,7 @@ void testRF008() {
       print('  ✅ CP02 PASS — Pago fallido (E1)');
     });
     test('CP03 — Conductor ya no disponible (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const estadoViajeEnRuta = 'en_ruta';
       // Act — ejecutar la validación / regla de la app
@@ -354,6 +395,7 @@ void testRF008() {
       print('  ✅ CP03 PASS — Conductor ya no disponible (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -370,6 +412,7 @@ void testRF008() {
 void testRF009() {
   group('RF-009 — Ingreso de datos de acompañantes', () {
     test('CP01 — Flujo exitoso — registrar datos de acompañantes', () {
+
       // Arrange — Flujo exitoso: Ingreso de datos de acompañantes
       const dni1234567810 = '12345678';
       // Act — ejecutar la validación / regla de la app
@@ -379,6 +422,7 @@ void testRF009() {
       print('  ✅ CP01 PASS — Flujo exitoso — registrar datos de acompañantes');
     });
     test('CP02 — DNI inválido (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const dniInvalido = '1234';
       const dniValido = '12345678';
@@ -391,6 +435,7 @@ void testRF009() {
       print('  ✅ CP02 PASS — DNI inválido (E1)');
     });
     test('CP03 — Campos vacíos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const campoNulo = null;
       const dniValor2020 = '';
@@ -403,6 +448,7 @@ void testRF009() {
       print('  ✅ CP03 PASS — Campos vacíos (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const campoNulo = null;
       const dniValor2020 = '';
@@ -421,6 +467,7 @@ void testRF009() {
 void testRF010() {
   group('RF-010 — Pago de asiento mediante pasarela', () {
     test('CP01 — Flujo exitoso — pagar asiento', () {
+
       // Arrange — Flujo exitoso: Pago de asiento mediante pasarela
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -429,6 +476,7 @@ void testRF010() {
       print('  ✅ CP01 PASS — Flujo exitoso — pagar asiento');
     });
     test('CP02 — Pago rechazado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const codigoHttp1 = 400;
       const mensajePago1 = 'Tarjeta rechazada';
@@ -443,6 +491,7 @@ void testRF010() {
       print('  ✅ CP02 PASS — Pago rechazado (E1)');
     });
     test('CP03 — Tiempo de sesión expirado (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const sesionActiva = false;
       // Act — ejecutar la validación / regla de la app
@@ -452,6 +501,7 @@ void testRF010() {
       print('  ✅ CP03 PASS — Tiempo de sesión expirado (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -460,6 +510,7 @@ void testRF010() {
       print('  ✅ CP04 PASS — Campos requeridos incompletos (E3)');
     });
     test('CP05 — Formato de datos inválido (E4)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -474,6 +525,7 @@ void testRF010() {
 void testRF011() {
   group('RF-011 — Forzar salida anticipada del vehículo', () {
     test('CP01 — Flujo exitoso — forzar salida anticipada', () {
+
       // Arrange — Flujo exitoso: Forzar salida anticipada del vehículo
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-011)
@@ -483,6 +535,7 @@ void testRF011() {
       print('  ✅ CP01 PASS — Flujo exitoso — forzar salida anticipada');
     });
     test('CP02 — Algún pasajero rechaza (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = forzarSalidaRechazadaPorPasajero(rechazos: 1);
@@ -490,6 +543,7 @@ void testRF011() {
       print('  ✅ CP02 PASS — Algún pasajero rechaza (E1)');
     });
     test('CP03 — Tiempo de aceptación expirado (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = forzarSalidaTiempoExpirado(tiempoExpirado: true, respuestasRecibidas: 1, totalPasajeros: 4);
@@ -503,6 +557,7 @@ void testRF011() {
 void testRF012() {
   group('RF-012 — Reembolso antes de salida del vehículo', () {
     test('CP01 — Flujo exitoso — solicitar reembolso', () {
+
       // Arrange — Flujo exitoso: Reembolso antes de salida del vehículo
       const estadoViajeEsperando10 = 'esperando';
       // Act — ejecutar la validación / regla de la app
@@ -512,6 +567,7 @@ void testRF012() {
       print('  ✅ CP01 PASS — Flujo exitoso — solicitar reembolso');
     });
     test('CP02 — El vehículo ya salió (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const estadoViajeEnRuta = 'en_ruta';
       const estadoViajeEsperando = 'esperando';
@@ -524,6 +580,7 @@ void testRF012() {
       print('  ✅ CP02 PASS — El vehículo ya salió (E1)');
     });
     test('CP03 — Error en pasarela (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = culqiChargeResultMessage(500, 'Error en pasarela');
@@ -537,6 +594,7 @@ void testRF012() {
 void testRF013() {
   group('RF-013 — Ver tiempo estimado de llegada del conductor', () {
     test('CP01 — Flujo exitoso — consultar ETA del conductor', () {
+
       // Arrange — Flujo exitoso: Ver tiempo estimado de llegada del conductor
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -546,6 +604,7 @@ void testRF013() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar ETA del conductor');
     });
     test('CP02 — Sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -555,6 +614,7 @@ void testRF013() {
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -571,16 +631,17 @@ void testRF013() {
 void testRF014() {
   group('RF-014 — Notificación push cuando el conductor está cerca', () {
     test('CP01 — Flujo exitoso — notificar llegada del conductor', () {
+
       // Arrange — Pasajero con push habilitado y viaje activo con datos válidos.
       const pushHabilitado = true;
       const tripId = 'trip-001';
       const passengerId = 'passenger-001';
       // Act — ejecutar la validación / regla de la app
       final puedeEnviar = puedeNotificarLlegadaConductor(
-        haySesion: true,
-        tripId: tripId,
-        passengerProfileId: passengerId,
-        pushDestinatarioHabilitado: pushHabilitado,
+      haySesion: true,
+      tripId: tripId,
+      passengerProfileId: passengerId,
+      pushDestinatarioHabilitado: pushHabilitado,
       );
       final texto = textoNotificacionLlegadaConductor();
       // Assert — verificar el resultado esperado del CP
@@ -590,12 +651,13 @@ void testRF014() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar llegada del conductor');
     });
     test('CP02 — Notificaciones desactivadas (E1)', () {
+
       // Arrange — El pasajero tiene desactivadas las notificaciones push.
       const pushHabilitado = false;
       // Act — ejecutar la validación / regla de la app
       final resultado = resultadoEnvioNotificacionPush(
-        pushHabilitado: pushHabilitado,
-        datosValidos: true,
+      pushHabilitado: pushHabilitado,
+      datosValidos: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(resultado, equals('Notificaciones push desactivadas'));
@@ -603,15 +665,16 @@ void testRF014() {
       print('  ✅ CP02 PASS — Notificaciones desactivadas (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — Faltan identificadores obligatorios del viaje o pasajero.
       // Act — ejecutar la validación / regla de la app
       final datosVacios = datosNotificacionLlegadaCompletos(
-        tripId: '',
-        passengerProfileId: 'passenger-001',
+      tripId: '',
+      passengerProfileId: 'passenger-001',
       );
       final sinPasajero = datosNotificacionLlegadaCompletos(
-        tripId: 'trip-001',
-        passengerProfileId: '',
+      tripId: 'trip-001',
+      passengerProfileId: '',
       );
       // Assert — verificar el resultado esperado del CP
       expect(datosVacios, isFalse);
@@ -626,6 +689,7 @@ void testRF014() {
 void testRF015() {
   group('RF-015 — Botón para pedir al conductor que espere', () {
     test('CP01 — Flujo exitoso — pedir espera al conductor', () {
+
       // Arrange — Flujo exitoso: Botón para pedir al conductor que espere
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-015)
@@ -635,6 +699,7 @@ void testRF015() {
       print('  ✅ CP01 PASS — Flujo exitoso — pedir espera al conductor');
     });
     test('CP02 — Sin conexión del pasajero (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -644,6 +709,7 @@ void testRF015() {
       print('  ✅ CP02 PASS — Sin conexión del pasajero (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -660,6 +726,7 @@ void testRF015() {
 void testRF016() {
   group('RF-016 — Chat en tiempo real pasajero-conductor', () {
     test('CP01 — Flujo exitoso — chat pasajero-conductor', () {
+
       // Arrange — Flujo exitoso: Chat en tiempo real pasajero-conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-016)
@@ -669,6 +736,7 @@ void testRF016() {
       print('  ✅ CP01 PASS — Flujo exitoso — chat pasajero-conductor');
     });
     test('CP02 — Sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -678,6 +746,7 @@ void testRF016() {
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -694,6 +763,7 @@ void testRF016() {
 void testRF017() {
   group('RF-017 — Ubicación del vehículo en tiempo real', () {
     test('CP01 — Flujo exitoso — ver ubicación del vehículo', () {
+
       // Arrange — Flujo exitoso: Ubicación del vehículo en tiempo real
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-017)
@@ -703,6 +773,7 @@ void testRF017() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver ubicación del vehículo');
     });
     test('CP02 — Sin GPS del conductor (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = wazeDisponible(lat: null, lng: null);
@@ -710,6 +781,7 @@ void testRF017() {
       print('  ✅ CP02 PASS — Sin GPS del conductor (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -726,6 +798,7 @@ void testRF017() {
 void testRF018() {
   group('RF-018 — Generación de QR individual por pasajero', () {
     test('CP01 — Flujo exitoso — generar QR de abordaje', () {
+
       // Arrange — Flujo exitoso: Generación de QR individual por pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = canScanReservationQr(buildPassengerQrData(reservaId: '9b4020ff-4a93-48e4-9931-b861b5dfa482', seatNumber: 1));
@@ -734,6 +807,7 @@ void testRF018() {
       print('  ✅ CP01 PASS — Flujo exitoso — generar QR de abordaje');
     });
     test('CP02 — Error de generación (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canScanReservationQr('');
@@ -743,6 +817,7 @@ void testRF018() {
       print('  ✅ CP02 PASS — Error de generación (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -759,6 +834,7 @@ void testRF018() {
 void testRF019() {
   group('RF-019 — Presentación de QR para abordaje', () {
     test('CP01 — Flujo exitoso — presentar QR de abordaje', () {
+
       // Arrange — Flujo exitoso: Presentación de QR para abordaje
       // Act — ejecutar la validación / regla de la app
       final resultado1 = canScanReservationQr(buildPassengerQrData(reservaId: '9b4020ff-4a93-48e4-9931-b861b5dfa482', seatNumber: 1));
@@ -767,6 +843,7 @@ void testRF019() {
       print('  ✅ CP01 PASS — Flujo exitoso — presentar QR de abordaje');
     });
     test('CP02 — QR vencido o ya escaneado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const valorQrNoesuuid10 = 'no-es-uuid';
       const valorQr9b4020ff4a9348e4993120 = '9b4020ff-4a93-48e4-9931-b861b5dfa482|1';
@@ -779,6 +856,7 @@ void testRF019() {
       print('  ✅ CP02 PASS — QR vencido o ya escaneado (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -795,6 +873,7 @@ void testRF019() {
 void testRF020() {
   group('RF-020 — Vista del recorrido durante el viaje', () {
     test('CP01 — Flujo exitoso — ver recorrido en curso', () {
+
       // Arrange — Flujo exitoso: Vista del recorrido durante el viaje
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -804,6 +883,7 @@ void testRF020() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver recorrido en curso');
     });
     test('CP02 — Sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -813,6 +893,7 @@ void testRF020() {
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -829,6 +910,7 @@ void testRF020() {
 void testRF021() {
   group('RF-021 — Marcaje manual de bajada anticipada', () {
     test('CP01 — Flujo exitoso — marcar bajada anticipada', () {
+
       // Arrange — Flujo exitoso: Marcaje manual de bajada anticipada
       const estadoAbordajeAbordo10 = 'abordo';
       // Act — ejecutar la validación / regla de la app
@@ -838,6 +920,7 @@ void testRF021() {
       print('  ✅ CP01 PASS — Flujo exitoso — marcar bajada anticipada');
     });
     test('CP02 — Si el pasajero no marca la bajada, el asiento permanece', () {
+
       // Arrange — datos de entrada del caso de prueba
       final ocupados = {1, 3, 5};
       // Act — ejecutar la validación / regla de la app
@@ -849,6 +932,7 @@ void testRF021() {
       print('  ✅ CP02 PASS — Si el pasajero no marca la bajada, el asiento permanece');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -865,6 +949,7 @@ void testRF021() {
 void testRF022() {
   group('RF-022 — Calificar al conductor', () {
     test('CP01 — Flujo exitoso — calificar conductor', () {
+
       // Arrange — Flujo exitoso: Calificar al conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-022)
@@ -874,6 +959,7 @@ void testRF022() {
       print('  ✅ CP01 PASS — Flujo exitoso — calificar conductor');
     });
     test('CP02 — El pasajero omite la calificación (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const campoNulo = null;
       // Act — ejecutar la validación / regla de la app
@@ -883,6 +969,7 @@ void testRF022() {
       print('  ✅ CP02 PASS — El pasajero omite la calificación (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -899,6 +986,7 @@ void testRF022() {
 void testRF023() {
   group('RF-023 — Ver noticias e incidencias de ruta', () {
     test('CP01 — Flujo exitoso — consultar noticias de ruta', () {
+
       // Arrange — Flujo exitoso: Ver noticias e incidencias de ruta
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-023)
@@ -908,6 +996,7 @@ void testRF023() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar noticias de ruta');
     });
     test('CP02 — Sin noticias (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -917,6 +1006,7 @@ void testRF023() {
       print('  ✅ CP02 PASS — Sin noticias (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -933,6 +1023,7 @@ void testRF023() {
 void testRF024() {
   group('RF-024 — Activación diaria del conductor', () {
     test('CP01 — Flujo exitoso — activar conductor para operar', () {
+
       // Arrange — Flujo exitoso: Activación diaria del conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-024)
@@ -942,6 +1033,7 @@ void testRF024() {
       print('  ✅ CP01 PASS — Flujo exitoso — activar conductor para operar');
     });
     test('CP02 — Sin confirmación de pago (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -951,6 +1043,7 @@ void testRF024() {
       print('  ✅ CP02 PASS — Sin confirmación de pago (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -967,6 +1060,7 @@ void testRF024() {
 void testRF025() {
   group('RF-025 — Escaneo de QR de pasajeros', () {
     test('CP01 — Flujo exitoso — escanear QR de pasajero', () {
+
       // Arrange — Flujo exitoso: Escaneo de QR de pasajeros
       // Act — ejecutar la validación / regla de la app
       final resultado1 = canScanReservationQr(buildPassengerQrData(reservaId: '9b4020ff-4a93-48e4-9931-b861b5dfa482', seatNumber: 1));
@@ -975,6 +1069,7 @@ void testRF025() {
       print('  ✅ CP01 PASS — Flujo exitoso — escanear QR de pasajero');
     });
     test('CP02 — QR inválido o ya usado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const valorQrNoesuuid10 = 'no-es-uuid';
       const valorQr9b4020ff4a9348e4993120 = '9b4020ff-4a93-48e4-9931-b861b5dfa482|1';
@@ -987,6 +1082,7 @@ void testRF025() {
       print('  ✅ CP02 PASS — QR inválido o ya usado (E1)');
     });
     test('CP03 — Pasajero no sube (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = pasajeroAusenteRegistrado('no_abordo');
@@ -994,6 +1090,7 @@ void testRF025() {
       print('  ✅ CP03 PASS — Pasajero no sube (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1010,6 +1107,7 @@ void testRF025() {
 void testRF026() {
   group('RF-026 — Generación de manifiesto electrónico', () {
     test('CP01 — Flujo exitoso — generar manifiesto electrónico', () {
+
       // Arrange — Flujo exitoso: Generación de manifiesto electrónico
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-026)
@@ -1019,6 +1117,7 @@ void testRF026() {
       print('  ✅ CP01 PASS — Flujo exitoso — generar manifiesto electrónico');
     });
     test('CP02 — Datos incompletos de algún pasajero (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = manifestEntryBoardingValido('desconocido');
@@ -1026,6 +1125,7 @@ void testRF026() {
       print('  ✅ CP02 PASS — Datos incompletos de algún pasajero (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1042,6 +1142,7 @@ void testRF026() {
 void testRF027() {
   group('RF-027 — Presentar manifiesto a autoridades', () {
     test('CP01 — Flujo exitoso — presentar manifiesto', () {
+
       // Arrange — Flujo exitoso: Presentar manifiesto a autoridades
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-027)
@@ -1051,6 +1152,7 @@ void testRF027() {
       print('  ✅ CP01 PASS — Flujo exitoso — presentar manifiesto');
     });
     test('CP02 — Sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -1060,6 +1162,7 @@ void testRF027() {
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1076,6 +1179,7 @@ void testRF027() {
 void testRF028() {
   group('RF-028 — Ver asientos disponibles del vehículo', () {
     test('CP01 — Flujo exitoso — ver ocupación del vehículo', () {
+
       // Arrange — Flujo exitoso: Ver asientos disponibles del vehículo
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -1085,6 +1189,7 @@ void testRF028() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver ocupación del vehículo');
     });
     test('CP02 — Sin actualización en tiempo real (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = offlineSyncStrategy(false);
@@ -1092,6 +1197,7 @@ void testRF028() {
       print('  ✅ CP02 PASS — Sin actualización en tiempo real (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1108,6 +1214,7 @@ void testRF028() {
 void testRF029() {
   group('RF-029 — Temporizador de 3 minutos para partir', () {
     test('CP01 — Flujo exitoso — iniciar temporizador de salida', () {
+
       // Arrange — Flujo exitoso: Temporizador de 3 minutos para partir
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-029)
@@ -1117,6 +1224,7 @@ void testRF029() {
       print('  ✅ CP01 PASS — Flujo exitoso — iniciar temporizador de salida');
     });
     test('CP02 — El conductor sale antes de los 3 minutos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canDepartAfterCountdown(fullSince: DateTime.now().subtract(const Duration(minutes: 1)), now: DateTime.now(), isFull: true);
@@ -1124,6 +1232,7 @@ void testRF029() {
       print('  ✅ CP02 PASS — El conductor sale antes de los 3 minutos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1140,6 +1249,7 @@ void testRF029() {
 void testRF030() {
   group('RF-030 — Integración con Waze para selección de ruta', () {
     test('CP01 — Flujo exitoso — seleccionar ruta con Waze', () {
+
       // Arrange — escenario «Flujo exitoso — seleccionar ruta con Waze»
       // Act — lógica real de lib/ (RF-030)
       final uri = buildWazeRouteUri(fromLat: -12.0464, fromLng: -76.9156, toLat: -11.9375, toLng: -76.6934);
@@ -1149,6 +1259,7 @@ void testRF030() {
       print('  ✅ CP01 PASS — Flujo exitoso — seleccionar ruta con Waze');
     });
     test('CP02 — Mapa no disponible (E1)', () {
+
       // Arrange — escenario «Mapa no disponible (E1)»
       // Act — lógica real de lib/ (RF-030)
       final resultado1 = wazeDisponible(lat: null, lng: null);
@@ -1159,6 +1270,7 @@ void testRF030() {
       print('  ✅ CP02 PASS — Mapa no disponible (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — escenario «Campos requeridos incompletos (E2)»
       // Act — lógica real de lib/ (RF-030)
       final resultado1 = validateWazeCoordinates(lat: null, lng: -76.6934);
@@ -1173,6 +1285,7 @@ void testRF030() {
 void testRF031() {
   group('RF-031 — Enviar punto de recojo alternativo al pasajero', () {
     test('CP01 — Flujo exitoso — notificar punto de recojo alternativo', () {
+
       // Arrange — Flujo exitoso: Enviar punto de recojo alternativo al pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (validatePickupPoint('Av. Principal 123, Chosica') == null);
@@ -1181,6 +1294,7 @@ void testRF031() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar punto de recojo alternativo');
     });
     test('CP02 — Pasajero no responde (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = mensajeChatValido('');
@@ -1188,6 +1302,7 @@ void testRF031() {
       print('  ✅ CP02 PASS — Pasajero no responde (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1204,6 +1319,7 @@ void testRF031() {
 void testRF032() {
   group('RF-032 — Chat individual conductor-pasajero', () {
     test('CP01 — Flujo exitoso — chat conductor-pasajero', () {
+
       // Arrange — Flujo exitoso: Chat individual conductor-pasajero
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-032)
@@ -1213,6 +1329,7 @@ void testRF032() {
       print('  ✅ CP01 PASS — Flujo exitoso — chat conductor-pasajero');
     });
     test('CP02 — Sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -1222,6 +1339,7 @@ void testRF032() {
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1238,6 +1356,7 @@ void testRF032() {
 void testRF033() {
   group('RF-033 — Chat grupal entre conductores activos', () {
     test('CP01 — Flujo exitoso — chat grupal conductores', () {
+
       // Arrange — Flujo exitoso: Chat grupal entre conductores activos
       const cuentaActiva = true;
       const estadoConductor = 'activo';
@@ -1248,6 +1367,7 @@ void testRF033() {
       print('  ✅ CP01 PASS — Flujo exitoso — chat grupal conductores');
     });
     test('CP02 — Conductor inactivo (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isDriverEligibleForListing(cuentaActiva: true, estado: 'inactivo');
@@ -1255,6 +1375,7 @@ void testRF033() {
       print('  ✅ CP02 PASS — Conductor inactivo (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1271,13 +1392,14 @@ void testRF033() {
 void testRF034() {
   group('RF-034 — Comando de voz para notificaciones', () {
     test('CP01 — Flujo exitoso — leer notificaciones por voz', () {
+
       // Arrange — El conductor tiene activadas las notificaciones por voz.
       const vozHabilitada = true;
       const mensaje = 'Próxima parada: María';
       // Act — ejecutar la validación / regla de la app
       final banner = bannerNotificacionVoz(
-        vozHabilitada: vozHabilitada,
-        texto: mensaje,
+      vozHabilitada: vozHabilitada,
+      texto: mensaje,
       );
       // Assert — verificar el resultado esperado del CP
       expect(banner, equals('🔊 Próxima parada: María'));
@@ -1285,12 +1407,13 @@ void testRF034() {
       print('  ✅ CP01 PASS — Flujo exitoso — leer notificaciones por voz');
     });
     test('CP02 — Volumen del dispositivo en cero (E1)', () {
+
       // Arrange — Las notificaciones por voz están desactivadas (volumen en cero).
       const vozHabilitada = false;
       // Act — ejecutar la validación / regla de la app
       final banner = bannerNotificacionVoz(
-        vozHabilitada: vozHabilitada,
-        texto: 'Pasajero cerca del punto de recojo',
+      vozHabilitada: vozHabilitada,
+      texto: 'Pasajero cerca del punto de recojo',
       );
       // Assert — verificar el resultado esperado del CP
       expect(banner, isNull);
@@ -1298,12 +1421,13 @@ void testRF034() {
       print('  ✅ CP02 PASS — Volumen del dispositivo en cero (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — El mensaje de voz está vacío.
       const vozHabilitada = true;
       // Act — ejecutar la validación / regla de la app
       final banner = bannerNotificacionVoz(
-        vozHabilitada: vozHabilitada,
-        texto: '',
+      vozHabilitada: vozHabilitada,
+      texto: '',
       );
       // Assert — verificar el resultado esperado del CP
       expect(banner, isNull);
@@ -1317,6 +1441,7 @@ void testRF034() {
 void testRF035() {
   group('RF-035 — Marcar ruta como completada', () {
     test('CP01 — Flujo exitoso — completar ruta', () {
+
       // Arrange — Flujo exitoso: Marcar ruta como completada
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -1326,6 +1451,7 @@ void testRF035() {
       print('  ✅ CP01 PASS — Flujo exitoso — completar ruta');
     });
     test('CP02 — El conductor marca por error (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = puedeRegistrarPasajeroAusente(boardingStatus: 'abordo', tripStatus: 'esperando');
@@ -1333,6 +1459,7 @@ void testRF035() {
       print('  ✅ CP02 PASS — El conductor marca por error (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1349,6 +1476,7 @@ void testRF035() {
 void testRF036() {
   group('RF-036 — Ver total acumulado de comisiones del día', () {
     test('CP01 — Flujo exitoso — consultar comisiones del día', () {
+
       // Arrange — Flujo exitoso: Ver total acumulado de comisiones del día
       const porcentajeValor10 = 20.0;
       // Act — ejecutar la validación / regla de la app
@@ -1358,6 +1486,7 @@ void testRF036() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar comisiones del día');
     });
     test('CP02 — Sin viajes completados (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1367,6 +1496,7 @@ void testRF036() {
       print('  ✅ CP02 PASS — Sin viajes completados (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1383,6 +1513,7 @@ void testRF036() {
 void testRF037() {
   group('RF-037 — Solicitar pago de comisión al administrador', () {
     test('CP01 — Flujo exitoso — solicitar pago de comisión', () {
+
       // Arrange — Flujo exitoso: Solicitar pago de comisión al administrador
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -1391,6 +1522,7 @@ void testRF037() {
       print('  ✅ CP01 PASS — Flujo exitoso — solicitar pago de comisión');
     });
     test('CP02 — Sin comisiones pendientes (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1400,6 +1532,7 @@ void testRF037() {
       print('  ✅ CP02 PASS — Sin comisiones pendientes (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -1414,6 +1547,7 @@ void testRF037() {
 void testRF038() {
   group('RF-038 — Confirmar recepción de pago de comisión', () {
     test('CP01 — Flujo exitoso — confirmar recepción de pago', () {
+
       // Arrange — Flujo exitoso: Confirmar recepción de pago de comisión
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -1422,6 +1556,7 @@ void testRF038() {
       print('  ✅ CP01 PASS — Flujo exitoso — confirmar recepción de pago');
     });
     test('CP02 — Sin confirmación del conductor (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1431,6 +1566,7 @@ void testRF038() {
       print('  ✅ CP02 PASS — Sin confirmación del conductor (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -1445,6 +1581,7 @@ void testRF038() {
 void testRF039() {
   group('RF-039 — Leer noticias e incidencias de ruta (conductor)', () {
     test('CP01 — Flujo exitoso — leer noticias de ruta', () {
+
       // Arrange — Flujo exitoso: Leer noticias e incidencias de ruta (conductor)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-039)
@@ -1454,6 +1591,7 @@ void testRF039() {
       print('  ✅ CP01 PASS — Flujo exitoso — leer noticias de ruta');
     });
     test('CP02 — Sin noticias (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1463,6 +1601,7 @@ void testRF039() {
       print('  ✅ CP02 PASS — Sin noticias (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1479,6 +1618,7 @@ void testRF039() {
 void testRF040() {
   group('RF-040 — Publicar noticias e incidencias de ruta', () {
     test('CP01 — Flujo exitoso — publicar incidencia de ruta', () {
+
       // Arrange — Flujo exitoso: Publicar noticias e incidencias de ruta
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-040)
@@ -1488,6 +1628,7 @@ void testRF040() {
       print('  ✅ CP01 PASS — Flujo exitoso — publicar incidencia de ruta');
     });
     test('CP02 — Texto vacío (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validarCampoRequerido('') != null;
@@ -1495,6 +1636,7 @@ void testRF040() {
       print('  ✅ CP02 PASS — Texto vacío (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1511,6 +1653,7 @@ void testRF040() {
 void testRF041() {
   group('RF-041 — Configuración de perfil del conductor', () {
     test('CP01 — Flujo exitoso — editar perfil conductor', () {
+
       // Arrange — Flujo exitoso: Configuración de perfil del conductor
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('editado@test.com') && PassengerAuthValidators.isValidPeruPhone('912345678'));
@@ -1519,6 +1662,7 @@ void testRF041() {
       print('  ✅ CP01 PASS — Flujo exitoso — editar perfil conductor');
     });
     test('CP02 — Datos críticos (placa, vehículo) (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = vehiculoRegistroValido(plate: '', totalSeats: 4);
@@ -1526,6 +1670,7 @@ void testRF041() {
       print('  ✅ CP02 PASS — Datos críticos (placa, vehículo) (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1542,6 +1687,7 @@ void testRF041() {
 void testRF042() {
   group('RF-042 — Crear perfil de conductor', () {
     test('CP01 — Flujo exitoso — crear conductor', () {
+
       // Arrange — Flujo exitoso: Crear perfil de conductor
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('editado@test.com') && PassengerAuthValidators.isValidPeruPhone('912345678'));
@@ -1550,6 +1696,7 @@ void testRF042() {
       print('  ✅ CP01 PASS — Flujo exitoso — crear conductor');
     });
     test('CP02 — DNI duplicado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = registrationFailureType('dni already registered');
@@ -1557,6 +1704,7 @@ void testRF042() {
       print('  ✅ CP02 PASS — DNI duplicado (E1)');
     });
     test('CP03 — Placa ya asignada a otro conductor (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeDbPlatealreadyassigned10 = 'plate already assigned';
       // Act — ejecutar la validación / regla de la app
@@ -1566,6 +1714,7 @@ void testRF042() {
       print('  ✅ CP03 PASS — Placa ya asignada a otro conductor (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1582,6 +1731,7 @@ void testRF042() {
 void testRF043() {
   group('RF-043 — Asignar vehículo a conductor', () {
     test('CP01 — Flujo exitoso — asignar vehículo', () {
+
       // Arrange — Flujo exitoso: Asignar vehículo a conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-043)
@@ -1591,6 +1741,7 @@ void testRF043() {
       print('  ✅ CP01 PASS — Flujo exitoso — asignar vehículo');
     });
     test('CP02 — Vehículo ya asignado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = placaDuplicateFailureType('plate already assigned');
@@ -1598,6 +1749,7 @@ void testRF043() {
       print('  ✅ CP02 PASS — Vehículo ya asignado (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1614,6 +1766,7 @@ void testRF043() {
 void testRF044() {
   group('RF-044 — Configurar porcentaje de comisión por conductor', () {
     test('CP01 — Flujo exitoso — configurar comisión', () {
+
       // Arrange — Flujo exitoso: Configurar porcentaje de comisión por conductor
       const porcentajeValor10 = 20.0;
       // Act — ejecutar la validación / regla de la app
@@ -1623,6 +1776,7 @@ void testRF044() {
       print('  ✅ CP01 PASS — Flujo exitoso — configurar comisión');
     });
     test('CP02 — Porcentaje fuera de rango (0-100) (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const porcentajeValor10 = -1.0;
       const porcentajeValor20 = 101.0;
@@ -1638,6 +1792,7 @@ void testRF044() {
       print('  ✅ CP02 PASS — Porcentaje fuera de rango (0-100) (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1654,6 +1809,7 @@ void testRF044() {
 void testRF045() {
   group('RF-045 — Ver solicitudes de pago de conductores', () {
     test('CP01 — Flujo exitoso — consultar solicitudes de pago', () {
+
       // Arrange — Flujo exitoso: Ver solicitudes de pago de conductores
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -1662,6 +1818,7 @@ void testRF045() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar solicitudes de pago');
     });
     test('CP02 — Sin solicitudes pendientes (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1671,6 +1828,7 @@ void testRF045() {
       print('  ✅ CP02 PASS — Sin solicitudes pendientes (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -1685,6 +1843,7 @@ void testRF045() {
 void testRF046() {
   group('RF-046 — Confirmar pago de comisión al conductor', () {
     test('CP01 — Flujo exitoso — confirmar pago', () {
+
       // Arrange — Flujo exitoso: Confirmar pago de comisión al conductor
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -1693,6 +1852,7 @@ void testRF046() {
       print('  ✅ CP01 PASS — Flujo exitoso — confirmar pago');
     });
     test('CP02 — Error de notificación (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = resultadoEnvioNotificacionPush(pushHabilitado: false, datosValidos: true);
@@ -1700,6 +1860,7 @@ void testRF046() {
       print('  ✅ CP02 PASS — Error de notificación (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -1714,6 +1875,7 @@ void testRF046() {
 void testRF047() {
   group('RF-047 — Ver ubicación en tiempo real de vehículos activos', () {
     test('CP01 — Flujo exitoso — monitorear flota en tiempo real', () {
+
       // Arrange — Flujo exitoso: Ver ubicación en tiempo real de vehículos activos
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-047)
@@ -1723,6 +1885,7 @@ void testRF047() {
       print('  ✅ CP01 PASS — Flujo exitoso — monitorear flota en tiempo real');
     });
     test('CP02 — Sin vehículos activos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1732,6 +1895,7 @@ void testRF047() {
       print('  ✅ CP02 PASS — Sin vehículos activos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1748,6 +1912,7 @@ void testRF047() {
 void testRF048() {
   group('RF-048 — Ver estado de cada conductor', () {
     test('CP01 — Flujo exitoso — consultar estado de conductores', () {
+
       // Arrange — Flujo exitoso: Ver estado de cada conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-048)
@@ -1757,6 +1922,7 @@ void testRF048() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar estado de conductores');
     });
     test('CP02 — Sin conductores registrados (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <Map<String, dynamic>>[];
       final isEmpty1 = busquedaSinResultados(lista.length);
@@ -1765,6 +1931,7 @@ void testRF048() {
       print('  ✅ CP02 PASS — Sin conductores registrados (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1781,6 +1948,7 @@ void testRF048() {
 void testRF049() {
   group('RF-049 — Acceder a manifiestos electrónicos de cualquier viaje', () {
     test('CP01 — Flujo exitoso — consultar manifiesto desde admin', () {
+
       // Arrange — Flujo exitoso: Acceder a manifiestos electrónicos de cualquier viaje
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-049)
@@ -1790,6 +1958,7 @@ void testRF049() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar manifiesto desde admin');
     });
     test('CP02 — Sin viajes registrados (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1799,6 +1968,7 @@ void testRF049() {
       print('  ✅ CP02 PASS — Sin viajes registrados (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1815,6 +1985,7 @@ void testRF049() {
 void testRF050() {
   group('RF-050 — Ver estadísticas generales del negocio', () {
     test('CP01 — Flujo exitoso — ver estadísticas del negocio', () {
+
       // Arrange — Flujo exitoso: Ver estadísticas generales del negocio
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-050)
@@ -1824,6 +1995,7 @@ void testRF050() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver estadísticas del negocio');
     });
     test('CP02 — Sin datos históricos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1833,6 +2005,7 @@ void testRF050() {
       print('  ✅ CP02 PASS — Sin datos históricos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1849,6 +2022,7 @@ void testRF050() {
 void testRF051() {
   group('RF-051 — Ver calificaciones de conductores', () {
     test('CP01 — Flujo exitoso — consultar calificaciones de conductores', () {
+
       // Arrange — Flujo exitoso: Ver calificaciones de conductores
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-051)
@@ -1858,6 +2032,7 @@ void testRF051() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar calificaciones de conductores');
     });
     test('CP02 — Sin calificaciones (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -1867,6 +2042,7 @@ void testRF051() {
       print('  ✅ CP02 PASS — Sin calificaciones (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1883,6 +2059,7 @@ void testRF051() {
 void testRF052() {
   group('RF-052 — Bloqueo de salida de vehículo sin estar lleno', () {
     test('CP01 — Flujo exitoso — validar llenado de vehículo', () {
+
       // Arrange — Flujo exitoso: Bloqueo de salida de vehículo sin estar lleno
       const ocupadosVehiculo = 4;
       const capacidadVehiculo = 4;
@@ -1893,6 +2070,7 @@ void testRF052() {
       print('  ✅ CP01 PASS — Flujo exitoso — validar llenado de vehículo');
     });
     test('CP02 — Salida forzada aceptada por todos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const ocupadosVehiculo = 2;
       const capacidadVehiculo = 4;
@@ -1904,6 +2082,7 @@ void testRF052() {
       print('  ✅ CP02 PASS — Salida forzada aceptada por todos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1920,6 +2099,7 @@ void testRF052() {
 void testRF053() {
   group('RF-053 — Validación de tarifa fija S/15 por asiento', () {
     test('CP01 — Flujo exitoso — validar tarifa fija', () {
+
       // Arrange — Flujo exitoso: Validación de tarifa fija S/15 por asiento
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (seatFareTotalSoles(1) == 15.0 && paymentAmountCents(2) == 3000);
@@ -1928,6 +2108,7 @@ void testRF053() {
       print('  ✅ CP01 PASS — Flujo exitoso — validar tarifa fija');
     });
     test('CP02 — N/A (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -1937,6 +2118,7 @@ void testRF053() {
       print('  ✅ CP02 PASS — N/A (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1953,6 +2135,7 @@ void testRF053() {
 void testRF054() {
   group('RF-054 — Bloqueo de reembolso tras salida del vehículo', () {
     test('CP01 — Flujo exitoso — bloquear reembolso post-salida', () {
+
       // Arrange — Flujo exitoso: Bloqueo de reembolso tras salida del vehículo
       const estadoViajeEsperando10 = 'esperando';
       // Act — ejecutar la validación / regla de la app
@@ -1962,6 +2145,7 @@ void testRF054() {
       print('  ✅ CP01 PASS — Flujo exitoso — bloquear reembolso post-salida');
     });
     test('CP02 — N/A (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const estadoViajeEnRuta = 'en_ruta';
       // Act — ejecutar la validación / regla de la app
@@ -1971,6 +2155,7 @@ void testRF054() {
       print('  ✅ CP02 PASS — N/A (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -1987,6 +2172,7 @@ void testRF054() {
 void testRF055() {
   group('RF-055 — QR individual e intransferible por pasajero', () {
     test('CP01 — Flujo exitoso — validar unicidad de QR', () {
+
       // Arrange — Flujo exitoso: QR individual e intransferible por pasajero
       // Act — lógica real de lib/ (RF-055)
       final resultado1 = canScanReservationQr(buildPassengerQrData(reservaId: '9b4020ff-4a93-48e4-9931-b861b5dfa482', seatNumber: 1));
@@ -1997,6 +2183,7 @@ void testRF055() {
       print('  ✅ CP01 PASS — Flujo exitoso — validar unicidad de QR');
     });
     test('CP02 — QR ya escaneado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const valorQrNoesuuid10 = 'no-es-uuid';
       const valorQr9b4020ff4a9348e4993120 = '9b4020ff-4a93-48e4-9931-b861b5dfa482|1';
@@ -2009,6 +2196,7 @@ void testRF055() {
       print('  ✅ CP02 PASS — QR ya escaneado (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2025,6 +2213,7 @@ void testRF055() {
 void testRF056() {
   group('RF-056 — Selección de ruta Chosica → San Isidro con múltiples opciones', () {
     test('CP01 — Flujo exitoso — seleccionar ruta de retorno', () {
+
       // Arrange — Flujo exitoso: Selección de ruta Chosica → San Isidro con múltiples opciones
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-056)
@@ -2034,6 +2223,7 @@ void testRF056() {
       print('  ✅ CP01 PASS — Flujo exitoso — seleccionar ruta de retorno');
     });
     test('CP02 — Sin conductores activos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <Map<String, dynamic>>[];
       final isEmpty1 = busquedaSinResultados(lista.length);
@@ -2042,6 +2232,7 @@ void testRF056() {
       print('  ✅ CP02 PASS — Sin conductores activos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2058,6 +2249,7 @@ void testRF056() {
 void testRF057() {
   group('RF-057 — Misma lógica de vehículo lleno en ruta de retorno', () {
     test('CP01 — Flujo exitoso — validar llenado en ruta de retorno', () {
+
       // Arrange — Flujo exitoso: Misma lógica de vehículo lleno en ruta de retorno
       const ocupadosVehiculo = 4;
       const capacidadVehiculo = 4;
@@ -2068,6 +2260,7 @@ void testRF057() {
       print('  ✅ CP01 PASS — Flujo exitoso — validar llenado en ruta de retorno');
     });
     test('CP02 — Salida forzada aceptada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const ocupadosVehiculo = 2;
       const capacidadVehiculo = 4;
@@ -2079,6 +2272,7 @@ void testRF057() {
       print('  ✅ CP02 PASS — Salida forzada aceptada (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2095,13 +2289,14 @@ void testRF057() {
 void testRF058() {
   group('RF-058 — Notificación al conductor cuando el vehículo se llena', () {
     test('CP01 — Flujo exitoso — notificar llenado del vehículo', () {
+
       // Arrange — Vehículo lleno y push del conductor habilitado.
       const pushConductor = true;
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarVehiculoLleno(
-        occupiedSeats: 4,
-        capacity: 4,
-        pushConductorHabilitado: pushConductor,
+      occupiedSeats: 4,
+      capacity: 4,
+      pushConductorHabilitado: pushConductor,
       );
       // Assert — verificar el resultado esperado del CP
       expect(debeNotificar, isTrue);
@@ -2109,17 +2304,18 @@ void testRF058() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar llenado del vehículo');
     });
     test('CP02 — Notificaciones desactivadas (E1)', () {
+
       // Arrange — Vehículo lleno pero push del conductor desactivado.
       const pushConductor = false;
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarVehiculoLleno(
-        occupiedSeats: 4,
-        capacity: 4,
-        pushConductorHabilitado: pushConductor,
+      occupiedSeats: 4,
+      capacity: 4,
+      pushConductorHabilitado: pushConductor,
       );
       final resultado = resultadoEnvioNotificacionPush(
-        pushHabilitado: pushConductor,
-        datosValidos: true,
+      pushHabilitado: pushConductor,
+      datosValidos: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(debeNotificar, isFalse);
@@ -2128,12 +2324,13 @@ void testRF058() {
       print('  ✅ CP02 PASS — Notificaciones desactivadas (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — El vehículo aún no está lleno.
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarVehiculoLleno(
-        occupiedSeats: 2,
-        capacity: 4,
-        pushConductorHabilitado: true,
+      occupiedSeats: 2,
+      capacity: 4,
+      pushConductorHabilitado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(debeNotificar, isFalse);
@@ -2147,13 +2344,14 @@ void testRF058() {
 void testRF059() {
   group('RF-059 — Notificación a pasajeros cuando el vehículo sale', () {
     test('CP01 — Flujo exitoso — notificar salida del vehículo', () {
+
       // Arrange — El vehículo inicia viaje con pasajeros a bordo.
       const estadoViaje = 'en_ruta';
       const hayPasajeros = true;
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarSalidaVehiculo(
-        estadoViaje: estadoViaje,
-        hayPasajeros: hayPasajeros,
+      estadoViaje: estadoViaje,
+      hayPasajeros: hayPasajeros,
       );
       // Assert — verificar el resultado esperado del CP
       expect(debeNotificar, isTrue);
@@ -2161,6 +2359,7 @@ void testRF059() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar salida del vehículo');
     });
     test('CP02 — Pasajero sin conexión (E1)', () {
+
       // Arrange — Pasajero sin conexión de red.
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -2171,11 +2370,12 @@ void testRF059() {
       print('  ✅ CP02 PASS — Pasajero sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — Viaje en espera sin pasajeros registrados.
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarSalidaVehiculo(
-        estadoViaje: 'esperando',
-        hayPasajeros: false,
+      estadoViaje: 'esperando',
+      hayPasajeros: false,
       );
       // Assert — verificar el resultado esperado del CP
       expect(debeNotificar, isFalse);
@@ -2189,6 +2389,7 @@ void testRF059() {
 void testRF060() {
   group('RF-060 — Notificación de solicitud de forzar salida a pasajeros', () {
     test('CP01 — Flujo exitoso — notificar solicitud de forzar salida', () {
+
       // Arrange — Hay una solicitud activa de forzar salida.
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarSolicitudForzarSalida(solicitudActiva: true);
@@ -2198,6 +2399,7 @@ void testRF060() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar solicitud de forzar salida');
     });
     test('CP02 — Algún pasajero rechaza (E1)', () {
+
       // Arrange — Al menos un pasajero rechazó la salida forzada.
       // Act — ejecutar la validación / regla de la app
       final rechazada = forzarSalidaRechazadaPorPasajero(rechazos: 1);
@@ -2207,12 +2409,13 @@ void testRF060() {
       print('  ✅ CP02 PASS — Algún pasajero rechaza (E1)');
     });
     test('CP03 — Tiempo expirado sin respuesta (E2)', () {
+
       // Arrange — Expiró el tiempo de respuesta de los pasajeros.
       // Act — ejecutar la validación / regla de la app
       final expirada = forzarSalidaTiempoExpirado(
-        tiempoExpirado: true,
-        respuestasRecibidas: 1,
-        totalPasajeros: 3,
+      tiempoExpirado: true,
+      respuestasRecibidas: 1,
+      totalPasajeros: 3,
       );
       // Assert — verificar el resultado esperado del CP
       expect(expirada, isTrue);
@@ -2226,6 +2429,7 @@ void testRF060() {
 void testRF061() {
   group('RF-061 — Inicio de sesión del administrador', () {
     test('CP01 — Flujo exitoso — autenticar administrador', () {
+
       // Arrange — Flujo exitoso: Inicio de sesión del administrador
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('pasajero@test.com') && PassengerAuthValidators.isValidPassword('password123'));
@@ -2234,6 +2438,7 @@ void testRF061() {
       print('  ✅ CP01 PASS — Flujo exitoso — autenticar administrador');
     });
     test('CP02 — Credenciales incorrectas (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const tipoAuthException = 'AuthException';
       // Act — ejecutar la validación / regla de la app
@@ -2243,6 +2448,7 @@ void testRF061() {
       print('  ✅ CP02 PASS — Credenciales incorrectas (E1)');
     });
     test('CP03 — Múltiples intentos fallidos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = authFailureTypeFromExceptionType('AuthException');
@@ -2250,6 +2456,7 @@ void testRF061() {
       print('  ✅ CP03 PASS — Múltiples intentos fallidos (E2)');
     });
     test('CP04 — Campos requeridos incompletos (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2266,6 +2473,7 @@ void testRF061() {
 void testRF062() {
   group('RF-062 — Cambio de estado del conductor a disponible tras completar ruta', () {
     test('CP01 — Flujo exitoso — actualizar estado del conductor', () {
+
       // Arrange — Flujo exitoso: Cambio de estado del conductor a disponible tras completar ruta
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -2275,6 +2483,7 @@ void testRF062() {
       print('  ✅ CP01 PASS — Flujo exitoso — actualizar estado del conductor');
     });
     test('CP02 — El conductor fuerza el cierre sin llegar al destino (E1', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('en_ruta');
@@ -2282,6 +2491,7 @@ void testRF062() {
       print('  ✅ CP02 PASS — El conductor fuerza el cierre sin llegar al destino (E1');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2298,6 +2508,7 @@ void testRF062() {
 void testRF063() {
   group('RF-063 — Vista de historial de viajes del pasajero', () {
     test('CP01 — Flujo exitoso — consultar historial de viajes', () {
+
       // Arrange — Flujo exitoso: Vista de historial de viajes del pasajero
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-063)
@@ -2307,6 +2518,7 @@ void testRF063() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar historial de viajes');
     });
     test('CP02 — Sin viajes previos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -2316,6 +2528,7 @@ void testRF063() {
       print('  ✅ CP02 PASS — Sin viajes previos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2332,6 +2545,7 @@ void testRF063() {
 void testRF064() {
   group('RF-064 — Vista de historial de viajes del conductor', () {
     test('CP01 — Flujo exitoso — consultar historial de viajes conductor', () {
+
       // Arrange — Flujo exitoso: Vista de historial de viajes del conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-064)
@@ -2341,6 +2555,7 @@ void testRF064() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar historial de viajes conductor');
     });
     test('CP02 — Sin viajes (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -2350,6 +2565,7 @@ void testRF064() {
       print('  ✅ CP02 PASS — Sin viajes (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2366,6 +2582,7 @@ void testRF064() {
 void testRF065() {
   group('RF-065 — Recuperación de contraseña del pasajero', () {
     test('CP01 — Flujo exitoso — recuperar contraseña pasajero', () {
+
       // Arrange — Flujo exitoso: Recuperación de contraseña del pasajero
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-065)
@@ -2375,6 +2592,7 @@ void testRF065() {
       print('  ✅ CP01 PASS — Flujo exitoso — recuperar contraseña pasajero');
     });
     test('CP02 — Correo no registrado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeEmailDuplicado = 'email already registered';
       // Act — ejecutar la validación / regla de la app
@@ -2384,6 +2602,7 @@ void testRF065() {
       print('  ✅ CP02 PASS — Correo no registrado (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2400,6 +2619,7 @@ void testRF065() {
 void testRF066() {
   group('RF-066 — Cierre de sesión del pasajero', () {
     test('CP01 — Flujo exitoso — cerrar sesión pasajero', () {
+
       // Arrange — Flujo exitoso: Cierre de sesión del pasajero
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-066)
@@ -2409,6 +2629,7 @@ void testRF066() {
       print('  ✅ CP01 PASS — Flujo exitoso — cerrar sesión pasajero');
     });
     test('CP02 — Si hay reserva activa (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('esperando');
@@ -2416,6 +2637,7 @@ void testRF066() {
       print('  ✅ CP02 PASS — Si hay reserva activa (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2432,6 +2654,7 @@ void testRF066() {
 void testRF067() {
   group('RF-067 — Cierre de sesión del conductor', () {
     test('CP01 — Flujo exitoso — cerrar sesión conductor', () {
+
       // Arrange — Flujo exitoso: Cierre de sesión del conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-067)
@@ -2441,6 +2664,7 @@ void testRF067() {
       print('  ✅ CP01 PASS — Flujo exitoso — cerrar sesión conductor');
     });
     test('CP02 — Si está en ruta activa (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = conductorDisponibleParaReserva('en_ruta');
@@ -2448,6 +2672,7 @@ void testRF067() {
       print('  ✅ CP02 PASS — Si está en ruta activa (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2464,11 +2689,12 @@ void testRF067() {
 void testRF068() {
   group('RF-068 — Notificación al administrador de nueva solicitud de pago', () {
     test('CP01 — Flujo exitoso — notificar solicitud de pago al admin', () {
+
       // Arrange — Solicitud de pago válida y administrador con conexión.
       // Act — ejecutar la validación / regla de la app
       final puedeNotificar = puedeNotificarAdminSolicitudPago(
-        solicitudValida: true,
-        adminConectado: true,
+      solicitudValida: true,
+      adminConectado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(puedeNotificar, isTrue);
@@ -2476,13 +2702,14 @@ void testRF068() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar solicitud de pago al admin');
     });
     test('CP02 — Admin sin conexión (E1)', () {
+
       // Arrange — Administrador sin conexión.
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
       final offline = offlineSyncStrategy(hayConexion);
       final puedeNotificar = puedeNotificarAdminSolicitudPago(
-        solicitudValida: true,
-        adminConectado: false,
+      solicitudValida: true,
+      adminConectado: false,
       );
       // Assert — verificar el resultado esperado del CP
       expect(offline, equals('último estado conocido'));
@@ -2491,11 +2718,12 @@ void testRF068() {
       print('  ✅ CP02 PASS — Admin sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — Solicitud de pago con datos incompletos.
       // Act — ejecutar la validación / regla de la app
       final puedeNotificar = puedeNotificarAdminSolicitudPago(
-        solicitudValida: false,
-        adminConectado: true,
+      solicitudValida: false,
+      adminConectado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(puedeNotificar, isFalse);
@@ -2509,6 +2737,7 @@ void testRF068() {
 void testRF069() {
   group('RF-069 — Filtros de búsqueda de conductores por ruta', () {
     test('CP01 — Flujo exitoso — filtrar conductores por ruta', () {
+
       // Arrange — Flujo exitoso: Filtros de búsqueda de conductores por ruta
       const cuentaActiva = true;
       const estadoConductor = 'activo';
@@ -2519,6 +2748,7 @@ void testRF069() {
       print('  ✅ CP01 PASS — Flujo exitoso — filtrar conductores por ruta');
     });
     test('CP02 — Sin conductores para la dirección seleccionada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <Map<String, dynamic>>[];
       final isEmpty1 = busquedaSinResultados(lista.length);
@@ -2527,6 +2757,7 @@ void testRF069() {
       print('  ✅ CP02 PASS — Sin conductores para la dirección seleccionada (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2543,6 +2774,7 @@ void testRF069() {
 void testRF070() {
   group('RF-070 — Mostrar tiempo estimado de llegada al destino', () {
     test('CP01 — Flujo exitoso — mostrar ETA al destino', () {
+
       // Arrange — Flujo exitoso: Mostrar tiempo estimado de llegada al destino
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -2552,6 +2784,7 @@ void testRF070() {
       print('  ✅ CP01 PASS — Flujo exitoso — mostrar ETA al destino');
     });
     test('CP02 — Sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -2561,6 +2794,7 @@ void testRF070() {
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2577,6 +2811,7 @@ void testRF070() {
 void testRF071() {
   group('RF-071 — Ver detalle de reserva activa del pasajero', () {
     test('CP01 — Flujo exitoso — consultar detalle de reserva', () {
+
       // Arrange — Flujo exitoso: Ver detalle de reserva activa del pasajero
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -2586,6 +2821,7 @@ void testRF071() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar detalle de reserva');
     });
     test('CP02 — Sin reserva activa (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('completado');
@@ -2593,6 +2829,7 @@ void testRF071() {
       print('  ✅ CP02 PASS — Sin reserva activa (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2609,6 +2846,7 @@ void testRF071() {
 void testRF072() {
   group('RF-072 — Mostrar asientos disponibles restantes al pasajero', () {
     test('CP01 — Flujo exitoso — ver asientos disponibles en listado', () {
+
       // Arrange — Flujo exitoso: Mostrar asientos disponibles restantes al pasajero
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -2618,6 +2856,7 @@ void testRF072() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver asientos disponibles en listado');
     });
     test('CP02 — Información desactualizada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = offlineSyncStrategy(false);
@@ -2625,6 +2864,7 @@ void testRF072() {
       print('  ✅ CP02 PASS — Información desactualizada (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2641,6 +2881,7 @@ void testRF072() {
 void testRF073() {
   group('RF-073 — Panel de inicio del conductor con resumen del día', () {
     test('CP01 — Flujo exitoso — ver resumen diario conductor', () {
+
       // Arrange — Flujo exitoso: Panel de inicio del conductor con resumen del día
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-073)
@@ -2650,6 +2891,7 @@ void testRF073() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver resumen diario conductor');
     });
     test('CP02 — Primer día sin viajes (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -2659,6 +2901,7 @@ void testRF073() {
       print('  ✅ CP02 PASS — Primer día sin viajes (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2675,6 +2918,7 @@ void testRF073() {
 void testRF074() {
   group('RF-074 — Visualización del estado de aceptación del forzado de salida', () {
     test('CP01 — Flujo exitoso — ver estado de aceptación de salida forz', () {
+
       // Arrange — Flujo exitoso: Visualización del estado de aceptación del forzado de salida
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-074)
@@ -2684,6 +2928,7 @@ void testRF074() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver estado de aceptación de salida forz');
     });
     test('CP02 — Tiempo límite alcanzado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = forzarSalidaTiempoExpirado(tiempoExpirado: true, respuestasRecibidas: 1, totalPasajeros: 4);
@@ -2691,6 +2936,7 @@ void testRF074() {
       print('  ✅ CP02 PASS — Tiempo límite alcanzado (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2707,6 +2953,7 @@ void testRF074() {
 void testRF075() {
   group('RF-075 — Bloqueo de acceso operativo al conductor sin pago confirmado', () {
     test('CP01 — Flujo exitoso — bloquear conductor sin confirmación de ', () {
+
       // Arrange — Flujo exitoso: Bloqueo de acceso operativo al conductor sin pago confirmado
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -2715,6 +2962,7 @@ void testRF075() {
       print('  ✅ CP01 PASS — Flujo exitoso — bloquear conductor sin confirmación de ');
     });
     test('CP02 — El conductor nunca recibió notificación de pago (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = puedeNotificarAdminSolicitudPago(solicitudValida: true, adminConectado: false);
@@ -2722,6 +2970,7 @@ void testRF075() {
       print('  ✅ CP02 PASS — El conductor nunca recibió notificación de pago (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -2736,6 +2985,7 @@ void testRF075() {
 void testRF076() {
   group('RF-076 — Indicador de ruta activa en el perfil del conductor (para pasajeros)', () {
     test('CP01 — Flujo exitoso — mostrar estado del conductor al pasajer', () {
+
       // Arrange — Flujo exitoso: Indicador de ruta activa en el perfil del conductor (para pasajeros)
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('editado@test.com') && PassengerAuthValidators.isValidPeruPhone('912345678'));
@@ -2744,6 +2994,7 @@ void testRF076() {
       print('  ✅ CP01 PASS — Flujo exitoso — mostrar estado del conductor al pasajer');
     });
     test('CP02 — Conductor en ruta (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = conductorDisponibleParaReserva('en_ruta');
@@ -2751,6 +3002,7 @@ void testRF076() {
       print('  ✅ CP02 PASS — Conductor en ruta (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2767,6 +3019,7 @@ void testRF076() {
 void testRF077() {
   group('RF-077 — Generación automática de recibo de pago al pasajero', () {
     test('CP01 — Flujo exitoso — generar recibo de pago', () {
+
       // Arrange — Flujo exitoso: Generación automática de recibo de pago al pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -2775,6 +3028,7 @@ void testRF077() {
       print('  ✅ CP01 PASS — Flujo exitoso — generar recibo de pago');
     });
     test('CP02 — Error de generación (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canScanReservationQr('');
@@ -2784,6 +3038,7 @@ void testRF077() {
       print('  ✅ CP02 PASS — Error de generación (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -2798,6 +3053,7 @@ void testRF077() {
 void testRF078() {
   group('RF-078 — Alertas de incidencias en ruta al pasajero durante el viaje', () {
     test('CP01 — Flujo exitoso — notificar incidencia en ruta', () {
+
       // Arrange — Flujo exitoso: Alertas de incidencias en ruta al pasajero durante el viaje
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-078)
@@ -2807,6 +3063,7 @@ void testRF078() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar incidencia en ruta');
     });
     test('CP02 — Pasajero sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -2816,6 +3073,7 @@ void testRF078() {
       print('  ✅ CP02 PASS — Pasajero sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2832,6 +3090,7 @@ void testRF078() {
 void testRF079() {
   group('RF-079 — Vista de perfil público del conductor para el pasajero', () {
     test('CP01 — Flujo exitoso — ver perfil del conductor', () {
+
       // Arrange — Flujo exitoso: Vista de perfil público del conductor para el pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('editado@test.com') && PassengerAuthValidators.isValidPeruPhone('912345678'));
@@ -2840,6 +3099,7 @@ void testRF079() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver perfil del conductor');
     });
     test('CP02 — Sin calificaciones (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -2849,6 +3109,7 @@ void testRF079() {
       print('  ✅ CP02 PASS — Sin calificaciones (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2865,6 +3126,7 @@ void testRF079() {
 void testRF080() {
   group('RF-080 — Indicador de cuántos asientos quedan para llenar el vehículo (conductor)', () {
     test('CP01 — Flujo exitoso — ver asientos pendientes para llenado', () {
+
       // Arrange — Flujo exitoso: Indicador de cuántos asientos quedan para llenar el vehículo (conductor)
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -2874,6 +3136,7 @@ void testRF080() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver asientos pendientes para llenado');
     });
     test('CP02 — Información desactualizada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = offlineSyncStrategy(false);
@@ -2881,6 +3144,7 @@ void testRF080() {
       print('  ✅ CP02 PASS — Información desactualizada (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2897,6 +3161,7 @@ void testRF080() {
 void testRF081() {
   group('RF-081 — Reseteo de bloqueo de conductor por administrador', () {
     test('CP01 — Flujo exitoso — desbloquear conductor manualmente', () {
+
       // Arrange — Flujo exitoso: Reseteo de bloqueo de conductor por administrador
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-081)
@@ -2906,6 +3171,7 @@ void testRF081() {
       print('  ✅ CP01 PASS — Flujo exitoso — desbloquear conductor manualmente');
     });
     test('CP02 — Conductor con deuda no resuelta (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = blockedAccountMessage(accountActive: false);
@@ -2913,6 +3179,7 @@ void testRF081() {
       print('  ✅ CP02 PASS — Conductor con deuda no resuelta (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2929,6 +3196,7 @@ void testRF081() {
 void testRF082() {
   group('RF-082 — Ver listado completo de conductores registrados (admin)', () {
     test('CP01 — Flujo exitoso — listar conductores', () {
+
       // Arrange — Flujo exitoso: Ver listado completo de conductores registrados (admin)
       const cuentaActiva = true;
       const estadoConductor = 'activo';
@@ -2939,6 +3207,7 @@ void testRF082() {
       print('  ✅ CP01 PASS — Flujo exitoso — listar conductores');
     });
     test('CP02 — Sin conductores registrados (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <Map<String, dynamic>>[];
       final isEmpty1 = busquedaSinResultados(lista.length);
@@ -2947,6 +3216,7 @@ void testRF082() {
       print('  ✅ CP02 PASS — Sin conductores registrados (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2963,6 +3233,7 @@ void testRF082() {
 void testRF083() {
   group('RF-083 — Editar datos de conductor (admin)', () {
     test('CP01 — Flujo exitoso — editar conductor', () {
+
       // Arrange — Flujo exitoso: Editar datos de conductor (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-083)
@@ -2972,6 +3243,7 @@ void testRF083() {
       print('  ✅ CP01 PASS — Flujo exitoso — editar conductor');
     });
     test('CP02 — Placa duplicada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeDbPlatealreadyassigned10 = 'plate already assigned';
       // Act — ejecutar la validación / regla de la app
@@ -2981,6 +3253,7 @@ void testRF083() {
       print('  ✅ CP02 PASS — Placa duplicada (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -2991,6 +3264,7 @@ void testRF083() {
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
     test('CP04 — Formato de datos inválido (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateEmailField('correo-sin-arroba') != null;
@@ -3005,6 +3279,7 @@ void testRF083() {
 void testRF084() {
   group('RF-084 — Filtrar estadísticas por rango de fechas (admin)', () {
     test('CP01 — Flujo exitoso — filtrar estadísticas por fecha', () {
+
       // Arrange — Flujo exitoso: Filtrar estadísticas por rango de fechas (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-084)
@@ -3014,6 +3289,7 @@ void testRF084() {
       print('  ✅ CP01 PASS — Flujo exitoso — filtrar estadísticas por fecha');
     });
     test('CP02 — Rango inválido (fecha fin antes que inicio) (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isCommissionPercentValid(-1);
@@ -3021,6 +3297,7 @@ void testRF084() {
       print('  ✅ CP02 PASS — Rango inválido (fecha fin antes que inicio) (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3037,6 +3314,7 @@ void testRF084() {
 void testRF085() {
   group('RF-085 — Ver desglose de ingresos por conductor (admin)', () {
     test('CP01 — Flujo exitoso — ver ingresos por conductor', () {
+
       // Arrange — Flujo exitoso: Ver desglose de ingresos por conductor (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-085)
@@ -3046,6 +3324,7 @@ void testRF085() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver ingresos por conductor');
     });
     test('CP02 — Sin viajes del conductor (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -3055,6 +3334,7 @@ void testRF085() {
       print('  ✅ CP02 PASS — Sin viajes del conductor (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3071,6 +3351,7 @@ void testRF085() {
 void testRF086() {
   group('RF-086 — Confirmación de datos antes del pago', () {
     test('CP01 — Flujo exitoso — confirmar datos de reserva antes de pag', () {
+
       // Arrange — Flujo exitoso: Confirmación de datos antes del pago
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -3079,6 +3360,7 @@ void testRF086() {
       print('  ✅ CP01 PASS — Flujo exitoso — confirmar datos de reserva antes de pag');
     });
     test('CP02 — El pasajero cancela (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('esperando');
@@ -3086,6 +3368,7 @@ void testRF086() {
       print('  ✅ CP02 PASS — El pasajero cancela (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -3100,6 +3383,7 @@ void testRF086() {
 void testRF087() {
   group('RF-087 — Ver promedio de calificación en perfil del conductor (conductor)', () {
     test('CP01 — Flujo exitoso — ver calificación propia del conductor', () {
+
       // Arrange — Flujo exitoso: Ver promedio de calificación en perfil del conductor (conductor)
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('editado@test.com') && PassengerAuthValidators.isValidPeruPhone('912345678'));
@@ -3108,6 +3392,7 @@ void testRF087() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver calificación propia del conductor');
     });
     test('CP02 — Sin calificaciones (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -3117,6 +3402,7 @@ void testRF087() {
       print('  ✅ CP02 PASS — Sin calificaciones (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3133,11 +3419,12 @@ void testRF087() {
 void testRF088() {
   group('RF-088 — Notificación de bloqueo al conductor', () {
     test('CP01 — Flujo exitoso — notificar bloqueo al conductor', () {
+
       // Arrange — Cuenta del conductor suspendida con push habilitado.
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarBloqueoConductor(
-        cuentaActiva: false,
-        pushConductorHabilitado: true,
+      cuentaActiva: false,
+      pushConductorHabilitado: true,
       );
       final mensaje = mensajeNotificacionBloqueoConductor();
       // Assert — verificar el resultado esperado del CP
@@ -3147,6 +3434,7 @@ void testRF088() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar bloqueo al conductor');
     });
     test('CP02 — Sin conexión (E1)', () {
+
       // Arrange — Conductor sin conexión de red.
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -3157,11 +3445,12 @@ void testRF088() {
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — Cuenta activa — no aplica bloqueo.
       // Act — ejecutar la validación / regla de la app
       final debeNotificar = debeNotificarBloqueoConductor(
-        cuentaActiva: true,
-        pushConductorHabilitado: true,
+      cuentaActiva: true,
+      pushConductorHabilitado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(debeNotificar, isFalse);
@@ -3175,6 +3464,7 @@ void testRF088() {
 void testRF089() {
   group('RF-089 — Ver capacidad del vehículo en el perfil del conductor', () {
     test('CP01 — Flujo exitoso — mostrar capacidad del vehículo', () {
+
       // Arrange — Flujo exitoso: Ver capacidad del vehículo en el perfil del conductor
       // Act — ejecutar la validación / regla de la app
       final resultado1 = vehiculoRegistroValido(plate: 'ABC-123', totalSeats: 4, label: 'Combi');
@@ -3183,6 +3473,7 @@ void testRF089() {
       print('  ✅ CP01 PASS — Flujo exitoso — mostrar capacidad del vehículo');
     });
     test('CP02 — N/A (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -3190,6 +3481,7 @@ void testRF089() {
       print('  ✅ CP02 PASS — N/A (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3206,6 +3498,7 @@ void testRF089() {
 void testRF090() {
   group('RF-090 — Gestión de múltiples vehículos por el administrador', () {
     test('CP01 — Flujo exitoso — registrar vehículo en el sistema', () {
+
       // Arrange — Flujo exitoso: Gestión de múltiples vehículos por el administrador
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-090)
@@ -3215,6 +3508,7 @@ void testRF090() {
       print('  ✅ CP01 PASS — Flujo exitoso — registrar vehículo en el sistema');
     });
     test('CP02 — Placa duplicada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeDbPlatealreadyassigned10 = 'plate already assigned';
       // Act — ejecutar la validación / regla de la app
@@ -3224,6 +3518,7 @@ void testRF090() {
       print('  ✅ CP02 PASS — Placa duplicada (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3240,6 +3535,7 @@ void testRF090() {
 void testRF091() {
   group('RF-091 — Ver mapa de asientos en el resumen de reserva', () {
     test('CP01 — Flujo exitoso — ver asientos seleccionados en resumen', () {
+
       // Arrange — Flujo exitoso: Ver mapa de asientos en el resumen de reserva
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -3249,6 +3545,7 @@ void testRF091() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver asientos seleccionados en resumen');
     });
     test('CP02 — El pasajero regresa (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isSeatSelectable(2, {1, 3});
@@ -3256,6 +3553,7 @@ void testRF091() {
       print('  ✅ CP02 PASS — El pasajero regresa (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3272,6 +3570,7 @@ void testRF091() {
 void testRF092() {
   group('RF-092 — Desactivar conductor (admin)', () {
     test('CP01 — Flujo exitoso — desactivar conductor', () {
+
       // Arrange — Flujo exitoso: Desactivar conductor (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-092)
@@ -3281,6 +3580,7 @@ void testRF092() {
       print('  ✅ CP01 PASS — Flujo exitoso — desactivar conductor');
     });
     test('CP02 — Conductor en ruta activa (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = conductorDisponibleParaReserva('en_ruta');
@@ -3288,6 +3588,7 @@ void testRF092() {
       print('  ✅ CP02 PASS — Conductor en ruta activa (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3304,6 +3605,7 @@ void testRF092() {
 void testRF093() {
   group('RF-093 — Reactivar conductor (admin)', () {
     test('CP01 — Flujo exitoso — reactivar conductor', () {
+
       // Arrange — Flujo exitoso: Reactivar conductor (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-093)
@@ -3313,6 +3615,7 @@ void testRF093() {
       print('  ✅ CP01 PASS — Flujo exitoso — reactivar conductor');
     });
     test('CP02 — N/A (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -3320,6 +3623,7 @@ void testRF093() {
       print('  ✅ CP02 PASS — N/A (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3336,6 +3640,7 @@ void testRF093() {
 void testRF094() {
   group('RF-094 — Mostrar historial de pagos al conductor', () {
     test('CP01 — Flujo exitoso — ver historial de pagos conductor', () {
+
       // Arrange — Flujo exitoso: Mostrar historial de pagos al conductor
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -3344,6 +3649,7 @@ void testRF094() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver historial de pagos conductor');
     });
     test('CP02 — Sin pagos (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -3351,6 +3657,7 @@ void testRF094() {
       print('  ✅ CP02 PASS — Sin pagos (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -3365,6 +3672,7 @@ void testRF094() {
 void testRF095() {
   group('RF-095 — Mostrar historial de pagos al administrador', () {
     test('CP01 — Flujo exitoso — ver historial de pagos admin', () {
+
       // Arrange — Flujo exitoso: Mostrar historial de pagos al administrador
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -3373,6 +3681,7 @@ void testRF095() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver historial de pagos admin');
     });
     test('CP02 — Sin pagos registrados (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -3380,6 +3689,7 @@ void testRF095() {
       print('  ✅ CP02 PASS — Sin pagos registrados (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = validateCardPaymentFields(cardNumber: '1234', cvv: '12', expiry: '00/00', holder: 'X') != null;
@@ -3394,6 +3704,7 @@ void testRF095() {
 void testRF096() {
   group('RF-096 — Tiempo estimado de llenado del vehículo (conductor)', () {
     test('CP01 — Flujo exitoso — estimar tiempo de llenado', () {
+
       // Arrange — Flujo exitoso: Tiempo estimado de llenado del vehículo (conductor)
       const ocupadosVehiculo = 4;
       const capacidadVehiculo = 4;
@@ -3404,6 +3715,7 @@ void testRF096() {
       print('  ✅ CP01 PASS — Flujo exitoso — estimar tiempo de llenado');
     });
     test('CP02 — Sin datos suficientes (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -3413,6 +3725,7 @@ void testRF096() {
       print('  ✅ CP02 PASS — Sin datos suficientes (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3429,6 +3742,7 @@ void testRF096() {
 void testRF097() {
   group('RF-097 — Acceso a la app sin conexión con datos en caché', () {
     test('CP01 — Flujo exitoso — acceso offline a reserva activa', () {
+
       // Arrange — Flujo exitoso: Acceso a la app sin conexión con datos en caché
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-097)
@@ -3438,6 +3752,7 @@ void testRF097() {
       print('  ✅ CP01 PASS — Flujo exitoso — acceso offline a reserva activa');
     });
     test('CP02 — Sin datos en caché (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -3447,6 +3762,7 @@ void testRF097() {
       print('  ✅ CP02 PASS — Sin datos en caché (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3463,6 +3779,7 @@ void testRF097() {
 void testRF098() {
   group('RF-098 — Soporte de múltiples rutas de retorno Chosica → San Isidro', () {
     test('CP01 — Flujo exitoso — mostrar rutas de retorno disponibles', () {
+
       // Arrange — Flujo exitoso: Soporte de múltiples rutas de retorno Chosica → San Isidro
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-098)
@@ -3472,6 +3789,7 @@ void testRF098() {
       print('  ✅ CP01 PASS — Flujo exitoso — mostrar rutas de retorno disponibles');
     });
     test('CP02 — Sin conductores en ruta de retorno (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <Map<String, dynamic>>[];
       final isEmpty1 = busquedaSinResultados(lista.length);
@@ -3480,6 +3798,7 @@ void testRF098() {
       print('  ✅ CP02 PASS — Sin conductores en ruta de retorno (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3496,6 +3815,7 @@ void testRF098() {
 void testRF099() {
   group('RF-099 — Integración con Waze para tiempo estimado al pasajero', () {
     test('CP01 — Flujo exitoso — integrar Waze para ETA al pasajero', () {
+
       // Arrange — escenario «Flujo exitoso — integrar Waze para ETA al pasajero» (Integración con Waze para tiempo estimado al pasajero)
       // Act — ejecutar la validación / regla de la app
       // Assert — verificar el resultado esperado del CP
@@ -3504,6 +3824,7 @@ void testRF099() {
       print('  ✅ CP01 PASS — Flujo exitoso — integrar Waze para ETA al pasajero');
     });
     test('CP02 — Waze no disponible (E1)', () {
+
       // Arrange — escenario «Waze no disponible (E1)»
       // Act — lógica real de lib/ (RF-099)
       expect(wazeDisponible(lat: null, lng: -76.6934), isFalse);
@@ -3511,6 +3832,7 @@ void testRF099() {
       print('  ✅ CP02 PASS — Waze no disponible (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — escenario «Campos requeridos incompletos (E2)»
       // Act — lógica real de lib/ (RF-099)
       expect(validateWazeCoordinates(lat: 999, lng: 0), isNotNull);
@@ -3523,6 +3845,7 @@ void testRF099() {
 void testRF100() {
   group('RF-100 — Registro de eventos del sistema para auditoría', () {
     test('CP01 — Flujo exitoso — registrar eventos de auditoría', () {
+
       // Arrange — Flujo exitoso: Registro de eventos del sistema para auditoría
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-100)
@@ -3532,6 +3855,7 @@ void testRF100() {
       print('  ✅ CP01 PASS — Flujo exitoso — registrar eventos de auditoría');
     });
     test('CP02 — Falla de registro (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = eventoAuditoriaValido('', 'conductor');
@@ -3539,6 +3863,7 @@ void testRF100() {
       print('  ✅ CP02 PASS — Falla de registro (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3555,6 +3880,7 @@ void testRF100() {
 void testRF101() {
   group('RF-101 — Inicio de sesión del conductor', () {
     test('CP01 — Flujo exitoso — iniciar sesión conductor', () {
+
       // Arrange — Flujo exitoso: Inicio de sesión del conductor
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (PassengerAuthValidators.isValidEmail('pasajero@test.com') && PassengerAuthValidators.isValidPassword('password123'));
@@ -3563,6 +3889,7 @@ void testRF101() {
       print('  ✅ CP01 PASS — Flujo exitoso — iniciar sesión conductor');
     });
     test('CP02 — Credenciales incorrectas (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const tipoAuthException = 'AuthException';
       // Act — ejecutar la validación / regla de la app
@@ -3572,6 +3899,7 @@ void testRF101() {
       print('  ✅ CP02 PASS — Credenciales incorrectas (E1)');
     });
     test('CP03 — Conductor desactivado (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isDriverEligibleForListing(cuentaActiva: false, estado: 'disponible');
@@ -3579,6 +3907,7 @@ void testRF101() {
       print('  ✅ CP03 PASS — Conductor desactivado (E2)');
     });
     test('CP04 — Sin confirmación de pago previo (E3)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -3594,6 +3923,7 @@ void testRF101() {
 void testRF102() {
   group('RF-102 — Recuperación de contraseña del conductor', () {
     test('CP01 — Flujo exitoso — recuperar contraseña conductor', () {
+
       // Arrange — Flujo exitoso: Recuperación de contraseña del conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-102)
@@ -3603,6 +3933,7 @@ void testRF102() {
       print('  ✅ CP01 PASS — Flujo exitoso — recuperar contraseña conductor');
     });
     test('CP02 — Correo no registrado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeEmailDuplicado = 'email already registered';
       // Act — ejecutar la validación / regla de la app
@@ -3612,6 +3943,7 @@ void testRF102() {
       print('  ✅ CP02 PASS — Correo no registrado (E1)');
     });
     test('CP03 — Enlace expirado (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = sessionExpiredAction(false);
@@ -3625,6 +3957,7 @@ void testRF102() {
 void testRF103() {
   group('RF-103 — Ingreso manual del punto de recojo al reservar', () {
     test('CP01 — Flujo exitoso — ingresar punto de recojo en reserva', () {
+
       // Arrange — Flujo exitoso: Ingreso manual del punto de recojo al reservar
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (validatePickupPoint('Av. Principal 123, Chosica') == null);
@@ -3633,6 +3966,7 @@ void testRF103() {
       print('  ✅ CP01 PASS — Flujo exitoso — ingresar punto de recojo en reserva');
     });
     test('CP02 — Campo vacío (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const puntoRecojoValor1010 = '';
       const campoVacio20 = null;
@@ -3645,6 +3979,7 @@ void testRF103() {
       print('  ✅ CP02 PASS — Campo vacío (E1)');
     });
     test('CP03 — Texto demasiado corto (menos de 3 caracteres) (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validarPuntoRecojo('ab');
@@ -3658,6 +3993,7 @@ void testRF103() {
 void testRF104() {
   group('RF-104 — Recepción de punto de recojo alternativo por el pasajero', () {
     test('CP01 — Flujo exitoso — recibir punto de recojo alternativo', () {
+
       // Arrange — Flujo exitoso: Recepción de punto de recojo alternativo por el pasajero
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (validatePickupPoint('Av. Principal 123, Chosica') == null);
@@ -3666,6 +4002,7 @@ void testRF104() {
       print('  ✅ CP01 PASS — Flujo exitoso — recibir punto de recojo alternativo');
     });
     test('CP02 — Pasajero sin conexión (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
@@ -3675,6 +4012,7 @@ void testRF104() {
       print('  ✅ CP02 PASS — Pasajero sin conexión (E1)');
     });
     test('CP03 — Pasajero no responde (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = mensajeChatValido('');
@@ -3688,6 +4026,7 @@ void testRF104() {
 void testRF105() {
   group('RF-105 — Cambio de estado visual del vehículo al completarse el llenado', () {
     test('CP01 — Flujo exitoso — actualizar estado visual del vehículo a', () {
+
       // Arrange — Flujo exitoso: Cambio de estado visual del vehículo al completarse el llenado
       const ocupadosVehiculo = 4;
       const capacidadVehiculo = 4;
@@ -3698,6 +4037,7 @@ void testRF105() {
       print('  ✅ CP01 PASS — Flujo exitoso — actualizar estado visual del vehículo a');
     });
     test('CP02 — Cancelación de reserva tras llenarse (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('en_ruta');
@@ -3705,6 +4045,7 @@ void testRF105() {
       print('  ✅ CP02 PASS — Cancelación de reserva tras llenarse (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3721,6 +4062,7 @@ void testRF105() {
 void testRF106() {
   group('RF-106 — Cierre de sesión del administrador', () {
     test('CP01 — Flujo exitoso — cerrar sesión administrador', () {
+
       // Arrange — Flujo exitoso: Cierre de sesión del administrador
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-106)
@@ -3730,6 +4072,7 @@ void testRF106() {
       print('  ✅ CP01 PASS — Flujo exitoso — cerrar sesión administrador');
     });
     test('CP02 — Si hay acciones pendientes sin guardar (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validarCampoRequerido(null) != null;
@@ -3737,6 +4080,7 @@ void testRF106() {
       print('  ✅ CP02 PASS — Si hay acciones pendientes sin guardar (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3753,6 +4097,7 @@ void testRF106() {
 void testRF107() {
   group('RF-107 — Consultar historial de chats tras finalizar el viaje', () {
     test('CP01 — Flujo exitoso — consultar historial de chats', () {
+
       // Arrange — Flujo exitoso: Consultar historial de chats tras finalizar el viaje
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-107)
@@ -3762,6 +4107,7 @@ void testRF107() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar historial de chats');
     });
     test('CP02 — Sin mensajes en el viaje (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -3769,6 +4115,7 @@ void testRF107() {
       print('  ✅ CP02 PASS — Sin mensajes en el viaje (E1)');
     });
     test('CP03 — Historial vacío (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -3782,6 +4129,7 @@ void testRF107() {
 void testRF108() {
   group('RF-108 — Selección de dirección del viaje al buscar', () {
     test('CP01 — Flujo exitoso — seleccionar dirección de viaje', () {
+
       // Arrange — Flujo exitoso: Selección de dirección del viaje al buscar
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-108)
@@ -3791,6 +4139,7 @@ void testRF108() {
       print('  ✅ CP01 PASS — Flujo exitoso — seleccionar dirección de viaje');
     });
     test('CP02 — Sin conductores en la dirección seleccionada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <Map<String, dynamic>>[];
       final isEmpty1 = busquedaSinResultados(lista.length);
@@ -3799,6 +4148,7 @@ void testRF108() {
       print('  ✅ CP02 PASS — Sin conductores en la dirección seleccionada (E1)');
     });
     test('CP03 — El pasajero cambia de dirección (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = matchesTripDirection(fromLabel: 'Chosica', toLabel: 'San Isidro', direction: kDirectionSiCho);
@@ -3812,6 +4162,7 @@ void testRF108() {
 void testRF109() {
   group('RF-109 — Ver lista de pasajeros del viaje con puntos de recojo (conductor)', () {
     test('CP01 — Flujo exitoso — ver lista de pasajeros y puntos de reco', () {
+
       // Arrange — Flujo exitoso: Ver lista de pasajeros del viaje con puntos de recojo (conductor)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-109)
@@ -3821,6 +4172,7 @@ void testRF109() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver lista de pasajeros y puntos de reco');
     });
     test('CP02 — Pasajero sin punto de recojo ingresado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validatePickupPoint('');
@@ -3828,6 +4180,7 @@ void testRF109() {
       print('  ✅ CP02 PASS — Pasajero sin punto de recojo ingresado (E1)');
     });
     test('CP03 — Lista vacía (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -3841,6 +4194,7 @@ void testRF109() {
 void testRF110() {
   group('RF-110 — Activar modo disponible por el conductor', () {
     test('CP01 — Flujo exitoso — activar disponibilidad del conductor', () {
+
       // Arrange — Flujo exitoso: Activar modo disponible por el conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-110)
@@ -3850,6 +4204,7 @@ void testRF110() {
       print('  ✅ CP01 PASS — Flujo exitoso — activar disponibilidad del conductor');
     });
     test('CP02 — Sin acceso operativo (pago no confirmado) (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = reservationPaymentCompleted(false);
@@ -3857,6 +4212,7 @@ void testRF110() {
       print('  ✅ CP02 PASS — Sin acceso operativo (pago no confirmado) (E1)');
     });
     test('CP03 — El conductor no activa disponibilidad (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isDriverEligibleForListing(cuentaActiva: true, estado: 'inactivo');
@@ -3870,6 +4226,7 @@ void testRF110() {
 void testRF111() {
   group('RF-111 — Desactivar modo disponible por el conductor', () {
     test('CP01 — Flujo exitoso — desactivar disponibilidad del conductor', () {
+
       // Arrange — Flujo exitoso: Desactivar modo disponible por el conductor
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-111)
@@ -3879,6 +4236,7 @@ void testRF111() {
       print('  ✅ CP01 PASS — Flujo exitoso — desactivar disponibilidad del conductor');
     });
     test('CP02 — Conductor con reservas activas (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = hasAvailableSeats(totalSeats: 4, occupiedSeats: 4);
@@ -3886,6 +4244,7 @@ void testRF111() {
       print('  ✅ CP02 PASS — Conductor con reservas activas (E1)');
     });
     test('CP03 — Conductor en ruta (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = conductorDisponibleParaReserva('en_ruta');
@@ -3899,6 +4258,7 @@ void testRF111() {
 void testRF112() {
   group('RF-112 — Recuperación de contraseña del administrador', () {
     test('CP01 — Flujo exitoso — recuperar contraseña administrador', () {
+
       // Arrange — Flujo exitoso: Recuperación de contraseña del administrador
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-112)
@@ -3908,6 +4268,7 @@ void testRF112() {
       print('  ✅ CP01 PASS — Flujo exitoso — recuperar contraseña administrador');
     });
     test('CP02 — Correo no registrado (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const mensajeEmailDuplicado = 'email already registered';
       // Act — ejecutar la validación / regla de la app
@@ -3917,6 +4278,7 @@ void testRF112() {
       print('  ✅ CP02 PASS — Correo no registrado (E1)');
     });
     test('CP03 — Enlace expirado (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = sessionExpiredAction(false);
@@ -3930,6 +4292,7 @@ void testRF112() {
 void testRF113() {
   group('RF-113 — Ver detalle completo de un viaje específico (admin)', () {
     test('CP01 — Flujo exitoso — consultar detalle de viaje', () {
+
       // Arrange — Flujo exitoso: Ver detalle completo de un viaje específico (admin)
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -3939,6 +4302,7 @@ void testRF113() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar detalle de viaje');
     });
     test('CP02 — Viaje sin datos completos (interrumpido) (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -3948,6 +4312,7 @@ void testRF113() {
       print('  ✅ CP02 PASS — Viaje sin datos completos (interrumpido) (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -3964,6 +4329,7 @@ void testRF113() {
 void testRF114() {
   group('RF-114 — Guardar método de pago para futuras reservas', () {
     test('CP01 — Flujo exitoso — guardar método de pago', () {
+
       // Arrange — Flujo exitoso: Guardar método de pago para futuras reservas
       // Act — ejecutar la validación / regla de la app
       final resultado1 = (isNewCardFormComplete(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') && validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez') == null);
@@ -3972,6 +4338,7 @@ void testRF114() {
       print('  ✅ CP01 PASS — Flujo exitoso — guardar método de pago');
     });
     test('CP02 — El pasajero no desea guardar (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isNewCardFormComplete(cardNumber: '', cvv: '', expiry: '', holder: '');
@@ -3979,6 +4346,7 @@ void testRF114() {
       print('  ✅ CP02 PASS — El pasajero no desea guardar (E1)');
     });
     test('CP03 — Error de la pasarela al guardar (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = culqiChargeResultMessage(400, 'Tarjeta rechazada');
@@ -3986,6 +4354,7 @@ void testRF114() {
       print('  ✅ CP03 PASS — Error de la pasarela al guardar (E2)');
     });
     test('CP04 — El pasajero puede eliminar el método guardado desde su ', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validateCardPaymentFields(cardNumber: '4111111111111111', cvv: '123', expiry: '12/28', holder: 'Juan Perez');
@@ -3999,6 +4368,7 @@ void testRF114() {
 void testRF115() {
   group('RF-115 — Cancelar reserva antes de la salida del vehículo', () {
     test('CP01 — Flujo exitoso — cancelar reserva', () {
+
       // Arrange — Flujo exitoso: Cancelar reserva antes de la salida del vehículo
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-115)
@@ -4008,6 +4378,7 @@ void testRF115() {
       print('  ✅ CP01 PASS — Flujo exitoso — cancelar reserva');
     });
     test('CP02 — El vehículo ya salió (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const estadoViajeEnRuta = 'en_ruta';
       const estadoViajeEsperando = 'esperando';
@@ -4020,6 +4391,7 @@ void testRF115() {
       print('  ✅ CP02 PASS — El vehículo ya salió (E1)');
     });
     test('CP03 — El pasajero cancela solo algunos asientos de un grupo (', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('esperando');
@@ -4033,6 +4405,7 @@ void testRF115() {
 void testRF116() {
   group('RF-116 — Acceder y compartir QR de cada acompañante', () {
     test('CP01 — Flujo exitoso — compartir QR de acompañante', () {
+
       // Arrange — Flujo exitoso: Acceder y compartir QR de cada acompañante
       // Act — ejecutar la validación / regla de la app
       final resultado1 = canScanReservationQr(buildPassengerQrData(reservaId: '9b4020ff-4a93-48e4-9931-b861b5dfa482', seatNumber: 1));
@@ -4041,6 +4414,7 @@ void testRF116() {
       print('  ✅ CP01 PASS — Flujo exitoso — compartir QR de acompañante');
     });
     test('CP02 — Error al compartir (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canScanReservationQr('invalido');
@@ -4048,6 +4422,7 @@ void testRF116() {
       print('  ✅ CP02 PASS — Error al compartir (E1)');
     });
     test('CP03 — QR ya escaneado (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       const valorQrNoesuuid10 = 'no-es-uuid';
       const valorQr9b4020ff4a9348e4993120 = '9b4020ff-4a93-48e4-9931-b861b5dfa482|1';
@@ -4066,6 +4441,7 @@ void testRF116() {
 void testRF117() {
   group('RF-117 — Registrar ausencia de pasajero que no abordó', () {
     test('CP01 — Flujo exitoso — registrar pasajero ausente', () {
+
       // Arrange — Flujo exitoso: Registrar ausencia de pasajero que no abordó
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-117)
@@ -4075,6 +4451,7 @@ void testRF117() {
       print('  ✅ CP01 PASS — Flujo exitoso — registrar pasajero ausente');
     });
     test('CP02 — El conductor marca por error (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = puedeRegistrarPasajeroAusente(boardingStatus: 'abordo', tripStatus: 'esperando');
@@ -4082,6 +4459,7 @@ void testRF117() {
       print('  ✅ CP02 PASS — El conductor marca por error (E1)');
     });
     test('CP03 — El pasajero llega tarde y el conductor ya partió (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = puedeRegistrarPasajeroAusente(boardingStatus: 'pendiente', tripStatus: 'en_ruta');
@@ -4095,6 +4473,7 @@ void testRF117() {
 void testRF118() {
   group('RF-118 — Ver orden de paradas de recojo (conductor)', () {
     test('CP01 — Flujo exitoso — ver orden de paradas de recojo', () {
+
       // Arrange — Flujo exitoso: Ver orden de paradas de recojo (conductor)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-118)
@@ -4104,6 +4483,7 @@ void testRF118() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver orden de paradas de recojo');
     });
     test('CP02 — Puntos de recojo fuera de la ruta (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = matchesTripDirection(fromLabel: 'Lima', toLabel: 'Chosica', direction: kDirectionSiCho);
@@ -4111,6 +4491,7 @@ void testRF118() {
       print('  ✅ CP02 PASS — Puntos de recojo fuera de la ruta (E1)');
     });
     test('CP03 — Ruta no seleccionada aún (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isRegisteredRouteDirection(null);
@@ -4124,6 +4505,7 @@ void testRF118() {
 void testRF119() {
   group('RF-119 — Configurar parámetros generales de la app (admin)', () {
     test('CP01 — Flujo exitoso — configurar parámetros generales', () {
+
       // Arrange — Flujo exitoso: Configurar parámetros generales de la app (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-119)
@@ -4133,6 +4515,7 @@ void testRF119() {
       print('  ✅ CP01 PASS — Flujo exitoso — configurar parámetros generales');
     });
     test('CP02 — Precio base en cero o negativo (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validarCampoRequerido(null) != null;
@@ -4142,6 +4525,7 @@ void testRF119() {
       print('  ✅ CP02 PASS — Precio base en cero o negativo (E1)');
     });
     test('CP03 — Cambio de precio con reservas activas (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('esperando');
@@ -4155,6 +4539,7 @@ void testRF119() {
 void testRF120() {
   group('RF-120 — Expiración y liberación automática de asientos bloqueados', () {
     test('CP01 — Flujo exitoso — liberar asientos por timeout', () {
+
       // Arrange — Flujo exitoso: Expiración y liberación automática de asientos bloqueados
       const cantidadAsientosValor10 = 1;
       // Act — ejecutar la validación / regla de la app
@@ -4164,6 +4549,7 @@ void testRF120() {
       print('  ✅ CP01 PASS — Flujo exitoso — liberar asientos por timeout');
     });
     test('CP02 — El pasajero completa el pago antes del tiempo límite (E', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = reservationPaymentCompleted(true);
@@ -4171,6 +4557,7 @@ void testRF120() {
       print('  ✅ CP02 PASS — El pasajero completa el pago antes del tiempo límite (E');
     });
     test('CP03 — Múltiples pasajeros esperando los mismos asientos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = isSeatSelectable(3, {1, 3, 5});
@@ -4184,6 +4571,7 @@ void testRF120() {
 void testRF121() {
   group('RF-121 — Ver detalle de una noticia o incidencia', () {
     test('CP01 — Flujo exitoso — ver detalle de noticia', () {
+
       // Arrange — Flujo exitoso: Ver detalle de una noticia o incidencia
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -4193,6 +4581,7 @@ void testRF121() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver detalle de noticia');
     });
     test('CP02 — Noticia eliminada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validarCampoRequerido(null) != null;
@@ -4200,6 +4589,7 @@ void testRF121() {
       print('  ✅ CP02 PASS — Noticia eliminada (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — ejecutar la validación / regla de la app
       final resultado1 = PassengerAuthValidators.validateRequiredField(null) != null;
@@ -4216,12 +4606,13 @@ void testRF121() {
 void testRF122() {
   group('RF-122 — Notificación al conductor cuando un pasajero cancela su reserva', () {
     test('CP01 — Flujo exitoso — notificar cancelación de reserva al con', () {
+
       // Arrange — Reserva activa, viaje en espera y conductor conectado.
       // Act — ejecutar la validación / regla de la app
       final puedeNotificar = puedeNotificarCancelacionAlConductor(
-        hayReserva: true,
-        estadoViaje: 'esperando',
-        conductorConectado: true,
+      hayReserva: true,
+      estadoViaje: 'esperando',
+      conductorConectado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(puedeNotificar, isTrue);
@@ -4229,14 +4620,15 @@ void testRF122() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar cancelación de reserva al con');
     });
     test('CP02 — Conductor sin conexión (E1)', () {
+
       // Arrange — Conductor sin conexión.
       const hayConexion = false;
       // Act — ejecutar la validación / regla de la app
       final offline = offlineSyncStrategy(hayConexion);
       final puedeNotificar = puedeNotificarCancelacionAlConductor(
-        hayReserva: true,
-        estadoViaje: 'esperando',
-        conductorConectado: false,
+      hayReserva: true,
+      estadoViaje: 'esperando',
+      conductorConectado: false,
       );
       // Assert — verificar el resultado esperado del CP
       expect(offline, equals('último estado conocido'));
@@ -4245,12 +4637,13 @@ void testRF122() {
       print('  ✅ CP02 PASS — Conductor sin conexión (E1)');
     });
     test('CP03 — Cancelación mientras el vehículo ya partió (E2)', () {
+
       // Arrange — El vehículo ya partió (viaje en ruta).
       // Act — ejecutar la validación / regla de la app
       final puedeNotificar = puedeNotificarCancelacionAlConductor(
-        hayReserva: true,
-        estadoViaje: 'en_ruta',
-        conductorConectado: true,
+      hayReserva: true,
+      estadoViaje: 'en_ruta',
+      conductorConectado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(puedeNotificar, isFalse);
@@ -4264,6 +4657,7 @@ void testRF122() {
 void testRF123() {
   group('RF-123 — Buscar conductor por nombre o placa (admin)', () {
     test('CP01 — Flujo exitoso — buscar conductor', () {
+
       // Arrange — Flujo exitoso: Buscar conductor por nombre o placa (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-123)
@@ -4273,6 +4667,7 @@ void testRF123() {
       print('  ✅ CP01 PASS — Flujo exitoso — buscar conductor');
     });
     test('CP02 — Sin coincidencias (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -4280,6 +4675,7 @@ void testRF123() {
       print('  ✅ CP02 PASS — Sin coincidencias (E1)');
     });
     test('CP03 — Búsqueda vacía (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = busquedaSinResultados(0);
@@ -4293,6 +4689,7 @@ void testRF123() {
 void testRF124() {
   group('RF-124 — Ver historial de viajes de un conductor específico (admin)', () {
     test('CP01 — Flujo exitoso — consultar historial de viajes de conduc', () {
+
       // Arrange — Flujo exitoso: Ver historial de viajes de un conductor específico (admin)
       // Act — ejecutar la validación / regla de la app
       // Act — lógica real de lib/ (RF-124)
@@ -4302,6 +4699,7 @@ void testRF124() {
       print('  ✅ CP01 PASS — Flujo exitoso — consultar historial de viajes de conduc');
     });
     test('CP02 — Sin viajes registrados (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       final lista = <dynamic>[];
       // Act — ejecutar la validación / regla de la app
@@ -4311,6 +4709,7 @@ void testRF124() {
       print('  ✅ CP02 PASS — Sin viajes registrados (E1)');
     });
     test('CP03 — Viaje incompleto o interrumpido (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = canRefundForTripStatus('cancelado');
@@ -4324,6 +4723,7 @@ void testRF124() {
 void testRF125() {
   group('RF-125 — Ver detalle de una noticia o incidencia (conductor)', () {
     test('CP01 — Flujo exitoso — ver detalle de noticia conductor', () {
+
       // Arrange — Flujo exitoso: Ver detalle de una noticia o incidencia (conductor)
       const hayConexion = true;
       // Act — ejecutar la validación / regla de la app
@@ -4333,6 +4733,7 @@ void testRF125() {
       print('  ✅ CP01 PASS — Flujo exitoso — ver detalle de noticia conductor');
     });
     test('CP02 — Noticia eliminada (E1)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = validarCampoRequerido(null) != null;
@@ -4340,6 +4741,7 @@ void testRF125() {
       print('  ✅ CP02 PASS — Noticia eliminada (E1)');
     });
     test('CP03 — Conductor en ruta (E2)', () {
+
       // Arrange — datos de entrada del caso de prueba
       // Act — lógica real de lib/
       final resultado1 = conductorDisponibleParaReserva('en_ruta');
@@ -4353,12 +4755,13 @@ void testRF125() {
 void testRF126() {
   group('RF-126 — Notificación al pasajero cuando el conductor completa la ruta', () {
     test('CP01 — Flujo exitoso — notificar llegada al destino al pasajer', () {
+
       // Arrange — Ruta completada, pasajero a bordo y con conexión.
       // Act — ejecutar la validación / regla de la app
       final puedeNotificar = puedeNotificarRutaCompletadaAlPasajero(
-        rutaCompletada: true,
-        pasajeroSigueEnViaje: true,
-        pasajeroConectado: true,
+      rutaCompletada: true,
+      pasajeroSigueEnViaje: true,
+      pasajeroConectado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(puedeNotificar, isTrue);
@@ -4366,12 +4769,13 @@ void testRF126() {
       print('  ✅ CP01 PASS — Flujo exitoso — notificar llegada al destino al pasajer');
     });
     test('CP02 — Pasajero que bajó anticipadamente (RF-021) (E1)', () {
+
       // Arrange — Pasajero que bajó anticipadamente (RF-021).
       // Act — ejecutar la validación / regla de la app
       final puedeNotificar = puedeNotificarRutaCompletadaAlPasajero(
-        rutaCompletada: true,
-        pasajeroSigueEnViaje: false,
-        pasajeroConectado: true,
+      rutaCompletada: true,
+      pasajeroSigueEnViaje: false,
+      pasajeroConectado: true,
       );
       // Assert — verificar el resultado esperado del CP
       expect(puedeNotificar, isFalse);
@@ -4379,12 +4783,13 @@ void testRF126() {
       print('  ✅ CP02 PASS — Pasajero que bajó anticipadamente (RF-021) (E1)');
     });
     test('CP03 — Pasajero sin conexión (E2)', () {
+
       // Arrange — Pasajero sin conexión al completar la ruta.
       // Act — ejecutar la validación / regla de la app
       final puedeNotificar = puedeNotificarRutaCompletadaAlPasajero(
-        rutaCompletada: true,
-        pasajeroSigueEnViaje: true,
-        pasajeroConectado: false,
+      rutaCompletada: true,
+      pasajeroSigueEnViaje: true,
+      pasajeroConectado: false,
       );
       // Assert — verificar el resultado esperado del CP
       expect(puedeNotificar, isFalse);
