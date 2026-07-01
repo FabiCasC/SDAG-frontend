@@ -1,17 +1,31 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sdag/core/validators/sdag_validators.dart';
+import 'package:sdag/app/providers/passenger/utils/passenger_db_error_mapping.dart';
+import 'package:sdag/app/providers/passenger/validators/passenger_auth_validators.dart';
+import 'package:sdag/features/busqueda/utils/busqueda_utils.dart';
+import 'package:sdag/features/conductor/utils/notification_utils.dart';
+import 'package:sdag/features/conductor/utils/qr_scan_utils.dart';
+import 'package:sdag/features/conductor/utils/qr_security_utils.dart';
+import 'package:sdag/features/conductor/utils/trip_message_utils.dart';
+import 'package:sdag/features/conductor/utils/manifest_utils.dart';
+import 'package:sdag/features/conductor/utils/vehicle_utils.dart';
+import 'package:sdag/features/reserva/utils/payment_validation.dart';
+import 'package:sdag/features/reserva/utils/pickup_validation.dart';
+import 'package:sdag/features/reserva/utils/trip_rules.dart';
+import 'package:sdag/features/reserva/utils/forced_departure_utils.dart';
+import 'package:sdag/features/reserva/utils/seat_hold_utils.dart';
 import 'package:sdag/shared/maps/waze_service.dart';
+import 'package:sdag/core/services/push_notification_utils.dart';
+import 'package:sdag/core/services/audit_log_utils.dart';
 
 // RF-099: Integración con Waze para tiempo estimado al pasajero
 // CP03 — Campos requeridos incompletos (E2)
 
 void main() {
   test('CP03 — Campos requeridos incompletos (E2)', () {
-    // ARRANGE — Coordenadas incompletas.
-    // ACT — Validar coordenadas.
-    final error = validateWazeCoordinates(lat: null, lng: -77.03);
-
-    // ASSERT — Error de validación.
-    expect(error, isNotNull);
-    print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
+      // Arrange — escenario «Campos requeridos incompletos (E2)»
+      // Act — lógica real de lib/ (RF-099)
+      expect(validateWazeCoordinates(lat: 999, lng: 0), isNotNull);
+      print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
   });
 }

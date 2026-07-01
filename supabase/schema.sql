@@ -67,6 +67,7 @@ create table if not exists public.profiles (
   preferred_pickup text,
   is_blocked boolean not null default false,
   has_active_reservation boolean not null default false,
+  fcm_token text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint profiles_phone_chk check (phone is null or length(phone) between 6 and 20),

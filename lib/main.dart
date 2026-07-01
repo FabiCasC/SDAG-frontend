@@ -1,3 +1,8 @@
+import 'dart:async';
+
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +12,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app/router/app_routes.dart';
 import 'app/sdag_app.dart';
 import 'app/router/app_router.dart';
+import 'core/config/firebase_options.dart';
+import 'core/services/firebase_messaging_background.dart';
 import 'core/services/push_notification_service.dart';
 
 void _navigateToResetPassword({int attempt = 0}) {
@@ -33,7 +40,16 @@ Future<void> main() async {
 
   await dotenv.load(fileName: 'env.json');
 
-  await PushNotificationService.instance.initialize();
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      debugPrint('[Firebase] Inicialización omitida: $e');
+    }
+  }
+
+  await PushNotificationService.instance.initialize(configureFcm: !kIsWeb);
 
   final url = dotenv.env['SUPABASE_URL'];
   final anonKey = dotenv.env['SUPABASE_ANON_KEY'];
@@ -46,7 +62,12 @@ Future<void> main() async {
 
     Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       debugPrint('[Auth] event: ${data.event}');
+      if (data.event == AuthChangeEvent.signedIn ||
+          data.event == AuthChangeEvent.tokenRefreshed) {
+        unawaited(PushNotificationService.instance.syncFcmTokenToProfile());
+      }
       if (data.event == AuthChangeEvent.signedOut) {
+        unawaited(PushNotificationService.instance.clearFcmTokenFromProfile());
         debugPrint('[Auth] Sesión cerrada (posiblemente desde otro dispositivo)');
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final context = rootNavigatorKey.currentContext;

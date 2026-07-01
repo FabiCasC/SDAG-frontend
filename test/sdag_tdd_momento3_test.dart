@@ -635,11 +635,11 @@ void testRF014() {
     group('RF-014 — Notificación push cuando el conductor está cerca', () {
 
     test('CP01 — Flujo exitoso — notificar llegada del conductor', () {
-      // ARRANGE — Pasajero con push habilitado y viaje activo con datos válidos.
+      // PRECONDICIÓN: Pasajero con push habilitado y viaje activo con datos válidos.
       const pushHabilitado = true;
       const tripId = 'trip-001';
       const passengerId = 'passenger-001';
-      // ACT — Se evalúa si puede enviarse la notificación de llegada del conductor.
+      // ACCIÓN: Se evalúa si puede enviarse la notificación de llegada del conductor.
       final puedeEnviar = puedeNotificarLlegadaConductor(
         haySesion: true,
         tripId: tripId,
@@ -647,28 +647,28 @@ void testRF014() {
         pushDestinatarioHabilitado: pushHabilitado,
       );
       final texto = textoNotificacionLlegadaConductor();
-      // ASSERT — El sistema permite enviar la notificación con el texto de llegada.
+      // RESULTADO ESPERADO: El sistema permite enviar la notificación con el texto de llegada.
       expect(puedeEnviar, isTrue);
       expect(texto, contains('llegando'));
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar llegada del conductor');
     });
     test('CP02 — Notificaciones desactivadas (E1)', () {
-      // ARRANGE — El pasajero tiene desactivadas las notificaciones push.
+      // PRECONDICIÓN: El pasajero tiene desactivadas las notificaciones push.
       const pushHabilitado = false;
-      // ACT — Se intenta enviar la notificación push de llegada.
+      // ACCIÓN: Se intenta enviar la notificación push de llegada.
       final resultado = resultadoEnvioNotificacionPush(
         pushHabilitado: pushHabilitado,
         datosValidos: true,
       );
-      // ASSERT — El envío se rechaza por push desactivado.
+      // RESULTADO ESPERADO: El envío se rechaza por push desactivado.
       expect(resultado, equals('Notificaciones push desactivadas'));
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Notificaciones desactivadas (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
-      // ARRANGE — Faltan identificadores obligatorios del viaje o pasajero.
-      // ACT — Se validan los datos mínimos de la notificación de llegada.
+      // PRECONDICIÓN: Faltan identificadores obligatorios del viaje o pasajero.
+      // ACCIÓN: Se validan los datos mínimos de la notificación de llegada.
       final datosVacios = datosNotificacionLlegadaCompletos(
         tripId: '',
         passengerProfileId: 'passenger-001',
@@ -677,10 +677,10 @@ void testRF014() {
         tripId: 'trip-001',
         passengerProfileId: '',
       );
-      // ASSERT — Los datos incompletos impiden la notificación.
+      // RESULTADO ESPERADO: Los datos incompletos impiden la notificación.
       expect(datosVacios, isFalse);
       expect(sinPasajero, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
   });
@@ -1419,43 +1419,43 @@ void testRF034() {
     group('RF-034 — Comando de voz para notificaciones', () {
 
     test('CP01 — Flujo exitoso — leer notificaciones por voz', () {
-      // ARRANGE — El conductor tiene activadas las notificaciones por voz.
+      // PRECONDICIÓN: El conductor tiene activadas las notificaciones por voz.
       const vozHabilitada = true;
       const mensaje = 'Próxima parada: María';
-      // ACT — Se emite el banner de voz como en el provider del conductor.
+      // ACCIÓN: Se emite el banner de voz como en el provider del conductor.
       final banner = bannerNotificacionVoz(
         vozHabilitada: vozHabilitada,
         texto: mensaje,
       );
-      // ASSERT — Se genera el banner audible con el prefijo 🔊.
+      // RESULTADO ESPERADO: Se genera el banner audible con el prefijo 🔊.
       expect(banner, equals('🔊 Próxima parada: María'));
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — leer notificaciones por voz');
     });
     test('CP02 — Volumen del dispositivo en cero (E1)', () {
-      // ARRANGE — Las notificaciones por voz están desactivadas (volumen en cero).
+      // PRECONDICIÓN: Las notificaciones por voz están desactivadas (volumen en cero).
       const vozHabilitada = false;
-      // ACT — Se intenta leer una notificación por voz.
+      // ACCIÓN: Se intenta leer una notificación por voz.
       final banner = bannerNotificacionVoz(
         vozHabilitada: vozHabilitada,
         texto: 'Pasajero cerca del punto de recojo',
       );
-      // ASSERT — No se emite banner de voz.
+      // RESULTADO ESPERADO: No se emite banner de voz.
       expect(banner, isNull);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Volumen del dispositivo en cero (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
-      // ARRANGE — El mensaje de voz está vacío.
+      // PRECONDICIÓN: El mensaje de voz está vacío.
       const vozHabilitada = true;
-      // ACT — Se intenta emitir un banner sin texto.
+      // ACCIÓN: Se intenta emitir un banner sin texto.
       final banner = bannerNotificacionVoz(
         vozHabilitada: vozHabilitada,
         texto: '',
       );
-      // ASSERT — No se emite banner sin contenido.
+      // RESULTADO ESPERADO: No se emite banner sin contenido.
       expect(banner, isNull);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
   });
@@ -2346,49 +2346,49 @@ void testRF058() {
     group('RF-058 — Notificación al conductor cuando el vehículo se llena', () {
 
     test('CP01 — Flujo exitoso — notificar llenado del vehículo', () {
-      // ARRANGE — Vehículo lleno y push del conductor habilitado.
+      // PRECONDICIÓN: Vehículo lleno y push del conductor habilitado.
       const pushConductor = true;
-      // ACT — Se evalúa si debe notificarse el llenado del vehículo.
+      // ACCIÓN: Se evalúa si debe notificarse el llenado del vehículo.
       final debeNotificar = debeNotificarVehiculoLleno(
-        occupiedSeats: 4,
-        capacity: 4,
+        ocupados: 4,
+        capacidad: 4,
         pushConductorHabilitado: pushConductor,
       );
-      // ASSERT — Se debe notificar al conductor.
+      // RESULTADO ESPERADO: Se debe notificar al conductor.
       expect(debeNotificar, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar llenado del vehículo');
     });
     test('CP02 — Notificaciones desactivadas (E1)', () {
-      // ARRANGE — Vehículo lleno pero push del conductor desactivado.
+      // PRECONDICIÓN: Vehículo lleno pero push del conductor desactivado.
       const pushConductor = false;
-      // ACT — Se evalúa el envío de notificación de llenado.
+      // ACCIÓN: Se evalúa el envío de notificación de llenado.
       final debeNotificar = debeNotificarVehiculoLleno(
-        occupiedSeats: 4,
-        capacity: 4,
+        ocupados: 4,
+        capacidad: 4,
         pushConductorHabilitado: pushConductor,
       );
       final resultado = resultadoEnvioNotificacionPush(
         pushHabilitado: pushConductor,
         datosValidos: true,
       );
-      // ASSERT — No se notifica con push desactivado.
+      // RESULTADO ESPERADO: No se notifica con push desactivado.
       expect(debeNotificar, isFalse);
       expect(resultado, equals('Notificaciones push desactivadas'));
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Notificaciones desactivadas (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
-      // ARRANGE — El vehículo aún no está lleno.
-      // ACT — Se evalúa notificación de llenado con asientos libres.
+      // PRECONDICIÓN: El vehículo aún no está lleno.
+      // ACCIÓN: Se evalúa notificación de llenado con asientos libres.
       final debeNotificar = debeNotificarVehiculoLleno(
-        occupiedSeats: 2,
-        capacity: 4,
+        ocupados: 2,
+        capacidad: 4,
         pushConductorHabilitado: true,
       );
-      // ASSERT — No corresponde notificar llenado.
+      // RESULTADO ESPERADO: No corresponde notificar llenado.
       expect(debeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
   });
@@ -2399,39 +2399,39 @@ void testRF059() {
     group('RF-059 — Notificación a pasajeros cuando el vehículo sale', () {
 
     test('CP01 — Flujo exitoso — notificar salida del vehículo', () {
-      // ARRANGE — El vehículo inicia viaje con pasajeros a bordo.
+      // PRECONDICIÓN: El vehículo inicia viaje con pasajeros a bordo.
       const estadoViaje = 'en_ruta';
       const hayPasajeros = true;
-      // ACT — Se evalúa notificación de salida a pasajeros.
+      // ACCIÓN: Se evalúa notificación de salida a pasajeros.
       final debeNotificar = debeNotificarSalidaVehiculo(
         estadoViaje: estadoViaje,
         hayPasajeros: hayPasajeros,
       );
-      // ASSERT — Se debe notificar la salida del vehículo.
+      // RESULTADO ESPERADO: Se debe notificar la salida del vehículo.
       expect(debeNotificar, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar salida del vehículo');
     });
     test('CP02 — Pasajero sin conexión (E1)', () {
-      // ARRANGE — Pasajero sin conexión de red.
+      // PRECONDICIÓN: Pasajero sin conexión de red.
       const hayConexion = false;
-      // ACT — Se consulta estrategia offline ante falta de conexión.
-      final resultado = offlineSyncStrategy(hayConexion);
-      // ASSERT — Se usa el último estado conocido.
+      // ACCIÓN: Se consulta estrategia offline ante falta de conexión.
+      final resultado = resultadoSinConexion(hayConexion);
+      // RESULTADO ESPERADO: Se usa el último estado conocido.
       expect(resultado, equals('último estado conocido'));
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Pasajero sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
-      // ARRANGE — Viaje en espera sin pasajeros registrados.
-      // ACT — Se evalúa notificación de salida sin pasajeros.
+      // PRECONDICIÓN: Viaje en espera sin pasajeros registrados.
+      // ACCIÓN: Se evalúa notificación de salida sin pasajeros.
       final debeNotificar = debeNotificarSalidaVehiculo(
         estadoViaje: 'esperando',
         hayPasajeros: false,
       );
-      // ASSERT — No se envía notificación de salida.
+      // RESULTADO ESPERADO: No se envía notificación de salida.
       expect(debeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
   });
@@ -2442,34 +2442,34 @@ void testRF060() {
     group('RF-060 — Notificación de solicitud de forzar salida a pasajeros', () {
 
     test('CP01 — Flujo exitoso — notificar solicitud de forzar salida', () {
-      // ARRANGE — Hay una solicitud activa de forzar salida.
-      // ACT — Se evalúa si debe notificarse a los pasajeros.
+      // PRECONDICIÓN: Hay una solicitud activa de forzar salida.
+      // ACCIÓN: Se evalúa si debe notificarse a los pasajeros.
       final debeNotificar = debeNotificarSolicitudForzarSalida(solicitudActiva: true);
-      // ASSERT — Se notifica la solicitud de forzar salida.
+      // RESULTADO ESPERADO: Se notifica la solicitud de forzar salida.
       expect(debeNotificar, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar solicitud de forzar salida');
     });
     test('CP02 — Algún pasajero rechaza (E1)', () {
-      // ARRANGE — Al menos un pasajero rechazó la salida forzada.
-      // ACT — Se evalúa el resultado de la votación.
+      // PRECONDICIÓN: Al menos un pasajero rechazó la salida forzada.
+      // ACCIÓN: Se evalúa el resultado de la votación.
       final rechazada = forzarSalidaRechazadaPorPasajero(rechazos: 1);
-      // ASSERT — La solicitud queda rechazada.
+      // RESULTADO ESPERADO: La solicitud queda rechazada.
       expect(rechazada, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Algún pasajero rechaza (E1)');
     });
     test('CP03 — Tiempo expirado sin respuesta (E2)', () {
-      // ARRANGE — Expiró el tiempo de respuesta de los pasajeros.
-      // ACT — Se evalúa timeout de la solicitud.
+      // PRECONDICIÓN: Expiró el tiempo de respuesta de los pasajeros.
+      // ACCIÓN: Se evalúa timeout de la solicitud.
       final expirada = forzarSalidaTiempoExpirado(
         tiempoExpirado: true,
         respuestasRecibidas: 1,
         totalPasajeros: 3,
       );
-      // ASSERT — La solicitud expira sin consenso.
+      // RESULTADO ESPERADO: La solicitud expira sin consenso.
       expect(expirada, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Tiempo expirado sin respuesta (E2)');
     });
   });
@@ -2754,42 +2754,42 @@ void testRF068() {
     group('RF-068 — Notificación al administrador de nueva solicitud de pago', () {
 
     test('CP01 — Flujo exitoso — notificar solicitud de pago al admin', () {
-      // ARRANGE — Solicitud de pago válida y administrador con conexión.
-      // ACT — Se evalúa notificación al administrador.
+      // PRECONDICIÓN: Solicitud de pago válida y administrador con conexión.
+      // ACCIÓN: Se evalúa notificación al administrador.
       final puedeNotificar = puedeNotificarAdminSolicitudPago(
         solicitudValida: true,
         adminConectado: true,
       );
-      // ASSERT — Se puede notificar al admin.
+      // RESULTADO ESPERADO: Se puede notificar al admin.
       expect(puedeNotificar, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar solicitud de pago al admin');
     });
     test('CP02 — Admin sin conexión (E1)', () {
-      // ARRANGE — Administrador sin conexión.
+      // PRECONDICIÓN: Administrador sin conexión.
       const hayConexion = false;
-      // ACT — Se evalúa entrega offline y regla de conexión del admin.
-      final offline = offlineSyncStrategy(hayConexion);
+      // ACCIÓN: Se evalúa entrega offline y regla de conexión del admin.
+      final offline = resultadoSinConexion(hayConexion);
       final puedeNotificar = puedeNotificarAdminSolicitudPago(
         solicitudValida: true,
         adminConectado: false,
       );
-      // ASSERT — No se notifica al admin sin conexión.
+      // RESULTADO ESPERADO: No se notifica al admin sin conexión.
       expect(offline, equals('último estado conocido'));
       expect(puedeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Admin sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
-      // ARRANGE — Solicitud de pago con datos incompletos.
-      // ACT — Se evalúa notificación con solicitud inválida.
+      // PRECONDICIÓN: Solicitud de pago con datos incompletos.
+      // ACCIÓN: Se evalúa notificación con solicitud inválida.
       final puedeNotificar = puedeNotificarAdminSolicitudPago(
         solicitudValida: false,
         adminConectado: true,
       );
-      // ASSERT — No se notifica con solicitud inválida.
+      // RESULTADO ESPERADO: No se notifica con solicitud inválida.
       expect(puedeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
   });
@@ -3524,39 +3524,39 @@ void testRF088() {
     group('RF-088 — Notificación de bloqueo al conductor', () {
 
     test('CP01 — Flujo exitoso — notificar bloqueo al conductor', () {
-      // ARRANGE — Cuenta del conductor suspendida con push habilitado.
-      // ACT — Se evalúa notificación de bloqueo.
+      // PRECONDICIÓN: Cuenta del conductor suspendida con push habilitado.
+      // ACCIÓN: Se evalúa notificación de bloqueo.
       final debeNotificar = debeNotificarBloqueoConductor(
         cuentaActiva: false,
         pushConductorHabilitado: true,
       );
       final mensaje = mensajeNotificacionBloqueoConductor();
-      // ASSERT — Se notifica el bloqueo con mensaje de cuenta suspendida.
+      // RESULTADO ESPERADO: Se notifica el bloqueo con mensaje de cuenta suspendida.
       expect(debeNotificar, isTrue);
       expect(mensaje, contains('suspendida'));
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar bloqueo al conductor');
     });
     test('CP02 — Sin conexión (E1)', () {
-      // ARRANGE — Conductor sin conexión de red.
+      // PRECONDICIÓN: Conductor sin conexión de red.
       const hayConexion = false;
-      // ACT — Se consulta estrategia offline.
-      final resultado = offlineSyncStrategy(hayConexion);
-      // ASSERT — Se conserva el último estado conocido.
+      // ACCIÓN: Se consulta estrategia offline.
+      final resultado = resultadoSinConexion(hayConexion);
+      // RESULTADO ESPERADO: Se conserva el último estado conocido.
       expect(resultado, equals('último estado conocido'));
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Sin conexión (E1)');
     });
     test('CP03 — Campos requeridos incompletos (E2)', () {
-      // ARRANGE — Cuenta activa — no aplica bloqueo.
-      // ACT — Se evalúa notificación de bloqueo con cuenta activa.
+      // PRECONDICIÓN: Cuenta activa — no aplica bloqueo.
+      // ACCIÓN: Se evalúa notificación de bloqueo con cuenta activa.
       final debeNotificar = debeNotificarBloqueoConductor(
         cuentaActiva: true,
         pushConductorHabilitado: true,
       );
-      // ASSERT — No se envía notificación de bloqueo.
+      // RESULTADO ESPERADO: No se envía notificación de bloqueo.
       expect(debeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Campos requeridos incompletos (E2)');
     });
   });
@@ -4835,45 +4835,45 @@ void testRF122() {
     group('RF-122 — Notificación al conductor cuando un pasajero cancela su reserva', () {
 
     test('CP01 — Flujo exitoso — notificar cancelación de reserva al con', () {
-      // ARRANGE — Reserva activa, viaje en espera y conductor conectado.
-      // ACT — Se evalúa notificación de cancelación al conductor.
+      // PRECONDICIÓN: Reserva activa, viaje en espera y conductor conectado.
+      // ACCIÓN: Se evalúa notificación de cancelación al conductor.
       final puedeNotificar = puedeNotificarCancelacionAlConductor(
         hayReserva: true,
         estadoViaje: 'esperando',
         conductorConectado: true,
       );
-      // ASSERT — Se puede notificar la cancelación.
+      // RESULTADO ESPERADO: Se puede notificar la cancelación.
       expect(puedeNotificar, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar cancelación de reserva al con');
     });
     test('CP02 — Conductor sin conexión (E1)', () {
-      // ARRANGE — Conductor sin conexión.
+      // PRECONDICIÓN: Conductor sin conexión.
       const hayConexion = false;
-      // ACT — Se evalúa entrega offline y regla de conexión.
-      final offline = offlineSyncStrategy(hayConexion);
+      // ACCIÓN: Se evalúa entrega offline y regla de conexión.
+      final offline = resultadoSinConexion(hayConexion);
       final puedeNotificar = puedeNotificarCancelacionAlConductor(
         hayReserva: true,
         estadoViaje: 'esperando',
         conductorConectado: false,
       );
-      // ASSERT — No se notifica sin conexión del conductor.
+      // RESULTADO ESPERADO: No se notifica sin conexión del conductor.
       expect(offline, equals('último estado conocido'));
       expect(puedeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Conductor sin conexión (E1)');
     });
     test('CP03 — Cancelación mientras el vehículo ya partió (E2)', () {
-      // ARRANGE — El vehículo ya partió (viaje en ruta).
-      // ACT — Se evalúa cancelación tardía.
+      // PRECONDICIÓN: El vehículo ya partió (viaje en ruta).
+      // ACCIÓN: Se evalúa cancelación tardía.
       final puedeNotificar = puedeNotificarCancelacionAlConductor(
         hayReserva: true,
         estadoViaje: 'en_ruta',
         conductorConectado: true,
       );
-      // ASSERT — No se notifica cancelación si el viaje ya inició.
+      // RESULTADO ESPERADO: No se notifica cancelación si el viaje ya inició.
       expect(puedeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Cancelación mientras el vehículo ya partió (E2)');
     });
   });
@@ -4998,42 +4998,42 @@ void testRF126() {
     group('RF-126 — Notificación al pasajero cuando el conductor completa la ruta', () {
 
     test('CP01 — Flujo exitoso — notificar llegada al destino al pasajer', () {
-      // ARRANGE — Ruta completada, pasajero a bordo y con conexión.
-      // ACT — Se evalúa notificación de llegada al destino.
+      // PRECONDICIÓN: Ruta completada, pasajero a bordo y con conexión.
+      // ACCIÓN: Se evalúa notificación de llegada al destino.
       final puedeNotificar = puedeNotificarRutaCompletadaAlPasajero(
         rutaCompletada: true,
         pasajeroSigueEnViaje: true,
         pasajeroConectado: true,
       );
-      // ASSERT — Se notifica al pasajero la finalización de ruta.
+      // RESULTADO ESPERADO: Se notifica al pasajero la finalización de ruta.
       expect(puedeNotificar, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP01 PASS — Flujo exitoso — notificar llegada al destino al pasajer');
     });
     test('CP02 — Pasajero que bajó anticipadamente (RF-021) (E1)', () {
-      // ARRANGE — Pasajero que bajó anticipadamente (RF-021).
-      // ACT — Se evalúa notificación con pasajero ya no en viaje.
+      // PRECONDICIÓN: Pasajero que bajó anticipadamente (RF-021).
+      // ACCIÓN: Se evalúa notificación con pasajero ya no en viaje.
       final puedeNotificar = puedeNotificarRutaCompletadaAlPasajero(
         rutaCompletada: true,
         pasajeroSigueEnViaje: false,
         pasajeroConectado: true,
       );
-      // ASSERT — No se notifica a quien ya bajó.
+      // RESULTADO ESPERADO: No se notifica a quien ya bajó.
       expect(puedeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP02 PASS — Pasajero que bajó anticipadamente (RF-021) (E1)');
     });
     test('CP03 — Pasajero sin conexión (E2)', () {
-      // ARRANGE — Pasajero sin conexión al completar la ruta.
-      // ACT — Se evalúa notificación con pasajero offline.
+      // PRECONDICIÓN: Pasajero sin conexión al completar la ruta.
+      // ACCIÓN: Se evalúa notificación con pasajero offline.
       final puedeNotificar = puedeNotificarRutaCompletadaAlPasajero(
         rutaCompletada: true,
         pasajeroSigueEnViaje: true,
         pasajeroConectado: false,
       );
-      // ASSERT — No se entrega push sin conexión del pasajero.
+      // RESULTADO ESPERADO: No se entrega push sin conexión del pasajero.
       expect(puedeNotificar, isFalse);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // RESULTADO OBTENIDO: se completa al correr el test
       print('  ✅ CP03 PASS — Pasajero sin conexión (E2)');
     });
   });

@@ -55,6 +55,8 @@ bool matchesTripDirection({
       toLabel.trim() == expectedToLabelForDirection(direction);
 }
 
+bool busquedaSinResultados(int viajesEncontrados) => viajesEncontrados <= 0;
+
 bool isDriverEligibleForListing({
   required bool? cuentaActiva,
   required String? estado,

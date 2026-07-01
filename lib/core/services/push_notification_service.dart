@@ -1,34 +1,38 @@
 import 'dart:async';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Notificaciones locales alimentadas por Supabase Realtime (RF-014, RF-058–060, RF-122, RF-126).
+import 'push_notification_utils.dart';
+
+/// Notificaciones push (FCM) + locales + brokers Realtime complementarios.
 class PushNotificationService {
   PushNotificationService._();
 
   static final PushNotificationService instance = PushNotificationService._();
 
   final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
+  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
+
   bool _initialized = false;
+  bool _fcmConfigured = false;
   int _notificationId = 0;
 
-  StreamSubscription<List<Map<String, dynamic>>>? _tripsSub;
-  StreamSubscription<List<Map<String, dynamic>>>? _reservationsSub;
   StreamSubscription<List<Map<String, dynamic>>>? _messagesSub;
+  StreamSubscription<List<Map<String, dynamic>>>? _reservationsSub;
+  StreamSubscription<RemoteMessage>? _foregroundSub;
+  StreamSubscription<String>? _tokenRefreshSub;
 
-  String? _watchedTripId;
-  String? _lastTripStatus;
   String? _activeProfileId;
-
   bool _messagesStreamPrimed = false;
   final Set<String> _seenMessageIds = {};
   final Set<String> _seenCancelledReservationIds = {};
 
   bool get isInitialized => _initialized;
 
-  Future<bool> initialize() async {
+  Future<bool> initialize({bool configureFcm = true}) async {
     if (_initialized) return true;
 
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -55,8 +59,97 @@ class PushNotificationService {
     }
 
     _initialized = true;
-    debugPrint('[Push] Notificaciones locales inicializadas');
+
+    if (configureFcm && !kIsWeb) {
+      await _configureFirebaseMessaging();
+    }
+
+    debugPrint('[Push] Servicio de notificaciones inicializado');
     return true;
+  }
+
+  Future<void> _configureFirebaseMessaging() async {
+    if (_fcmConfigured) return;
+
+    await _messaging.requestPermission(alert: true, badge: true, sound: true);
+
+    _foregroundSub = FirebaseMessaging.onMessage.listen(handleRemoteMessage);
+    _tokenRefreshSub = _messaging.onTokenRefresh.listen((token) {
+      unawaited(_persistFcmToken(token));
+    });
+
+    _fcmConfigured = true;
+    await syncFcmTokenToProfile();
+  }
+
+  /// Registra el token FCM del dispositivo en `profiles.fcm_token`.
+  Future<void> syncFcmTokenToProfile() async {
+    if (kIsWeb || !_fcmConfigured) return;
+
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final token = await _messaging.getToken();
+      if (token == null || token.trim().isEmpty) return;
+      await _persistFcmToken(token.trim());
+    } catch (e) {
+      debugPrint('[Push/FCM] No se pudo sincronizar token: $e');
+    }
+  }
+
+  Future<void> _persistFcmToken(String token) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'fcm_token': token})
+          .eq('id', user.id);
+      debugPrint('[Push/FCM] Token registrado en Supabase');
+    } catch (e) {
+      debugPrint('[Push/FCM] Error guardando token: $e');
+    }
+  }
+
+  Future<void> clearFcmTokenFromProfile() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      await Supabase.instance.client
+          .from('profiles')
+          .update({'fcm_token': null})
+          .eq('id', user.id);
+    } catch (_) {}
+  }
+
+  /// Procesa payloads FCM remotos (foreground, background o app cerrada).
+  Future<void> handleRemoteMessage(RemoteMessage message) async {
+    final data = message.data;
+    final notification = message.notification;
+
+    var title = (notification?.title ?? data['title'] ?? '').trim();
+    var body = (notification?.body ?? data['body'] ?? '').trim();
+
+    if (title.isEmpty) {
+      final mapped = _mapPayloadToCopy(data);
+      title = mapped.$1;
+      body = mapped.$2;
+    }
+
+    if (title.isEmpty) return;
+
+    await showLocal(
+      title: title,
+      body: body.isNotEmpty ? body : title,
+    );
+  }
+
+  (String title, String body) _mapPayloadToCopy(Map<String, dynamic> data) {
+    final type = (data['type'] ?? data['event'] ?? '').toString().trim().toLowerCase();
+    return (tituloNotificacionFcm(type), cuerpoNotificacionFcm(type));
   }
 
   Future<void> startSupabaseBrokers({
@@ -67,18 +160,10 @@ class PushNotificationService {
     await stopSupabaseBrokers();
 
     _activeProfileId = profileId;
-    _watchedTripId = tripId;
-    _lastTripStatus = null;
     _messagesStreamPrimed = false;
     _seenMessageIds.clear();
 
     if (tripId == null || tripId.isEmpty) return;
-
-    _tripsSub = Supabase.instance.client
-        .from('trips')
-        .stream(primaryKey: ['id'])
-        .eq('id', tripId)
-        .listen(_onTripStream);
 
     _messagesSub = Supabase.instance.client
         .from('trip_messages')
@@ -96,45 +181,13 @@ class PushNotificationService {
   }
 
   Future<void> stopSupabaseBrokers() async {
-    await _tripsSub?.cancel();
-    await _reservationsSub?.cancel();
     await _messagesSub?.cancel();
-    _tripsSub = null;
-    _reservationsSub = null;
+    await _reservationsSub?.cancel();
     _messagesSub = null;
-    _watchedTripId = null;
-    _lastTripStatus = null;
+    _reservationsSub = null;
     _activeProfileId = null;
     _messagesStreamPrimed = false;
     _seenMessageIds.clear();
-  }
-
-  void _onTripStream(List<Map<String, dynamic>> rows) {
-    if (rows.isEmpty) return;
-    final row = rows.first;
-    final status = row['status']?.toString() ?? '';
-    final prev = _lastTripStatus;
-    _lastTripStatus = status;
-
-    if (prev == null) return;
-
-    if (prev != 'en_ruta' && status == 'en_ruta') {
-      unawaited(
-        showLocal(
-          title: '¡Tu viaje ha iniciado!',
-          body: 'El vehículo está en marcha',
-        ),
-      );
-    }
-
-    if (prev != 'completado' && status == 'completado') {
-      unawaited(
-        showLocal(
-          title: 'Ruta completada',
-          body: 'Gracias por viajar con SDAG. ¡No olvides calificar a tu conductor!',
-        ),
-      );
-    }
   }
 
   void _onTripMessagesStream(List<Map<String, dynamic>> rows) {
@@ -158,12 +211,11 @@ class PushNotificationService {
       _seenMessageIds.add(id);
 
       final passengerId = row['passenger_id']?.toString();
-      final senderId = row['sender_id']?.toString() ??
-          row['sender_profile_id']?.toString();
+      final senderId =
+          row['sender_id']?.toString() ?? row['sender_profile_id']?.toString();
 
       final involvesUser = passengerId == profileId || senderId == profileId;
-      if (!involvesUser) continue;
-      if (senderId == profileId) continue;
+      if (!involvesUser || senderId == profileId) continue;
 
       unawaited(
         showLocal(
@@ -199,7 +251,7 @@ class PushNotificationService {
     const androidDetails = AndroidNotificationDetails(
       'sdag_events',
       'Eventos SDAG',
-      channelDescription: 'Alertas de viaje, cancelaciones y estado del vehículo',
+      channelDescription: 'Alertas de viaje, reservas y mensajes',
       importance: Importance.high,
       priority: Priority.high,
     );
@@ -254,5 +306,13 @@ class PushNotificationService {
       title: 'Salida anticipada autorizada',
       body: 'Se alcanzó el 50% de votos ($votos/$total). El viaje ha iniciado.',
     );
+  }
+
+  Future<void> dispose() async {
+    await _foregroundSub?.cancel();
+    await _tokenRefreshSub?.cancel();
+    await stopSupabaseBrokers();
+    _foregroundSub = null;
+    _tokenRefreshSub = null;
   }
 }

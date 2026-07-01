@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/router/app_routes.dart';
+import '../../../core/config/google_maps_config.dart';
 import '../../../shared/widgets/app_navigation_back.dart';
 import '../../../shared/maps/google_directions_service.dart';
 import '../../../shared/maps/waze_service.dart';
@@ -23,8 +24,6 @@ import '../providers/conductor_viaje_provider.dart';
 import '../providers/conductor_voice_provider.dart';
 import '../../../core/services/conductor_tts_service.dart';
 
-const _driverMapsApiKey = 'AIzaSyBspcTEh828O90o862FewdtQeCek9MIXOk';
-
 class ConductorMapaScreen extends ConsumerStatefulWidget {
   const ConductorMapaScreen({super.key});
 
@@ -34,9 +33,11 @@ class ConductorMapaScreen extends ConsumerStatefulWidget {
 
 class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
   GoogleMapController? _mapController;
-  Timer? _refreshTimer;
+  StreamSubscription<Position>? _positionStreamSub;
   LatLng? _driverPosition;
+  String? _driverId;
   String? _tripId;
+  int _driverCapacity = 0;
   bool _loading = true;
   String? _errorMessage;
   List<_PickupMarkerData> _pickupMarkers = const <_PickupMarkerData>[];
@@ -44,23 +45,24 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
   bool _routeLoaded = false;
   String? _lastSpokenPickupId;
 
+  static const _locationSettings = LocationSettings(
+    accuracy: LocationAccuracy.high,
+    distanceFilter: 15,
+  );
+
   @override
   void initState() {
     super.initState();
     if (!kIsWeb) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _loadDriverMap();
-        _refreshTimer = Timer.periodic(
-          const Duration(seconds: 15),
-          (_) => _loadDriverMap(silent: true),
-        );
+        unawaited(_bootstrapDriverMap());
       });
     }
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
+    _positionStreamSub?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
@@ -324,14 +326,12 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
     );
   }
 
-  Future<void> _loadDriverMap({bool silent = false}) async {
+  Future<void> _bootstrapDriverMap() async {
     if (!mounted || kIsWeb) return;
-    if (!silent) {
-      setState(() {
-        _loading = true;
-        _errorMessage = null;
-      });
-    }
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
 
     try {
       await _ensureDriverLocationPermission();
@@ -339,9 +339,6 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
       if (user == null) {
         throw Exception('No hay sesión activa del conductor.');
       }
-
-      final position = await Geolocator.getCurrentPosition();
-      final driverPosition = LatLng(position.latitude, position.longitude);
 
       final driverRow = await Supabase.instance.client
           .from('drivers')
@@ -364,17 +361,18 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
           .maybeSingle();
       final tripId = tripRow?['id']?.toString();
 
-      await Supabase.instance.client.from('driver_locations').upsert({
-        'driver_id': driverId,
-        'trip_id': tripId,
-        'lat': driverPosition.latitude,
-        'lng': driverPosition.longitude,
-        'occupied_seats': ref.read(conductorViajeProvider).asientosOcupados.length,
-        'capacity': (driverRow['capacity'] as int?) ?? 0,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
+      _driverId = driverId;
+      _tripId = tripId;
+      _driverCapacity = (driverRow['capacity'] as int?) ?? 0;
 
-      final pickups = tripId == null ? const <_PickupMarkerData>[] : await _loadPickupMarkers(tripId);
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: _locationSettings,
+      );
+      final driverPosition = LatLng(position.latitude, position.longitude);
+      await _publishDriverLocation(position);
+
+      final pickups =
+          tripId == null ? const <_PickupMarkerData>[] : await _loadPickupMarkers(tripId);
 
       if (!_routeLoaded) {
         _routePolyline = await fetchRoutePolyline(
@@ -386,7 +384,6 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
 
       if (!mounted) return;
       setState(() {
-        _tripId = tripId;
         _driverPosition = driverPosition;
         _pickupMarkers = pickups;
         _loading = false;
@@ -394,6 +391,7 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
       });
       _announceNextPickupIfNeeded();
       _fitBounds();
+      _startPositionStream();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -401,6 +399,46 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
         _errorMessage = e.toString().replaceFirst('Exception: ', '');
       });
     }
+  }
+
+  void _startPositionStream() {
+    _positionStreamSub?.cancel();
+    _positionStreamSub = Geolocator.getPositionStream(
+      locationSettings: _locationSettings,
+    ).listen(
+      (position) => unawaited(_onPositionStreamUpdate(position)),
+      onError: (Object error) {
+        debugPrint('[ConductorMapa] Error en PositionStream: $error');
+      },
+    );
+  }
+
+  Future<void> _onPositionStreamUpdate(Position position) async {
+    if (!mounted || _driverId == null) return;
+
+    final driverPosition = LatLng(position.latitude, position.longitude);
+    setState(() => _driverPosition = driverPosition);
+
+    try {
+      await _publishDriverLocation(position);
+    } catch (e) {
+      debugPrint('[ConductorMapa] Error publicando ubicación: $e');
+    }
+  }
+
+  Future<void> _publishDriverLocation(Position position) async {
+    final driverId = _driverId;
+    if (driverId == null) return;
+
+    await Supabase.instance.client.from('driver_locations').upsert({
+      'driver_id': driverId,
+      'trip_id': _tripId,
+      'lat': position.latitude,
+      'lng': position.longitude,
+      'occupied_seats': ref.read(conductorViajeProvider).asientosOcupados.length,
+      'capacity': _driverCapacity,
+      'updated_at': DateTime.now().toIso8601String(),
+    });
   }
 
   Future<List<_PickupMarkerData>> _loadPickupMarkers(String tripId) async {
@@ -457,7 +495,7 @@ class _ConductorMapaScreenState extends ConsumerState<ConductorMapaScreen> {
     final url = Uri.parse(
       'https://maps.googleapis.com/maps/api/geocode/json'
       '?address=${Uri.encodeComponent('$address, Lima, Peru')}'
-      '&key=$_driverMapsApiKey&language=es',
+      '&key=${googleMapsRestApiKey()}&language=es',
     );
 
     try {

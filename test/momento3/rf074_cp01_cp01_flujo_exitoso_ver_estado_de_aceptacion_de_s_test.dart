@@ -1,24 +1,34 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sdag/core/validators/sdag_validators.dart';
 import 'package:sdag/app/providers/passenger/utils/passenger_db_error_mapping.dart';
 import 'package:sdag/app/providers/passenger/validators/passenger_auth_validators.dart';
 import 'package:sdag/features/busqueda/utils/busqueda_utils.dart';
 import 'package:sdag/features/conductor/utils/notification_utils.dart';
 import 'package:sdag/features/conductor/utils/qr_scan_utils.dart';
+import 'package:sdag/features/conductor/utils/qr_security_utils.dart';
+import 'package:sdag/features/conductor/utils/trip_message_utils.dart';
+import 'package:sdag/features/conductor/utils/manifest_utils.dart';
+import 'package:sdag/features/conductor/utils/vehicle_utils.dart';
 import 'package:sdag/features/reserva/utils/payment_validation.dart';
 import 'package:sdag/features/reserva/utils/pickup_validation.dart';
 import 'package:sdag/features/reserva/utils/trip_rules.dart';
+import 'package:sdag/features/reserva/utils/forced_departure_utils.dart';
+import 'package:sdag/features/reserva/utils/seat_hold_utils.dart';
+import 'package:sdag/shared/maps/waze_service.dart';
+import 'package:sdag/core/services/push_notification_utils.dart';
+import 'package:sdag/core/services/audit_log_utils.dart';
 
 // RF-074: Visualización del estado de aceptación del forzado de salida
 // CP01 — Flujo exitoso — ver estado de aceptación de salida forz
 
 void main() {
   test('CP01 — Flujo exitoso — ver estado de aceptación de salida forz', () {
-      // ARRANGE — El sistema SDAG está listo y el actor puede ejecutar «Visualización del estado de aceptación del forzado de salida» con datos válidos.
-      // ACT — Se ejecuta la lógica de negocio/validación de la app: PassengerAuthValidators.validateRequiredField().
-      final resultado1 = PassengerAuthValidators.validateRequiredField('ok');
-      // ASSERT — El sistema debe responder: isNull.
-      expect(resultado1, isNull);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
+      // Arrange — Flujo exitoso: Visualización del estado de aceptación del forzado de salida
+      // Act — ejecutar la validación / regla de la app
+      // Act — lógica real de lib/ (RF-074)
+      final resultado1 = isEarlyDepartureAuthorized(votos: 2, activePassengerCount: 4);
+      // Assert — verificar el resultado esperado del CP
+      expect(resultado1, isTrue);
       print('  ✅ CP01 PASS — Flujo exitoso — ver estado de aceptación de salida forz');
   });
 }

@@ -1,31 +1,40 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sdag/core/validators/sdag_validators.dart';
 import 'package:sdag/app/providers/passenger/utils/passenger_db_error_mapping.dart';
 import 'package:sdag/app/providers/passenger/validators/passenger_auth_validators.dart';
 import 'package:sdag/features/busqueda/utils/busqueda_utils.dart';
 import 'package:sdag/features/conductor/utils/notification_utils.dart';
 import 'package:sdag/features/conductor/utils/qr_scan_utils.dart';
+import 'package:sdag/features/conductor/utils/qr_security_utils.dart';
+import 'package:sdag/features/conductor/utils/trip_message_utils.dart';
+import 'package:sdag/features/conductor/utils/manifest_utils.dart';
+import 'package:sdag/features/conductor/utils/vehicle_utils.dart';
 import 'package:sdag/features/reserva/utils/payment_validation.dart';
 import 'package:sdag/features/reserva/utils/pickup_validation.dart';
 import 'package:sdag/features/reserva/utils/trip_rules.dart';
+import 'package:sdag/features/reserva/utils/forced_departure_utils.dart';
+import 'package:sdag/features/reserva/utils/seat_hold_utils.dart';
+import 'package:sdag/shared/maps/waze_service.dart';
+import 'package:sdag/core/services/push_notification_utils.dart';
+import 'package:sdag/core/services/audit_log_utils.dart';
 
 // RF-044: Configurar porcentaje de comisión por conductor
 // CP02 — Porcentaje fuera de rango (0-100) (E1)
 
 void main() {
   test('CP02 — Porcentaje fuera de rango (0-100) (E1)', () {
-      // ARRANGE — El administrador intenta configurar un porcentaje de comisión fuera de 0–100.
+      // Arrange — datos de entrada del caso de prueba
       const porcentajeValor10 = -1.0;
       const porcentajeValor20 = 101.0;
       const porcentajeValor30 = 20.0;
-      // ACT — Se ejecuta la lógica de negocio/validación de la app: isCommissionPercentValid().
+      // Act — ejecutar la validación / regla de la app
       final resultado1 = isCommissionPercentValid(porcentajeValor10);
       final resultado2 = isCommissionPercentValid(porcentajeValor20);
       final resultado3 = isCommissionPercentValid(porcentajeValor30);
-      // ASSERT — El sistema debe responder: isFalse; isFalse; isTrue.
+      // Assert — verificar el resultado esperado del CP
       expect(resultado1, isFalse);
       expect(resultado2, isFalse);
       expect(resultado3, isTrue);
-      // Evidencia Momento 3: resultado obtenido al ejecutar flutter test
       print('  ✅ CP02 PASS — Porcentaje fuera de rango (0-100) (E1)');
   });
 }

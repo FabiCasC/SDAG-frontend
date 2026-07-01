@@ -12,6 +12,7 @@ import '../../features/busqueda/utils/busqueda_utils.dart';
 import '../../features/conductor/utils/qr_scan_utils.dart';
 import '../../features/conductor/utils/notification_utils.dart';
 import '../../features/reserva/utils/payment_validation.dart';
+import '../../shared/maps/waze_service.dart';
 
 export '../../features/conductor/utils/notification_utils.dart';
 
@@ -292,6 +293,12 @@ bool validacionFormatoPagoInvalido() {
         holder: 'X',
       ) !=
       null;
+}
+
+bool calificacionConductorValida(int rating) => rating >= 1 && rating <= 5;
+
+bool coordenadasConductorValidas({required double lat, required double lng}) {
+  return validateWazeCoordinates(lat: lat, lng: lng) == null;
 }
 
 // ── Notificaciones (push / voz / mensajes de viaje) ───────────────────────
